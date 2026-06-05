@@ -27,14 +27,18 @@
 //! - Each `EvasionFrame` is a byte vector + metadata
 //! - The caller feeds frames to the QUIC stack in order
 
+pub mod capsule;
 pub mod qpack;
 pub mod quic_cid;
+pub mod quic_datagram;
 pub mod zero_rtt;
 pub mod stream_priority;
 pub mod mtu_fragmentation;
 
+pub use capsule::{CapsuleFrame, CapsuleSmuggleAttack, CapsuleSmuggleVariant};
 pub use qpack::{QpackDesyncAttack, QpackDesyncVariant, QpackEncoder};
 pub use quic_cid::{CidRotationStrategy, ConnectionIdGenerator};
+pub use quic_datagram::{QuicDatagramAttack, QuicDatagramFrame, QuicDatagramVariant};
 pub use zero_rtt::{ZeroRttReplayBuilder, ZeroRttPayload};
 pub use stream_priority::{H3PriorityAttack, H3PriorityVariant, PriorityUpdateFrame};
 pub use mtu_fragmentation::{MtuFragmentationAttack, QuicCryptoFragment};
@@ -73,6 +77,17 @@ pub enum EvasionTechnique {
     StreamPriorityTopology,
     /// QUIC UDP fragmentation below WAF reassembly threshold.
     MtuFragmentation,
+    /// HTTP Capsule Protocol (RFC 9297) smuggling — payload bytes
+    /// ride inside capsules whose framing is opaque to HTTP-semantic
+    /// WAFs but parsed by CONNECT-UDP / CONNECT-IP / WebTransport
+    /// terminators on the origin side.
+    CapsuleProtocolSmuggle,
+    /// QUIC unreliable datagram (RFC 9221) smuggling — payload rides
+    /// in DATAGRAM frames outside any HTTP/3 stream. WAFs that
+    /// inspect HTTP/3 STREAM frames at the HTTP semantic layer don't
+    /// see DATAGRAM bytes; WebTransport / CONNECT-UDP / MASQUE
+    /// terminators on the origin parse them as application data.
+    QuicDatagramSmuggle,
 }
 
 impl EvasionTechnique {
@@ -83,6 +98,8 @@ impl EvasionTechnique {
             Self::ZeroRttReplay,
             Self::StreamPriorityTopology,
             Self::MtuFragmentation,
+            Self::CapsuleProtocolSmuggle,
+            Self::QuicDatagramSmuggle,
         ]
     }
 
@@ -93,6 +110,8 @@ impl EvasionTechnique {
             Self::ZeroRttReplay => "0-RTT replay — application data before TLS handshake; WAF inspection blind spot",
             Self::StreamPriorityTopology => "HTTP/3 PRIORITY_UPDATE topology — confuses WAF multiplexing reassemblers",
             Self::MtuFragmentation => "QUIC MTU fragmentation — below-threshold fragment sizes evade DPI reassembly",
+            Self::CapsuleProtocolSmuggle => "HTTP Capsule Protocol (RFC 9297) — payload rides inside opaque capsules; WAF sees flat body, CONNECT-UDP/IP/WebTransport origin parses values",
+            Self::QuicDatagramSmuggle => "QUIC DATAGRAM (RFC 9221) — payload outside any HTTP/3 stream; WAF inspecting HTTP semantic misses it entirely",
         }
     }
 }
@@ -110,6 +129,94 @@ mod tests {
 
     #[test]
     fn all_techniques_count() {
-        assert_eq!(EvasionTechnique::all().len(), 5);
+        assert_eq!(EvasionTechnique::all().len(), 7);
+    }
+
+    // ── descriptions are distinct ─────────────────────────────────────────
+
+    #[test]
+    fn all_techniques_descriptions_are_distinct() {
+        let descs: Vec<&str> = EvasionTechnique::all().iter().map(|t| t.description()).collect();
+        let mut seen = std::collections::HashSet::new();
+        for desc in &descs {
+            assert!(
+                seen.insert(*desc),
+                "duplicate description detected: {desc}"
+            );
+        }
+    }
+
+    // ── all() covers every enum variant ──────────────────────────────────
+
+    #[test]
+    fn all_techniques_covers_every_variant() {
+        // Anti-rig: if a new variant is added to EvasionTechnique but not
+        // to all(), this test catches it via the count + exhaustive variant list.
+        let all = EvasionTechnique::all();
+        // Verify every concrete variant is present.
+        let has = |t: EvasionTechnique| all.contains(&t);
+        assert!(has(EvasionTechnique::QpackDesync), "QpackDesync missing from all()");
+        assert!(has(EvasionTechnique::CidRotation), "CidRotation missing from all()");
+        assert!(has(EvasionTechnique::ZeroRttReplay), "ZeroRttReplay missing from all()");
+        assert!(has(EvasionTechnique::StreamPriorityTopology), "StreamPriorityTopology missing from all()");
+        assert!(has(EvasionTechnique::MtuFragmentation), "MtuFragmentation missing from all()");
+        assert!(has(EvasionTechnique::CapsuleProtocolSmuggle), "CapsuleProtocolSmuggle missing from all()");
+        assert!(has(EvasionTechnique::QuicDatagramSmuggle), "QuicDatagramSmuggle missing from all()");
+    }
+
+    // ── serde round-trip ──────────────────────────────────────────────────
+
+    #[test]
+    fn evasion_technique_serde_roundtrip() {
+        for &tech in EvasionTechnique::all() {
+            let json = serde_json::to_string(&tech).expect("serialize");
+            let back: EvasionTechnique = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(tech, back, "serde roundtrip failed for {tech:?}: {json}");
+        }
+    }
+
+    // ── EvasionFrame construction ─────────────────────────────────────────
+
+    #[test]
+    fn evasion_frame_fields_are_accessible() {
+        let frame = EvasionFrame {
+            bytes: vec![0x01, 0x02],
+            description: "test frame".to_string(),
+            technique: EvasionTechnique::QpackDesync,
+            stream_id: 4,
+        };
+        assert_eq!(frame.bytes, &[0x01, 0x02]);
+        assert_eq!(frame.description, "test frame");
+        assert_eq!(frame.technique, EvasionTechnique::QpackDesync);
+        assert_eq!(frame.stream_id, 4);
+    }
+
+    // ── EvasionFrameSet construction ──────────────────────────────────────
+
+    #[test]
+    fn evasion_frame_set_fields_are_accessible() {
+        let fs = EvasionFrameSet {
+            frames: vec![],
+            technique: EvasionTechnique::CidRotation,
+            description: "burst".to_string(),
+        };
+        assert!(fs.frames.is_empty());
+        assert_eq!(fs.technique, EvasionTechnique::CidRotation);
+        assert_eq!(fs.description, "burst");
+    }
+
+    // ── EvasionTechnique PartialEq / Hash ────────────────────────────────
+
+    #[test]
+    fn evasion_technique_eq_and_hash_are_consistent() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        for &t in EvasionTechnique::all() {
+            set.insert(t);
+        }
+        assert_eq!(set.len(), 7, "all 7 variants must hash distinctly");
+        // Inserting the same variant again must not grow the set.
+        set.insert(EvasionTechnique::QpackDesync);
+        assert_eq!(set.len(), 7);
     }
 }

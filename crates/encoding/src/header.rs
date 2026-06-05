@@ -17,6 +17,7 @@
 //! - **Comma-joined header values** — Multiple values in one header via comma
 
 use std::fmt;
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
 
 /// A header transformation technique.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -99,16 +100,6 @@ pub fn tab_separator(header_name: &str, value: &str) -> String {
     format!("{header_name}:\t{value}")
 }
 
-/// FNV-1a hash of header_name + value bytes for deterministic pad count.
-fn fnv1a_header_hash(header_name: &str, value: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in header_name.bytes().chain(value.bytes()) {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
 /// Apply whitespace padding around the value.
 ///
 /// F136: pad count is derived deterministically from `header_name + value`
@@ -120,25 +111,14 @@ fn fnv1a_header_hash(header_name: &str, value: &str) -> u64 {
 #[must_use]
 pub fn whitespace_pad(header_name: &str, value: &str) -> String {
     let value = sanitize_header_value(value);
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut h: u64 = FNV_OFFSET_64;
     for b in header_name.bytes().chain(value.bytes()) {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        h = h.wrapping_mul(FNV_PRIME_64);
     }
     let pad_count = (h as usize % 4) + 2; // 2–5 spaces, deterministic
     let pad = " ".repeat(pad_count);
     format!("{header_name}:{pad}{value}{pad}")
-}
-
-fn char_boundary_near(s: &str, byte_idx: usize) -> usize {
-    if byte_idx >= s.len() {
-        return s.len();
-    }
-    let mut i = byte_idx;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 /// Apply obsolete line folding (RFC 7230 §3.2.4).
@@ -162,7 +142,7 @@ fn line_fold_with_ending(header_name: &str, value: &str, ending: &str) -> String
     if value.len() < 4 {
         return format!("{header_name}: {value}");
     }
-    let mid = char_boundary_near(&value, value.len() / 2);
+    let mid = crate::floor_char_boundary(&value, value.len() / 2);
     format!(
         "{}: {}{ending}\t{}",
         header_name,
@@ -191,8 +171,8 @@ fn multi_line_fold_with_ending(header_name: &str, value: &str, ending: &str) -> 
     if value.len() < 6 {
         return format!("{header_name}: {value}");
     }
-    let t1 = char_boundary_near(&value, value.len() / 3);
-    let t2 = char_boundary_near(&value, value.len() * 2 / 3);
+    let t1 = crate::floor_char_boundary(&value, value.len() / 3);
+    let t2 = crate::floor_char_boundary(&value, value.len() * 2 / 3);
     format!(
         "{}: {}{ending} {}{ending}\t{}",
         header_name,
@@ -243,7 +223,7 @@ pub fn null_byte_inject(header_name: &str) -> String {
     if header_name.len() < 2 {
         return header_name.to_string();
     }
-    let mid = char_boundary_near(header_name, header_name.len() / 2);
+    let mid = crate::floor_char_boundary(header_name, header_name.len() / 2);
     format!("{}\x00{}", &header_name[..mid], &header_name[mid..])
 }
 
@@ -315,10 +295,19 @@ pub const EXOTIC_CHARSETS: &[&str] = &[
 #[must_use]
 pub fn all_obfuscations(header_name: &str, value: &str) -> Vec<(HeaderTechnique, String)> {
     let benign = "safe_value";
+    // Three entries below (CaseMixing, UnderscoreSubstitution,
+    // NullByteInjection) transform only the header NAME and interpolate
+    // the value inline, so they must sanitise it here the same way the
+    // helper-based entries do internally — otherwise a value containing
+    // `\r\n` smuggles a header line on the wire. This is the exact gap
+    // `sanitize_header_value` was added to close; these inline format!s
+    // were missed by that fix. (The helper-based entries below sanitise
+    // internally, so passing the raw `value` to them stays correct.)
+    let safe_value = sanitize_header_value(value);
     vec![
         (
             HeaderTechnique::CaseMixing,
-            format!("{}: {}", case_mix(header_name), value),
+            format!("{}: {}", case_mix(header_name), safe_value),
         ),
         (
             HeaderTechnique::TabSeparator,
@@ -339,11 +328,11 @@ pub fn all_obfuscations(header_name: &str, value: &str) -> Vec<(HeaderTechnique,
         }),
         (
             HeaderTechnique::UnderscoreSubstitution,
-            format!("{}: {}", underscore_substitute(header_name), value),
+            format!("{}: {}", underscore_substitute(header_name), safe_value),
         ),
         (
             HeaderTechnique::NullByteInjection,
-            format!("{}: {}", null_byte_inject(header_name), value),
+            format!("{}: {}", null_byte_inject(header_name), safe_value),
         ),
         (
             HeaderTechnique::TrailingSpace,

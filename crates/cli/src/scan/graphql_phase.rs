@@ -83,9 +83,15 @@ pub(crate) async fn detect_graphql_endpoint(
             continue;
         }
 
-        // Read body (bounded to 64 KB — GraphQL responses can be huge for
-        // introspection but the __typename probe should be tiny).
-        let body = match response.text().await {
+        // §15 OOM / decompression-bomb defence: `.text().await` is
+        // unbounded — a hostile endpoint can serve a gzip bomb that
+        // expands to GBs while we're probing for GraphQL. Cap at 64 KiB
+        // (more than enough for a `{__typename}` probe response; the
+        // comment previously claimed "bounded to 64 KB" but the code was
+        // wrong). On overrun skip this candidate rather than panicking.
+        const GRAPHQL_PROBE_BODY_CAP: usize = 64 * 1024;
+        let body = match crate::safe_body::read_bounded_text(response, GRAPHQL_PROBE_BODY_CAP).await
+        {
             Ok(b) => b,
             Err(_) => continue,
         };
@@ -163,12 +169,16 @@ mod tests {
 
     #[test]
     fn looks_like_graphql_with_data_key() {
-        assert!(looks_like_graphql_response(r#"{"data":{"__typename":"Query"}}"#));
+        assert!(looks_like_graphql_response(
+            r#"{"data":{"__typename":"Query"}}"#
+        ));
     }
 
     #[test]
     fn looks_like_graphql_with_errors_key() {
-        assert!(looks_like_graphql_response(r#"{"errors":[{"message":"not found"}]}"#));
+        assert!(looks_like_graphql_response(
+            r#"{"errors":[{"message":"not found"}]}"#
+        ));
     }
 
     #[test]

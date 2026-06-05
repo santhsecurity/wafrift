@@ -206,6 +206,37 @@ fn still_executes_structured_attack_requires_structural_tokens() {
 }
 
 #[test]
+fn still_executes_rejects_keyword_buried_in_larger_identifier() {
+    // SOUNDNESS regression (R2 token-boundary fix). The structural-token
+    // gate used to test `normalized_candidate.contains(token)` — raw
+    // SUBSTRING containment. That let a mutation that buries each keyword
+    // inside a LARGER identifier pass, even though the buried text is no
+    // longer a SQL keyword: `union` survives in `reunion`, `select` in
+    // `selected`, `from` in `fromage`, `users` in `userspace`. None of
+    // those is the keyword, so the candidate does NOT execute the UNION
+    // exfil — yet the old gate credited it as equivalent. The fix matches
+    // against the candidate's WHOLE tokens, so a buried substring no longer
+    // counts. Reverting `token_set` membership back to `nc.contains(t)`
+    // turns this red.
+    let orig = "1 UNION SELECT 1,2 FROM users";
+    // Every structural token of `orig` (union/select/from/users) appears
+    // here ONLY as a substring of a larger word — never as a token.
+    let buried = "1 reunion selected fromage userspace 1,2";
+    assert!(
+        !esql::still_executes(orig, buried),
+        "keywords buried inside larger identifiers must NOT count as surviving"
+    );
+    // Sanity twin: the SAME tokens present as REAL whole tokens (different
+    // column list / ordering of the projection) still execute — the fix
+    // rejects burial, not legitimate re-spelling.
+    let real = "1 union select 2,1 from users";
+    assert!(
+        esql::still_executes(orig, real),
+        "genuine surviving tokens must still execute"
+    );
+}
+
+#[test]
 fn still_executes_tautology_with_whitespace_rewrite() {
     // PROPERTY: a whitespace rewrite of a tautology must still be
     // recognised as executing the same exploit.

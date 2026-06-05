@@ -215,14 +215,16 @@ mod tests {
             response_hash: 0,
             observed_at_secs: 0,
             submission: SubmissionStatus::default(),
+            delivery: String::new(),
         }
     }
 
     fn bucket_with(blocked: Vec<&str>, bypassed: Vec<&str>) -> RuleBucket {
-        let mut b = RuleBucket::default();
-        b.blocked = blocked.into_iter().map(attempt).collect();
-        b.bypassed = bypassed.into_iter().map(bypass).collect();
-        b
+        RuleBucket {
+            blocked: blocked.into_iter().map(attempt).collect(),
+            bypassed: bypassed.into_iter().map(bypass).collect(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -306,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn pick_catch_all_falls_back_to_Z_when_letters_exhausted() {
+    fn pick_catch_all_falls_back_to_z_when_letters_exhausted() {
         // Payloads contain every ASCII letter — pick_catch_all
         // falls back to 'Z'.
         let all_letters: String = (b'A'..=b'Z').chain(b'a'..=b'z').map(|b| b as char).collect();
@@ -426,9 +428,11 @@ mod tests {
             .map(|i| format!("' OR {i}=1-- comment{i}"))
             .collect();
         let bypasses_v: Vec<String> = (0..100).map(|i| format!("normal_input_{i}")).collect();
-        let mut bucket = RuleBucket::default();
-        bucket.blocked = payloads.iter().map(|s| attempt(s)).collect();
-        bucket.bypassed = bypasses_v.iter().map(|s| bypass(s)).collect();
+        let bucket = RuleBucket {
+            blocked: payloads.iter().map(|s| attempt(s)).collect(),
+            bypassed: bypasses_v.iter().map(|s| bypass(s)).collect(),
+            ..Default::default()
+        };
 
         let start = std::time::Instant::now();
         let alpha = infer_alphabet_default(&bucket).expect("alphabet");

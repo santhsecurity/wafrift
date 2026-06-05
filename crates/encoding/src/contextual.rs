@@ -1,3 +1,4 @@
+use crate::encoding::strategy::MAX_PAYLOAD_SIZE;
 use crate::encoding::Strategy;
 use wafrift_types::injection_context::{ContextualEncodeError, InjectionContext};
 
@@ -6,15 +7,19 @@ pub fn encode_in_context(
     strategy: Strategy,
     context: InjectionContext,
 ) -> Result<String, ContextualEncodeError> {
+    // §7 DEDUP: context-specific limits reference the canonical
+    // `MAX_PAYLOAD_SIZE` (8 MiB) instead of repeating the bare literal.
+    // The pre-fix had two independent `8 * 1024 * 1024` entries; both
+    // now track the shared constant so a single edit adjusts them all.
     let max_size = match context {
-        InjectionContext::JsonString => 4 * 1024 * 1024,
+        InjectionContext::JsonString => MAX_PAYLOAD_SIZE / 2, // 4 MiB
         InjectionContext::JsonNumber => 1024,
-        InjectionContext::XmlAttribute => 1024 * 1024,
-        InjectionContext::XmlCdata => 8 * 1024 * 1024,
+        InjectionContext::XmlAttribute => MAX_PAYLOAD_SIZE / 8, // 1 MiB
+        InjectionContext::XmlCdata => MAX_PAYLOAD_SIZE,
         InjectionContext::HeaderValue => 8 * 1024,
         InjectionContext::CookieValue => 4 * 1024,
         InjectionContext::MultipartFileName => 256,
-        _ => 8 * 1024 * 1024,
+        _ => MAX_PAYLOAD_SIZE,
     };
 
     if payload.len() > max_size {
@@ -943,6 +948,6 @@ mod tests {
     fn xml_attribute_null_byte_rejected() {
         // NULL byte in an XML attribute must be rejected.
         let err = escape_for_context("hello\x00world", InjectionContext::XmlAttribute).unwrap_err();
-        assert!(err.to_string().len() > 0);
+        assert!(!err.to_string().is_empty());
     }
 }

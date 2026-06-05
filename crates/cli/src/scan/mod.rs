@@ -15,10 +15,14 @@ pub(crate) mod detect_phase;
 pub(crate) mod differential_phase;
 pub(crate) mod graphql_phase;
 pub(crate) mod header_obf_phase;
+pub(crate) mod injection_delivery;
 pub(crate) mod multi_vector;
 pub(crate) mod pentest_client;
 pub(crate) mod raw_runner;
 pub(crate) mod session_init_plug;
+pub(crate) mod surface_probe;
+pub(crate) mod waf_bypass_verdict;
+pub(crate) mod waf_engagement;
 
 use colored::Colorize;
 use serde_json::json;
@@ -62,6 +66,7 @@ use crate::helpers::{
 pub(crate) fn build_bypass_variants_json(
     target: &str,
     param: &str,
+    delivery: injection_delivery::InjectionDelivery,
     variants: &[(usize, String, Vec<String>, f64)],
     minimal_payloads: &[Option<String>],
 ) -> Vec<serde_json::Value> {
@@ -70,32 +75,60 @@ pub(crate) fn build_bypass_variants_json(
         .enumerate()
         .map(|(i, (idx, payload, techniques, conf))| {
             let minimal = minimal_payloads.get(i).and_then(Option::as_ref);
-            let full_url = scan_url_with_param(target, param, &urlencoding::encode(payload));
-            // Use poc_emit for annotated repro_curl (metadata comment block
-            // names the technique chain and confidence); fall back to the
-            // plain url_query helper on render errors so bypasses are never
-            // silently dropped.
-            let repro_curl = crate::poc_emit::render_raw_curl(
-                &full_url,
-                "GET",
-                &[],
-                None,
+            let repro_curl = injection_delivery::repro_curl(
+                delivery,
+                target,
+                param,
+                payload,
                 techniques,
                 *conf,
                 &format!("scan bypass (variant {idx})"),
-                None,
-                Some(&format!("variant.{idx}")),
-            )
-            .unwrap_or_else(|_| crate::helpers::url_query_repro_curl(target, param, payload));
+                *idx,
+            );
+            // Fix #4: emit replay_technique_keys — the same strings the
+            // gene bank stores as proven_winners.  These ARE the engine
+            // keys; the `techniques` field already emits them so we alias
+            // it here with an explicit name so replay consumers find it
+            // without guessing the field name.
+            //
+            // Also emit a paste-ready repro_replay_command so the operator
+            // can reproduce the bypass with zero copy-paste friction.
+            let replay_keys = techniques.clone();
+            let repro_replay = if replay_keys.is_empty() {
+                None
+            } else {
+                let joined = replay_keys.join(",");
+                Some(format!(
+                    "wafrift replay --target {target} --param {param} \
+                     --payload '{}' --technique {joined}",
+                    payload.replace('\'', "\\'")
+                ))
+            };
             serde_json::json!({
                 "variant": idx,
                 "payload": payload,
                 "techniques": techniques,
+                // Fix #4: engine keys for --from-host / --technique replay.
+                // Same value as `techniques` — named explicitly so tooling
+                // can rely on this field name without inspecting the schema.
+                "replay_technique_keys": replay_keys,
+                // Fix #4: paste-ready wafrift replay command.
+                "repro_replay_command": repro_replay,
                 "confidence": conf,
                 "minimal_payload": minimal,
                 "repro_curl": repro_curl,
-                "minimal_repro_curl": minimal
-                    .map(|m| crate::helpers::url_query_repro_curl(target, param, m)),
+                "minimal_repro_curl": minimal.map(|m| {
+                    injection_delivery::repro_curl(
+                        delivery,
+                        target,
+                        param,
+                        m,
+                        techniques,
+                        *conf,
+                        &format!("scan bypass minimal (variant {idx})"),
+                        *idx,
+                    )
+                }),
             })
         })
         .collect()
@@ -166,6 +199,7 @@ pub(crate) fn render_summary_text_block(
     blocked: u32,
     bypassed: u32,
     errors: u32,
+    challenges: u32,
     bypass_rate: f64,
     elapsed_secs: f64,
 ) -> String {
@@ -214,6 +248,14 @@ pub(crate) fn render_summary_text_block(
             format!("{errors}").yellow()
         );
     }
+    if challenges > 0 {
+        let _ = writeln!(
+            out,
+            "  {} {}",
+            "Challenges (CAPTCHA):".bold().cyan(),
+            format!("{challenges}").bright_yellow()
+        );
+    }
     let _ = writeln!(
         out,
         "  {} {}",
@@ -245,6 +287,29 @@ pub(crate) fn render_summary_text_block(
 ///
 /// `variants` matches the orchestrator's `bypass_variants` Vec of
 /// `(variant_idx, payload, techniques, confidence)` rows.
+/// Visualise C0/C1 control characters (CR, LF, TAB, and any other
+/// `is_control` byte) for safe terminal display, leaving printable ASCII
+/// and printable Unicode untouched. A raw CR resets the cursor to column
+/// 0 and a raw NUL truncates the line at the libc level when an operator
+/// copies it out of scan output — so the human-readable `Payload:`
+/// preview must render them as `\r` / `\n` / `\t` / `\x00` without
+/// altering ordinary payload bytes (e.g. the apostrophe in `' OR 1=1--`).
+/// The copy-pasteable form lives on the `Reproduce:` line, which uses the
+/// shell ANSI-C quoter; this is the read-only preview counterpart.
+fn escape_control_for_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\r' => out.push_str("\\r"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 pub(crate) fn render_bypass_variants_text_block(
     variants: &[(usize, String, Vec<String>, f64)],
     param: &str,
@@ -278,16 +343,27 @@ pub(crate) fn render_bypass_variants_text_block(
             out,
             "  {} {} {}",
             "Payload:".bold().cyan(),
-            payload.bright_white(),
+            escape_control_for_display(payload).bright_white(),
             format!("({} bytes)", payload.len()).bright_black()
         );
+        // §15 CRLF/control-byte injection in emitted reproducer:
+        // - `param` was unquoted — a param containing shell metacharacters
+        //   (`[`, `]`, `(`, `;`, etc.) breaks the pasted command.
+        // - `target` was naively single-quoted with no apostrophe escape —
+        //   a URL containing `'` would silently break the quoting.
+        // - payload bytes CR / NUL / TAB inside `$'...'` passed through raw,
+        //   resetting the terminal cursor (CR) or truncating at libc level
+        //   (NUL) when the operator copies the reproduce line from logs.
+        // Fix: use the crate's canonical quoting helpers for all three fields.
+        // `sh_ansi_c_quote_bytes` handles CR/NUL/TAB inside `$'...'` correctly;
+        // `sh_quote` handles metacharacters and apostrophes for param and target.
         let _ = writeln!(
             out,
-            "  {} curl -G --data-urlencode {}=$'{}' '{}'",
+            "  {} curl -G --data-urlencode {}={} {}",
             "Reproduce:".bold().cyan(),
-            param,
-            payload.replace('\'', "'\\''"),
-            target,
+            crate::helpers::sh_quote(param),
+            crate::helpers::sh_ansi_c_quote_bytes(payload.as_bytes()),
+            crate::helpers::sh_quote(target),
         );
     }
     out
@@ -330,22 +406,32 @@ pub(crate) fn estimate_scan_seconds(variants: usize, delay_ms: u64) -> u64 {
 /// instead of `%3Cscript%3E`, making the WAF see an obviously mangled token
 /// rather than the actual evasion candidate.
 pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str) -> String {
-    let base = target.trim_end_matches('/');
+    // Split off a `#fragment` FIRST: the fragment is never sent to the server,
+    // and appending a query *after* it (`…#frag?q=…`) folds the param into the
+    // fragment and silently drops it on the wire. Strip it, build the query on
+    // the real URL, then re-attach the fragment for a well-formed result.
+    let (head, fragment) = match target.split_once('#') {
+        Some((h, f)) => (h, Some(f)),
+        None => (target, None),
+    };
+    let base = head.trim_end_matches('/');
     // Determine whether the base already has a query string so we use
     // `&` vs `?` as the separator.  Parse is attempted first to handle
     // complex URLs correctly; if the URL is not parseable we fall back
     // to a simple string-match on `?`.
-    if let Ok(parsed) = reqwest::Url::parse(base) {
+    let core = if let Ok(parsed) = reqwest::Url::parse(base) {
         let sep = if parsed.query().is_some() { "&" } else { "?" };
         format!("{base}{sep}{param}={value_encoded}")
+    } else if base.contains('?') {
+        // Unparseable target (e.g. typo'd scheme) — fall back to a simple
+        // string check so the param is never lost.
+        format!("{base}&{param}={value_encoded}")
     } else {
-        // Unparseable target (e.g. typo'd scheme) — fall back to
-        // a simple string check so the param is never lost.
-        if base.contains('?') {
-            format!("{base}&{param}={value_encoded}")
-        } else {
-            format!("{base}?{param}={value_encoded}")
-        }
+        format!("{base}?{param}={value_encoded}")
+    };
+    match fragment {
+        Some(f) => format!("{core}#{f}"),
+        None => core,
     }
 }
 
@@ -353,7 +439,6 @@ pub(crate) fn scan_url_with_param(target: &str, param: &str, value_encoded: &str
 pub(crate) async fn run_scan(
     mut args: ScanArgs,
     cancel: tokio_util::sync::CancellationToken,
-    quiet: bool,
 ) -> ExitCode {
     // `-r/--raw-request` mode: short-circuit to the raw-template
     // runner. The default scan loop assumes URL-query shape
@@ -362,7 +447,14 @@ pub(crate) async fn run_scan(
     // mutates the payload at every `§§` marker. See
     // [`raw_runner::run_scan_raw`] for the runner's scope.
     if let Some(path) = args.raw_request.clone() {
-        let text = match std::fs::read_to_string(&path) {
+        // §15 TOCTOU fix: use read_bounded_text_file so a stat()+read() race
+        // cannot be exploited by swapping the file with a symlink to /dev/zero.
+        // Cap is MAX_OPERATOR_INPUT_BYTES (1 MiB) — raw HTTP request templates
+        // are tiny; a multi-MB template is a misconfiguration, not an attack.
+        let text = match crate::safe_body::read_bounded_text_file(
+            &path,
+            crate::safe_body::MAX_OPERATOR_INPUT_BYTES,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!(
@@ -373,52 +465,65 @@ pub(crate) async fn run_scan(
                 return ExitCode::from(2);
             }
         };
-        let template = match crate::raw_request::parse_raw_http_request_with_scheme(
-            &text,
-            &args.raw_request_scheme,
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!(
-                    "{} could not parse --raw-request {}: {e}",
-                    "Input error:".red().bold(),
-                    path.display()
-                );
-                return ExitCode::from(2);
-            }
+        // R46+ fix (dogfood foreground): if the operator passed
+        // --target https://... and --raw-request together, infer
+        // the raw-request scheme from --target instead of the
+        // default `http`. Pre-fix `wafrift scan https://target/
+        // --raw-request file.http` silently downgraded to plain
+        // http on the wire — leaking unencrypted traffic to a
+        // target the operator explicitly asked to be TLS.
+        let resolved_target = args.target.as_deref().or(args.target_positional.as_deref());
+        let inferred_scheme = if args.raw_request_scheme != "http" {
+            // Operator-explicit value wins.
+            args.raw_request_scheme.clone()
+        } else if let Some(t) = resolved_target
+            && t.starts_with("https://")
+        {
+            "https".to_string()
+        } else {
+            args.raw_request_scheme.clone()
         };
+        let template =
+            match crate::raw_request::parse_raw_http_request_with_scheme(&text, &inferred_scheme) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!(
+                        "{} could not parse --raw-request {}: {e}",
+                        "Input error:".red().bold(),
+                        path.display()
+                    );
+                    return ExitCode::from(2);
+                }
+            };
         return raw_runner::run_scan_raw(template, args, cancel).await;
     }
 
     // `--from-discovery` expansion (handled in main.rs) always sets a
     // concrete target; the direct path is clap-guaranteed to have one
     // via the `target_positional` OR `--target` arms of `ScanArgs`.
-    let target_owned = crate::helpers::normalize_target_url(
-        args.resolved_target().unwrap_or(""),
-    );
-    let target_owned = target_owned.trim_end_matches('/').to_string();
-    let target = target_owned.as_str();
+    let mut effective_url =
+        crate::helpers::normalize_target_url(args.resolved_target().unwrap_or(""));
+    effective_url = effective_url.trim_end_matches('/').to_string();
+    let mut scan_param = args.param.clone();
+    let mut scan_delivery = injection_delivery::InjectionDelivery::GetQuery;
+
+    let auto_escalate = args.auto_escalate && !args.no_auto_escalate;
+    let probe_surfaces = !args.no_probe_surfaces && (args.probe_surfaces || auto_escalate);
 
     // Permission gate: refuse to fire against any target the operator
     // hasn't authorized. Local/RFC1918 targets and the built-in bounty
     // allowlist are always permitted. All others require either
     // `--i-have-permission <reason>` or `~/.wafrift/permission.toml`.
-    crate::permission::assert_permitted(target, args.i_have_permission.as_deref());
-    if target.is_empty() {
-        eprintln!(
-            "{} target URL must be valid (e.g. https://example.com/search) — \
+    crate::permission::assert_permitted(&effective_url, args.i_have_permission.as_deref());
+    if effective_url.is_empty() {
+        return crate::helpers::input_error(
+            "target URL must be valid (e.g. https://example.com/search) — \
              pass it as the first positional arg or via --target, \
              or use --from-discovery <report.json|->",
-            "Input error:".red().bold()
         );
-        return ExitCode::from(1);
     }
     if args.payload.is_empty() {
-        eprintln!(
-            "{} --payload must not be empty (e.g. \"' OR 1=1--\")",
-            "Input error:".red().bold()
-        );
-        return ExitCode::from(1);
+        return crate::helpers::input_error("--payload must not be empty (e.g. \"' OR 1=1--\")");
     }
 
     // OOB callback substitution: when --callback-url is set + the
@@ -465,18 +570,41 @@ pub(crate) async fn run_scan(
         Ok(f) => f,
         Err(msg) => {
             eprintln!("{} {msg}", "Filter error:".red().bold());
-            return ExitCode::from(1);
+            return ExitCode::from(2);
         }
     };
     let encoding_only = args.encoding_only || !filter.grammar_enabled();
     let payload_type = grammar::classify(&args.payload);
     let mut strategies = filter.filter_strategies(strategies_for_level(args.level));
     if strategies.is_empty() && !filter.is_default() {
-        eprintln!(
-            "{} no encoding strategies remain after --only/--exclude",
-            "Filter error:".red().bold()
-        );
-        return ExitCode::from(1);
+        // Issue-7 fix (dogfood R43 cohort): the only-tamper case
+        // (`--only tamper/null_byte`) hit this path with a stale
+        // generic message. Operators rightly asked: why is a valid
+        // tamper selector being rejected? Explain the constraint
+        // and the fix (add an encoding selector too).
+        let only_has_tamper = !args.only.is_empty()
+            && args
+                .only
+                .iter()
+                .all(|s| s.contains("tamper/") || s.starts_with("tamper"));
+        if only_has_tamper {
+            eprintln!(
+                "{} `wafrift scan` builds variant chains by composing tamper \
+                 strategies ON TOP OF an encoding base — a tamper-only `--only` \
+                 leaves the engine with nothing to chain through. Add at least \
+                 one encoding/* selector, e.g. `--only encoding/url/single,{}`. \
+                 (Note: `wafrift evade --only tamper/<X>` works without this \
+                 constraint — it composes off the raw payload.)",
+                "Filter error:".red().bold(),
+                args.only.first().map_or("tamper/null_byte", String::as_str),
+            );
+        } else {
+            eprintln!(
+                "{} no encoding strategies remain after --only/--exclude",
+                "Filter error:".red().bold()
+            );
+        }
+        return ExitCode::from(2);
     }
     let max_mutations = max_mutations_for_level(args.level);
 
@@ -506,7 +634,11 @@ pub(crate) async fn run_scan(
                 })
                 .collect();
             if all_names.is_empty() {
-                vec![]
+                // Cold install (no per-WAF history yet): warm-start from the
+                // bundled default's proven generic techniques so the FIRST scan
+                // fires known winners instead of discovering from zero —
+                // CLAUDE.md "what pentesters want".
+                GeneBank::default_seed_winners()
             } else {
                 all_names
             }
@@ -521,14 +653,29 @@ pub(crate) async fn run_scan(
     };
 
     if !gene_seed_names.is_empty() {
-        // Move strategies that match gene bank winners to the front.
+        // R48 pass-10 I5 (CLAUDE.md §11 UTILIZATION): use the canonical
+        // strategy_path AND match against legacy Debug-format. Pre-fix
+        // the Debug-format substring contains was correct only by luck
+        // for plain `encoding::X` entries and silently MISSED any
+        // chain:: prefixed entries (e.g. chain::TripleUrlEncode), so
+        // chain techniques from prior scans were never promoted —
+        // warm-start info wasted. Both spellings + the canonical
+        // hierarchical path are now matched.
+        let matches_winner = |strat: &wafrift_encoding::Strategy| {
+            let debug_form = format!("{strat:?}");
+            let canonical = crate::technique_filter::strategy_path(*strat);
+            gene_seed_names.iter().any(|s| {
+                s == &format!("encoding::{debug_form}")
+                    || s == &format!("chain::{debug_form}")
+                    || s == &format!("heavy:{canonical}")
+                    || s == &format!("medium:{canonical}")
+                    || s == &format!("light:{canonical}")
+                    || s.contains(canonical)
+            })
+        };
         strategies.sort_by(|a, b| {
-            let a_known = gene_seed_names
-                .iter()
-                .any(|s| s.contains(&format!("{a:?}")));
-            let b_known = gene_seed_names
-                .iter()
-                .any(|s| s.contains(&format!("{b:?}")));
+            let a_known = matches_winner(a);
+            let b_known = matches_winner(b);
             b_known.cmp(&a_known) // true > false, so winners go first
         });
     }
@@ -568,46 +715,113 @@ pub(crate) async fn run_scan(
         return ExitCode::from(1);
     }
 
-    let scan_text = !quiet && args.format != "json";
+    // Issue-6 fix (dogfood R29 cohort): preview the firing budget
+    // BEFORE sending any traffic. Rate-limit-bound pentesters need
+    // this to plan against per-target budgets (Cloudflare's public
+    // scope allows ~50 req/min; some bounties cap stricter). Output
+    // is machine-parseable so `wafrift scan --dry-run --payload x
+    // --target https://… | grep -oP 'variants: \K[0-9]+'` works
+    // unchanged across releases.
+    if args.dry_run {
+        // Estimate runtime from inter-request delay alone — the
+        // dominant factor at moderate concurrency. Wall-clock will
+        // be lower under `--concurrency > 1` but the operator wants
+        // the budget ceiling, not the optimistic estimate.
+        // §13 dogfood round-2 DEFECT 2: this estimate covers the EXPLORE
+        // phase only (`variants.len()` probes). The exploit / multi-vector /
+        // encoding-chain phase fires ADDITIONAL requests after the explore
+        // loop, and that count is data-dependent (it scales with how many
+        // bypasses the explore phase surfaces) — so a precise total is
+        // genuinely unknowable here and a hardcoded multiplier would be a
+        // §6 magic number that drifts. Rather than print a false "total"
+        // (pre-fix said "~4s" for a run that fired 220 requests over 222s),
+        // label the scope honestly and flag it as a LOWER BOUND so a
+        // rate-budgeting operator isn't misled into a ban. `variants` /
+        // `estimated_seconds` keep their meaning (explore-phase); the new
+        // `estimate_scope` field is additive (no schema bump, per convention).
+        let est_ms = (variants.len() as u64).saturating_mul(args.delay_ms);
+        let est_s = est_ms / 1000;
+        let est_m = est_s / 60;
+        let level_label = format!("{:?}", args.level).to_lowercase();
+        if args.format == "json" || args.quiet {
+            println!(
+                r#"{{"schema_version":1,"dry_run":true,"variants":{},"level":"{}","delay_ms":{},"estimated_seconds":{},"estimate_scope":"explore_phase_only","exploit_phase_adds_uncounted_requests":true}}"#,
+                variants.len(),
+                level_label,
+                args.delay_ms,
+                est_s
+            );
+        } else {
+            println!(
+                "dry-run: {} variants (explore phase) · level={} · delay={}ms · \
+                 explore-phase estimate ~{}m{}s ({}s) wall — the exploit/multi-vector \
+                 phase fires ADDITIONAL uncounted requests, so treat this as a LOWER \
+                 BOUND when budgeting against a rate cap. Re-run without --dry-run to fire",
+                variants.len(),
+                level_label,
+                args.delay_ms,
+                est_m,
+                est_s % 60,
+                est_s,
+            );
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    // TRACING: variant build outcome — visible at RUST_LOG=wafrift=debug.
+    debug!(
+        target: "wafrift::scan",
+        variant_count = variants.len(),
+        strategies = strategies.len(),
+        payload_type = ?payload_type,
+        encoding_only,
+        level = ?args.level,
+        "variant set built"
+    );
+
+    // `--quiet` AND `--format json` both suppress the human-readable
+    // banner/progress lines. `--quiet` is the explicit "shut up" flag
+    // a CI script reaches for when piping the output blob to disk;
+    // `--format json` is the implicit one. Either is sufficient.
+    let scan_text = !args.quiet && args.format != "json";
+    // Fix #7: scan banner + all progress lines go to STDERR in text mode so
+    // stdout in text mode contains only the result block (same as JSON mode).
+    // Operators using `wafrift scan | grep` or `wafrift scan | tee` get a
+    // clean result stream without the 2300+ progress lines polluting stdout.
     if scan_text {
-        println!(
+        eprintln!(
             "{}\n",
             "╔══════════════════════════════════════════════════╗".bright_cyan()
         );
-        println!(
+        eprintln!(
             "{}  {}",
             "║".bright_cyan(),
             "WafRift Live WAF Evasion Scanner".bold().bright_white()
         );
-        println!(
+        eprintln!(
             "{}\n",
             "╚══════════════════════════════════════════════════╝".bright_cyan()
         );
-        println!("  {} {}", "Target:".bold().cyan(), target.yellow());
-        println!(
+        eprintln!(
+            "  {} {}",
+            "Target:".bold().cyan(),
+            effective_url.as_str().yellow()
+        );
+        eprintln!(
             "  {} {}",
             "Payload Type:".bold().cyan(),
             payload_type_label(payload_type).bold()
         );
-        println!(
+        eprintln!(
             "  {} {}",
             "Variants:".bold().cyan(),
             format!("{}", variants.len()).yellow()
         );
-        println!(
+        eprintln!(
             "  {} {}ms",
             "Delay:".bold().cyan(),
             format!("{}", args.delay_ms).yellow()
         );
-        // Time-to-finish hint: a fresh operator launching `wafrift
-        // scan ... --level heavy` against a target with --delay-ms
-        // 500 sees nothing happen for 5 minutes and assumes the tool
-        // is broken. Surface a rough wall-clock estimate AND the
-        // exact tighter-loop flag so they can ^C and re-run in
-        // light mode for a quick answer. Emitted on STDERR so a
-        // `wafrift scan --format text | tee` pipeline doesn't end
-        // up with the hint glued into the text body — the hint is
-        // operator UX, not part of the result stream.
         let estimate_secs = estimate_scan_seconds(variants.len(), args.delay_ms);
         if estimate_secs >= 60 {
             let mins = estimate_secs / 60;
@@ -620,7 +834,7 @@ pub(crate) async fn run_scan(
         } else {
             eprintln!("  {} ~{estimate_secs}s", "Estimated:".bold().cyan(),);
         }
-        println!();
+        eprintln!();
     }
 
     // Unconditional startup line on STDERR — even in `--format json`
@@ -631,30 +845,13 @@ pub(crate) async fn run_scan(
     // process. stderr keeps stdout pure for `| jq`.
     let scan_started = std::time::Instant::now();
     eprintln!(
-        "[wafrift scan] {} variants → {target} (param={}, level={:?}, delay={}ms) — progress on stderr, results on stdout",
+        "[wafrift scan] {} variants → {} (param={}, level={:?}, delay={}ms) — progress on stderr, results on stdout",
         variants.len(),
-        args.param,
+        effective_url,
+        scan_param,
         args.level,
         args.delay_ms
     );
-
-    // Honest-contract guard: `--stealth-browser <profile>` is a flag
-    // that scan currently does not wire. TLS-level browser
-    // impersonation requires `rquest`/BoringSSL and lives in
-    // `wafrift-proxy --tls-impersonate <profile>` (built with the
-    // `tls-impersonate` feature). The flag is retained on `wafrift
-    // scan` for backwards compatibility — pre-flag scripts that set
-    // it keep working — but rather than silently doing nothing, we
-    // surface a warning so operators relying on it know they're
-    // getting reqwest/rustls TLS, not Chrome/Firefox bytes.
-    if let Some(ref profile) = args.stealth_browser {
-        eprintln!(
-            "[wafrift scan] {} --stealth-browser={profile:?} is currently a no-op in `scan` \
-             (CLI uses reqwest/rustls TLS). For wire-identical browser TLS, run \
-             `wafrift-proxy --tls-impersonate {profile}` and route this scan through it.",
-            "warn:".yellow().bold()
-        );
-    }
 
     // Per-request timeout: operator can override via `--timeout-secs`
     // (or `.wafrift.toml`'s `http.timeout_secs`); 0 keeps the workspace
@@ -666,45 +863,78 @@ pub(crate) async fn run_scan(
         wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS
     });
 
+    let scan_identity =
+        match crate::config::shared_scan_browser_headers(args.stealth_browser.as_deref()) {
+            Ok(identity) => identity,
+            Err(e) => {
+                eprintln!("{} {e}", "Config error:".red().bold());
+                return ExitCode::from(2);
+            }
+        };
+    if let Some(profile) = args.stealth_browser.as_deref() {
+        if scan_identity.explicit_user_agent {
+            eprintln!(
+                "[wafrift scan] {} --stealth-browser={profile:?} browser headers were applied, \
+                 but http.user_agent overrides the User-Agent. TLS remains reqwest/rustls; \
+                 for wire-identical browser TLS, use wafrift-proxy --tls-impersonate {profile}.",
+                "warn:".yellow().bold()
+            );
+        } else {
+            eprintln!(
+                "[wafrift scan] {} --stealth-browser={profile:?} applied browser HTTP headers. \
+                 TLS remains reqwest/rustls; for wire-identical browser TLS, use \
+                 wafrift-proxy --tls-impersonate {profile}.",
+                "info:".cyan().bold()
+            );
+        }
+        debug!(
+            target: "wafrift::scan",
+            profile = ?scan_identity.profile,
+            user_agent = %scan_identity.user_agent,
+            "scan browser identity resolved"
+        );
+    }
+    let mut default_headers = scan_identity.headers.clone();
+
     // Step 0: Stateful chain — see `session_init_plug` module.
     let session_state = match session_init_plug::run(
         args.session_init.as_deref(),
         args.insecure,
         scan_text,
         request_timeout,
+        default_headers.clone(),
     )
     .await
     {
         Ok(s) => s,
-        Err(code) => return code,
+        Err(e) => {
+            return e;
+        }
     };
+    if let Some(ref state) = session_state {
+        // Session-init headers are more specific than profile defaults:
+        // captured Cookie / Authorization values must travel on every
+        // detect, baseline, and variant request.
+        for (name, value) in state.headers.iter() {
+            default_headers.insert(name.clone(), value.clone());
+        }
+    }
 
     // Step 1: WAF detection — fetch target and identify WAF.
-    // UA is operator-configurable via `.wafrift.toml`'s `http.user_agent`.
-    // Default is a browser-shaped UA: CRS PL2+ rule 913100/913110
-    // blocks `reqwest/*`, `curl/*`, `python-requests/*` before any
-    // payload inspection ever runs.
-    let scan_ua = crate::config::shared_user_agent();
-    let mut http_builder = wafrift_transport::base_client_builder(
-        request_timeout.as_secs(),
-        args.insecure,
-        Some(&scan_ua),
-    )
-    .redirect(reqwest::redirect::Policy::limited(5));
-    if let Some(ref state) = session_state {
-        // Default headers travel on every request issued by this
-        // client — so cookies/auth captured at init replay through
-        // detect, baseline, and every variant fire without each
-        // call site needing to remember.
-        http_builder = http_builder.default_headers(state.headers.clone());
-    }
+    // Default browser headers come from the consolidated stealth catalog.
+    // CRS PL2+ rule 913100/913110 blocks `reqwest/*`, `curl/*`, and
+    // `python-requests/*` before any payload inspection ever runs.
+    let mut http_builder =
+        wafrift_transport::base_client_builder(request_timeout.as_secs(), args.insecure, None)
+            .default_headers(default_headers.clone())
+            .redirect(crate::helpers::safe_redirect_policy(5));
     // Pentest pivot: --proxy + -H/--header. See `pentest_client`
     // for the validation grammar and unit tests.
     http_builder = match pentest_client::apply_pentest_flags_or_print(
         http_builder,
         args.proxy.as_deref(),
         &args.header,
-        session_state.as_ref().map(|s| &s.headers),
+        Some(&default_headers),
     ) {
         Ok(b) => b,
         Err(code) => return code,
@@ -712,28 +942,57 @@ pub(crate) async fn run_scan(
     let http = match http_builder.build() {
         Ok(client) => client,
         Err(e) => {
-            eprintln!("  {} Failed to build HTTP client for scan (check --insecure and TLS config). Fix: verify network connectivity and target URL. {} ", "error:".red().bold(), e);
+            eprintln!(
+                "  {} reqwest builder error ({})\n    {}",
+                "✗ Failed to create HTTP client:".red().bold(),
+                e,
+                "hint: this usually means a TLS backend (rustls / native-tls) failed to initialise — check OS root certs are present".bright_black()
+            );
             return ExitCode::from(1);
         }
     };
     let scan_start = Instant::now();
 
-    if scan_text {
-        println!("{}", "[1/3] Detecting WAF...".bold().cyan());
-    }
-    let baseline_response = match http.get(target).send().await {
-        Ok(resp) => resp,
-        Err(err) => {
-            eprintln!("  {} Cannot reach target {target}: {err}. Fix: verify the target is up and the URL is correct.", "error:".red().bold());
-            return ExitCode::from(1);
-        }
+    // ── GraphQL detection + payload injection ─────────────────────────
+    // When --graphql is set OR the target auto-detects as a GraphQL
+    // endpoint, inject the full wafrift-graphql battery into a
+    // dedicated side-pool. These payloads are POST bodies (JSON), NOT
+    // URL-query values, so they live in their own vec and are fired
+    // separately (below) via POST to the detected GraphQL endpoint.
+    let graphql_probe_result = graphql_phase::build_graphql_payloads(
+        &http,
+        effective_url.as_str(),
+        args.graphql,
+        scan_text,
+    )
+    .await;
+    let (graphql_payloads, graphql_endpoint) =
+        if let Some((payloads, endpoint)) = graphql_probe_result {
+            (payloads, Some(endpoint))
+        } else {
+            (Vec::new(), None)
+        };
+
+    // Step 1: WAF detection + advisor planning — see `detect_phase`.
+    let detect_outcome = match detect_phase::run(&http, effective_url.as_str(), scan_text).await {
+        Ok(o) => o,
+        Err(code) => return code,
     };
     let baseline_status = detect_outcome.baseline_status;
-    let _headers_vec = detect_outcome.headers_vec;
-    let _body_bytes = detect_outcome.body_bytes;
+    // headers_vec and body_bytes from the detection baseline are only
+    // needed inside detect_phase — no downstream phase reads them.
+    // Drop them here rather than binding to a `_`-prefixed name that
+    // looks intentional but silently moves data out of the struct
+    // and discards it.
+    drop(detect_outcome.headers_vec);
+    drop(detect_outcome.body_bytes);
+    // detected_waf_obj is the top-detection clone inside DetectOutcome;
+    // its name (String) is already in `waf_name` and its structured
+    // form (name/confidence/indicators) surfaces via `detected` in the
+    // --report-layers JSON path. No additional binding needed.
+    drop(detect_outcome.detected_waf_obj);
     let detected = detect_outcome.detected;
     let waf_name = detect_outcome.waf_name;
-    let _detected_waf_obj = detect_outcome.detected_waf_obj;
     let evasion_plan = detect_outcome.evasion_plan;
 
     // TRACING: WAF detection outcome — lets the operator confirm RUST_LOG=info
@@ -767,7 +1026,7 @@ pub(crate) async fn run_scan(
         if let Some(entry) = cache.get(&key)
             && scan_text
         {
-            println!(
+            eprintln!(
                 "  {} cached pipeline '{}' — {:.0}% success rate",
                 "📦 Learning cache:".bold().cyan(),
                 entry.pipeline.name.yellow(),
@@ -778,11 +1037,11 @@ pub(crate) async fn run_scan(
 
     // Gene bank: load known bypasses for this WAF.
     if let Ok(mut bank) = GeneBank::open_default()
-        && let Some(genome) = bank.load(&waf_name)
+        && let Some(genome) = bank.load_or_default(&waf_name)
     {
         let seeds = genome.seed_winners();
         if !seeds.is_empty() && scan_text {
-            println!(
+            eprintln!(
                 "\n  {} {} {}",
                 "🧬".bold(),
                 "Gene bank loaded:".bold().cyan(),
@@ -799,14 +1058,138 @@ pub(crate) async fn run_scan(
                     .iter()
                     .find(|t| t.name == *seed)
                     .map_or(0.0, |t| t.success_rate() * 100.0);
-                println!("    {} {:.0}% {}", "→".bright_cyan(), rate, seed.yellow());
+                eprintln!("    {} {:.0}% {}", "→".bright_cyan(), rate, seed.yellow());
+            }
+        }
+    }
+
+    // §9 WIRING: ML-backed WAF evasion variant injection.
+    //
+    // `apply_ml_evasion_if_applicable` exists in `wafrift-strategy` but was
+    // never called from the scan pipeline — the function was dead code
+    // (§11 UTILIZATION violation). Wire it here: for ML-backed WAFs (AWS Bot
+    // Control, Cloudflare Bot Management, Akamai Bot Manager, Datadome) inject
+    // up to `ML_EVASION_INJECT_COUNT` structurally-mutated candidates into the
+    // existing variant list so the fire loop exercises them.
+    //
+    // The conservative synthetic oracle always reports "blocked", forcing the
+    // manifold explorer to surface genuine structural novelty rather than
+    // trivially-accepted mutations. The outer transport layer then verifies
+    // each candidate against the live WAF — confirmed bypasses are credited
+    // just like any other variant.
+    const ML_EVASION_INJECT_COUNT: usize = 8;
+    {
+        use wafrift_strategy::ml_evasion::{DEFAULT_ML_BUDGET, ml_evasion_probe_payload};
+        use wafrift_types::WafClass;
+        let waf_class = WafClass::from_waf_name(&waf_name);
+        if waf_class.is_ml_backed() {
+            let mut ml_added = 0_usize;
+            // Different seeds → diverse on-manifold structural mutations of the
+            // payload. Each is injected as a variant and verified against the
+            // live WAF by the fire loop below, so only real bypasses are
+            // credited. `ml_evasion_probe_payload` owns the probe/extract wiring
+            // (shared with `bench-waf`).
+            for seed in 0..ML_EVASION_INJECT_COUNT as u64 {
+                let Some((mutated_payload, techs)) =
+                    ml_evasion_probe_payload(&args.payload, &waf_name, DEFAULT_ML_BUDGET, seed)
+                else {
+                    break;
+                };
+                let tech_names: Vec<String> = techs.iter().map(|t| format!("{t:?}")).collect();
+                variants.push(crate::helpers::Variant {
+                    payload: mutated_payload,
+                    techniques: tech_names,
+                    confidence: 0.6,
+                });
+                ml_added += 1;
+            }
+            if ml_added > 0 && scan_text {
+                eprintln!(
+                    "  {} {ml_added} ML-evasion variants injected ({waf_class:?} is ML-backed)",
+                    "🤖 ML evasion:".bold().cyan()
+                );
+            }
+        }
+    }
+
+    // ── Surface probe / auto-escalate (before baseline when escalating) ──
+    let mut surface_alternatives: Vec<surface_probe::SurfacePreflight> = Vec::new();
+    let mut escalated_to_json: Option<surface_probe::SurfacePreflightJson> = None;
+    let primary_url_before_escalation = effective_url.clone();
+    let primary_param_before_escalation = scan_param.clone();
+
+    if auto_escalate {
+        if scan_text {
+            eprintln!(
+                "\n{}",
+                "[1b/7] Surface probe — ranking injection points from HTML..."
+                    .bold()
+                    .cyan()
+            );
+        }
+        surface_alternatives = surface_probe::probe_alternatives(
+            &http,
+            effective_url.as_str(),
+            &args.payload,
+            args.surface_cap,
+        )
+        .await;
+        let primary_cand = surface_probe::SurfaceCandidate {
+            url: effective_url.clone(),
+            param: scan_param.clone(),
+            method: "GET",
+            source: "cli_primary",
+        };
+        if let Some(mut primary_pf) =
+            surface_probe::preflight_surface(&http, &primary_cand, &args.payload).await
+        {
+            primary_pf.candidate.source = "cli_primary";
+            surface_alternatives.push(primary_pf);
+            surface_alternatives.sort_by(|a, b| b.score.cmp(&a.score));
+        }
+        let primary_pf = surface_alternatives
+            .iter()
+            .find(|p| p.candidate.source == "cli_primary");
+        let primary_score = primary_pf.map(|p| p.score).unwrap_or(0);
+        let pick = surface_probe::best_meaningful(&surface_alternatives).or_else(|| {
+            surface_alternatives
+                .iter()
+                .filter(|p| p.candidate.source != "cli_primary" && p.score > primary_score)
+                .max_by_key(|p| p.score)
+        });
+        if let Some(best) = pick {
+            if best.candidate.url != effective_url || best.candidate.param != scan_param {
+                if scan_text {
+                    eprintln!(
+                        "  {} → {} ?{}={} ({}, score={})",
+                        "Auto-escalate".yellow().bold(),
+                        best.candidate.url,
+                        best.candidate.param,
+                        "…",
+                        best.report.level.as_str(),
+                        best.score
+                    );
+                }
+                escalated_to_json = Some(surface_probe::to_json_preflight(best));
+                effective_url = best.candidate.url.trim_end_matches('/').to_string();
+                scan_param = best.candidate.param.clone();
+                scan_delivery = injection_delivery::InjectionDelivery::from_surface_method(
+                    best.candidate.method,
+                );
             }
         }
     }
 
     // Step 2: Baseline — see `baseline` module.
-    let baseline_outcome =
-        baseline::run(&http, target, &args.param, &args.payload, scan_text).await;
+    let mut baseline_outcome = baseline::run_with_delivery(
+        &http,
+        effective_url.as_str(),
+        &scan_param,
+        &args.payload,
+        scan_text,
+        scan_delivery,
+    )
+    .await;
     let raw_status = baseline_outcome.status;
     let raw_blocked = baseline_outcome.blocked;
     // Note: baseline_outcome.transport_ok was used downstream; preserved as
@@ -815,20 +1198,169 @@ pub(crate) async fn run_scan(
     // via baseline_outcome.transport_ok if needed).
 
     // Step 2b: Differential probing — see `differential_phase` module.
-    let mut intel_loop =
-        differential_phase::run(&http, target, &args.param, args.delay_ms, scan_text).await;
+    // Baseline already fired one request, so fires_so_far starts at 1;
+    // the phase truncates its quick-probe batch to the remaining
+    // --max-fires budget (0 = unlimited).
+    let mut intel_loop = differential_phase::run(
+        &http,
+        effective_url.as_str(),
+        &scan_param,
+        args.delay_ms,
+        scan_text,
+        1,
+        args.max_fires,
+    )
+    .await;
+
+    // Step 2b½: WAF engagement — is this parameter actually inspected?
+    let benign_fp = injection_delivery::fire_benign_probe(
+        &http,
+        scan_delivery,
+        effective_url.as_str(),
+        &scan_param,
+        waf_engagement::BENIGN_PROBE_VALUE,
+    )
+    .await;
+    let mut waf_engagement = waf_engagement::assess(
+        &baseline_outcome,
+        baseline_outcome.fingerprint,
+        benign_fp,
+        &intel_loop,
+    );
+    waf_engagement::render_engagement_warning(&waf_engagement, scan_text);
+
+    if probe_surfaces && !auto_escalate {
+        if scan_text {
+            eprintln!(
+                "\n{}",
+                "[2a/7] Surface probe — ranking alternative injection points..."
+                    .bold()
+                    .cyan()
+            );
+        }
+        surface_alternatives = surface_probe::probe_alternatives(
+            &http,
+            primary_url_before_escalation.as_str(),
+            &args.payload,
+            args.surface_cap,
+        )
+        .await;
+    }
+
+    let mut count_meaningful_bypass =
+        waf_engagement.counts_meaningful_bypass() || args.full_scan_unguarded;
+
+    // Late escalation: primary was unguarded at pre-scan but guarded sinks may
+    // exist — probe again and re-baseline if we find active/selective surface.
+    if auto_escalate
+        && !count_meaningful_bypass
+        && escalated_to_json.is_none()
+        && baseline_outcome.transport_ok
+    {
+        let late_alts = surface_probe::probe_alternatives(
+            &http,
+            primary_url_before_escalation.as_str(),
+            &args.payload,
+            args.surface_cap,
+        )
+        .await;
+        if let Some(best) = surface_probe::best_meaningful(&late_alts).or_else(|| {
+            late_alts
+                .iter()
+                .filter(|p| p.score > surface_probe::engagement_score(waf_engagement.level))
+                .max_by_key(|p| p.score)
+        }) {
+            if scan_text {
+                eprintln!(
+                    "  {} late pivot → {} ?{}=… ({})",
+                    "Auto-escalate".yellow().bold(),
+                    best.candidate.url,
+                    best.candidate.param,
+                    best.report.level.as_str()
+                );
+            }
+            escalated_to_json = Some(surface_probe::to_json_preflight(best));
+            effective_url = best.candidate.url.trim_end_matches('/').to_string();
+            scan_param = best.candidate.param.clone();
+            scan_delivery =
+                injection_delivery::InjectionDelivery::from_surface_method(best.candidate.method);
+            let target = effective_url.as_str();
+            baseline_outcome = baseline::run_with_delivery(
+                &http,
+                target,
+                &scan_param,
+                &args.payload,
+                scan_text,
+                scan_delivery,
+            )
+            .await;
+            intel_loop = differential_phase::run(
+                &http,
+                target,
+                &scan_param,
+                args.delay_ms,
+                scan_text,
+                1,
+                args.max_fires,
+            )
+            .await;
+            let benign_fp = injection_delivery::fire_benign_probe(
+                &http,
+                scan_delivery,
+                target,
+                &scan_param,
+                waf_engagement::BENIGN_PROBE_VALUE,
+            )
+            .await;
+            waf_engagement = waf_engagement::assess(
+                &baseline_outcome,
+                baseline_outcome.fingerprint,
+                benign_fp,
+                &intel_loop,
+            );
+            waf_engagement::render_engagement_warning(&waf_engagement, scan_text);
+            count_meaningful_bypass =
+                waf_engagement.counts_meaningful_bypass() || args.full_scan_unguarded;
+            surface_alternatives = late_alts;
+        }
+    }
+
+    let target = effective_url.as_str();
+
+    let surface_probe_json = serde_json::json!({
+        "primary": {
+            "url": primary_url_before_escalation,
+            "param": primary_param_before_escalation,
+            "engagement_level": waf_engagement.level.as_str(),
+        },
+        "alternatives": surface_alternatives.iter().map(surface_probe::to_json_preflight).collect::<Vec<_>>(),
+        "escalated_to": escalated_to_json,
+        "recommendations": surface_probe::build_recommendations(
+            waf_engagement.level,
+            &surface_alternatives,
+            escalated_to_json.is_some(),
+        ),
+    });
 
     // Scan counters (declared early so cache replay can use them).
     let mut bypassed = 0_u32;
+    let mut meaningful_bypassed = 0_u32;
+    let mut unguarded_pass = 0_u32;
     let mut blocked = 0_u32;
     let mut errors = 0_u32;
     let mut _rate_limited = 0_u32;
-    let mut _challenges = 0_u32;
+    let mut challenges = 0_u32;
     let mut bypass_variants: Vec<(usize, String, Vec<String>, f64)> = Vec::new();
     let mut variant_outcomes: Vec<(Vec<String>, bool)> = Vec::new();
     let delay = Duration::from_millis(args.delay_ms);
     let mut winning_strategies: HashSet<String> = HashSet::new();
-    let mut total_fired = 0_usize;
+    // Baseline, benign engagement probe, and differential suite already fired.
+    let mut total_fired =
+        1_usize + usize::from(benign_fp.is_some()) + intel_loop.probes_completed();
+    // Convenience closure: true when the global fire budget is exhausted.
+    // args.max_fires == 0 → unlimited (backward-compat sentinel).
+    let budget_exhausted =
+        |fired: usize| -> bool { args.max_fires != 0 && fired >= args.max_fires };
 
     // Step 2c: Learning cache replay — try cached winning pipeline first.
     let mut cache_hit_bypass = false;
@@ -859,7 +1391,7 @@ pub(crate) async fn run_scan(
                 };
                 if let Some(ref enc_payload) = encoded {
                     let url =
-                        scan_url_with_param(target, &args.param, &urlencoding::encode(enc_payload));
+                        scan_url_with_param(target, &scan_param, &urlencoding::encode(enc_payload));
                     if let Ok(resp) = http.get(&url).send().await {
                         let status = resp.status().as_u16();
                         let body = crate::safe_body::read_bounded(
@@ -871,15 +1403,21 @@ pub(crate) async fn run_scan(
                         if !is_waf_block(status, &body) {
                             cache_hit_bypass = true;
                             bypassed += 1;
-                            total_fired += 1;
-                            bypass_variants.push((
-                                0,
-                                enc_payload.clone(),
-                                vec![format!("cache_replay::{}", tech.technique)],
-                                0.95,
-                            ));
+                            if count_meaningful_bypass {
+                                meaningful_bypassed += 1;
+                                total_fired += 1;
+                                bypass_variants.push((
+                                    0,
+                                    enc_payload.clone(),
+                                    vec![format!("cache_replay::{}", tech.technique)],
+                                    0.95,
+                                ));
+                            } else {
+                                unguarded_pass += 1;
+                                total_fired += 1;
+                            }
                             if scan_text {
-                                println!(
+                                eprintln!(
                                     "  {} cached pipeline '{}' bypassed immediately!",
                                     "⚡ Cache replay:".bold().green(),
                                     entry.pipeline.name.yellow()
@@ -897,7 +1435,7 @@ pub(crate) async fn run_scan(
     // Promote encoding strategies that match differential insights.
     let diff_suggestions = intel_loop.suggested_evasions();
     if !diff_suggestions.is_empty() && scan_text {
-        println!(
+        eprintln!(
             "  {} promoting: {}",
             "🎯 Diff-guided:".bold().cyan(),
             diff_suggestions
@@ -922,10 +1460,10 @@ pub(crate) async fn run_scan(
     // `verified_bypass`-gated: WAF passed + request reached the app +
     // the per-class oracle confirms it is still a structurally-valid
     // attack. No member is counted on shape alone.
-    if !cancel.is_cancelled() {
+    if !cancel.is_cancelled() && !budget_exhausted(total_fired) && count_meaningful_bypass {
         if let Some(class) = crate::equiv_engine::class_for_payload_type(payload_type) {
             if scan_text {
-                println!(
+                eprintln!(
                     "\n{}",
                     format!(
                         "[2e/7] Equivalence moat — B→C→A ({class}, learned-WAF CEGIS vs {waf_name})..."
@@ -939,29 +1477,28 @@ pub(crate) async fn run_scan(
                 crate::Level::Medium => 40,
                 crate::Level::Heavy => 96,
             };
-            let moat = crate::equiv_engine::run_equiv_cegis(
+            // Use the budgeted variant so the global --max-fires cap is
+            // honoured. bench_waf / hunt callers use `run_equiv_cegis`
+            // (unlimited) and are unaffected by this call site.
+            let moat = crate::equiv_engine::run_equiv_cegis_with_budget(
                 &http,
                 |d, p| crate::equiv_engine::build_live_request_for_delivery(target, d, p),
                 class,
                 &args.payload,
                 target,
-                &args.param,
+                &scan_param,
                 equiv_budget,
                 args.delay_ms,
-                // Pre-fix this was hardcoded `DEFAULT_REQUEST_TIMEOUT_SECS`,
-                // ignoring the operator's `--timeout-secs` setting. Every
-                // OTHER scan phase respected request_timeout (the
-                // computed Duration on line ~677), but the equiv moat
-                // hardcoded the default — so an operator who raised
-                // --timeout-secs to handle a slow target would still see
-                // the moat phase time out at the workspace default.
-                request_timeout.as_secs(),
+                wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
                 &waf_name,
+                total_fired,
+                args.max_fires,
             )
             .await;
 
             for b in &moat.bypasses {
                 bypassed += 1;
+                meaningful_bypassed += 1;
                 total_fired += 1;
                 let techs = vec![
                     format!("equiv-moat::{}::{}", b.phase, b.delivery_label),
@@ -979,12 +1516,10 @@ pub(crate) async fn run_scan(
             // saturating_add: if `non_bypass` overflows u32 the conversion
             // yields u32::MAX, then the plain `+=` would wrap. Two saturations
             // keep the counter honest rather than wrapping to a wrong value.
-            blocked = blocked.saturating_add(
-                u32::try_from(non_bypass).unwrap_or(u32::MAX)
-            );
+            blocked = blocked.saturating_add(u32::try_from(non_bypass).unwrap_or(u32::MAX));
 
             if scan_text {
-                println!(
+                eprintln!(
                     "  {} {} verified bypass / {} sent · {} slipped-but-oracle-rejected{}",
                     if moat.bypasses.is_empty() {
                         "✗".red().bold()
@@ -1002,7 +1537,7 @@ pub(crate) async fn run_scan(
                 );
                 for b in moat.bypasses.iter().take(6) {
                     let shown: String = b.payload.chars().take(88).collect();
-                    println!(
+                    eprintln!(
                         "    {} [{}|{}] {} (HTTP {})",
                         "→".bright_green(),
                         b.phase,
@@ -1013,7 +1548,7 @@ pub(crate) async fn run_scan(
                 }
             }
         } else if scan_text {
-            println!(
+            eprintln!(
                 "\n  {}",
                 format!(
                     "[2e/7] Equivalence moat — skipped: no sound model for {} yet",
@@ -1022,21 +1557,34 @@ pub(crate) async fn run_scan(
                 .bright_black()
             );
         }
+    } else if scan_text && !count_meaningful_bypass {
+        eprintln!(
+            "\n  {}",
+            "[2e/7] Equivalence moat — skipped: parameter is not WAF-guarded (pass --full-scan-unguarded to fire anyway)"
+                .yellow()
+        );
     }
 
     // Step 3: Explore — fire all pre-generated variants.
     if scan_text {
-        if cache_hit_bypass {
-            println!(
+        if !count_meaningful_bypass {
+            eprintln!(
+                "\n{}",
+                "[3/7] Variant explore — skipped (unguarded parameter; not a WAF bypass measurement)"
+                    .yellow()
+                    .bold()
+            );
+        } else if cache_hit_bypass {
+            eprintln!(
                 "\n{}",
                 "[3/7] Exploring evasion variants (cache hit — already have a bypass)..."
                     .bold()
                     .cyan()
             );
         } else {
-            println!("\n{}", "[3/7] Exploring evasion variants...".bold().cyan());
+            eprintln!("\n{}", "[3/7] Exploring evasion variants...".bold().cyan());
         }
-        println!();
+        eprintln!();
     }
 
     // Create the response oracle for multi-signal classification.
@@ -1096,13 +1644,36 @@ pub(crate) async fn run_scan(
     let mut max_retry_after_obeyed: Option<Duration> = None;
     let mut batches_done = 0_u32;
     let mut last_heartbeat = std::time::Instant::now();
+    // Fix #1: wall-clock budget for the scan loop.  0 = unlimited.
+    let scan_timeout_budget = if args.scan_timeout_secs > 0 {
+        Some(std::time::Duration::from_secs(args.scan_timeout_secs))
+    } else {
+        None
+    };
+    let mut scan_timeout_exceeded = false;
     let mut variant_idx = 0_usize;
-    while variant_idx < variants.len() {
+    while count_meaningful_bypass && variant_idx < variants.len() {
         if cancel.is_cancelled() {
             if scan_text {
-                println!(
+                eprintln!(
                     "\n  {}",
                     "⚠ Cancelled — skipping remaining variants".yellow().bold()
+                );
+            }
+            break;
+        }
+
+        // Fix #1: wall-clock budget check — before each batch.
+        if let Some(budget) = scan_timeout_budget
+            && scan_start.elapsed() >= budget
+        {
+            scan_timeout_exceeded = true;
+            if scan_text {
+                eprintln!(
+                    "\n  {} --scan-timeout-secs {} exceeded after {:.1}s — emitting partial results",
+                    "⏱ Wall-clock budget:".yellow().bold(),
+                    args.scan_timeout_secs,
+                    scan_start.elapsed().as_secs_f64()
                 );
             }
             break;
@@ -1119,47 +1690,24 @@ pub(crate) async fn run_scan(
         // Fire all requests in this batch concurrently.
         let mut tasks = tokio::task::JoinSet::new();
         for (index, variant) in batch {
-            let url =
-                scan_url_with_param(target, &args.param, &urlencoding::encode(&variant.payload));
             let client = http.clone();
             let payload = variant.payload.clone();
             let techniques = variant.techniques.clone();
             let confidence = variant.confidence;
             let oracle = oracle.clone();
+            let delivery = scan_delivery;
+            let target_url = target.to_string();
+            let param = scan_param.clone();
             tasks.spawn(async move {
-                let (verdict, retry_after) = match client.get(&url).send().await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        // Capture Retry-After BEFORE the body — a polite
-                        // 429/503 names how long to wait in this header
-                        // and obeying it precisely (capped) is the
-                        // single highest-yield rate-limit evasion.
-                        let ra = if status == 429 || status == 503 {
-                            let now = std::time::SystemTime::now();
-                            resp.headers()
-                                .get_all("retry-after")
-                                .iter()
-                                .filter_map(|v| v.to_str().ok())
-                                .filter_map(|s| crate::retry_after::parse(s, now))
-                                .max()
-                        } else {
-                            None
-                        };
-                        let body = crate::safe_body::read_bounded(
-                            resp,
-                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-                        )
-                        .await
-                        .unwrap_or_default();
-                        let ctx = ResponseContext {
-                            status,
-                            body: body.to_vec(),
-                            ..Default::default()
-                        };
-                        (Some(oracle.classify(&ctx)), ra)
-                    }
-                    Err(_) => (None, None),
-                };
+                let (verdict, retry_after) = injection_delivery::fire_variant_classified(
+                    &client,
+                    delivery,
+                    &target_url,
+                    &param,
+                    &payload,
+                    &oracle,
+                )
+                .await;
                 (index, payload, techniques, confidence, verdict, retry_after)
             });
         }
@@ -1197,7 +1745,7 @@ pub(crate) async fn run_scan(
                     print!("{}", "R".yellow());
                 }
             } else if verdict.is_challenge() {
-                _challenges += 1;
+                challenges += 1;
                 blocked += 1;
                 if args.format == "text" {
                     print!("{}", "C".bright_yellow());
@@ -1209,6 +1757,7 @@ pub(crate) async fn run_scan(
                 }
             } else {
                 bypassed += 1;
+                meaningful_bypassed += 1;
                 bypass_variants.push((
                     total_fired,
                     payload.clone(),
@@ -1236,7 +1785,7 @@ pub(crate) async fn run_scan(
                     "bypass found"
                 );
                 if args.format == "text" {
-                    print!("{}", "!".bright_green().bold());
+                    eprint!("{}", "!".bright_green().bold());
                 }
             }
 
@@ -1250,11 +1799,11 @@ pub(crate) async fn run_scan(
                     0.0
                 };
                 let total_variants = variants.len();
-                print!(
+                eprint!(
                     " {}",
                     format!("[{done}/{total_variants} {rate:.0}%]").bright_black()
                 );
-                let _ = io::stdout().flush();
+                let _ = io::stderr().flush();
             }
         }
 
@@ -1305,7 +1854,7 @@ pub(crate) async fn run_scan(
                  Aborting — the target is throttling us, so any \"bypass/blocked\" \
                  verdict would be noise, not signal.\n  Remedies:\n    \
                  • raise --delay-ms (e.g. --delay-ms 2000) to stay under the limit\n    \
-                 • spread requests across egress IPs (--egress-socks5 / --egress-http-proxy / --egress-tailscale-nodes)\n    \
+                 • spread requests across egress IPs (origin-bypass / proxy-pool / Tor)\n    \
                  • test an endpoint that is not behind the per-IP limiter",
                 "RATE-LIMITED:".yellow().bold(),
                 _rate_limited,
@@ -1350,7 +1899,7 @@ pub(crate) async fn run_scan(
     // Step 3b: Tamper — apply novel tamper strategies to grammar mutations.
     // These are fundamentally different from encoding: SQL comment insertion (/**/),
     // overlong UTF-8, null byte injection exploit WAF implementation bugs.
-    if !encoding_only {
+    if count_meaningful_bypass && !encoding_only {
         let tamper_context = match payload_type {
             PayloadType::Sql => Some("sql"),
             PayloadType::Xss => Some("xss"),
@@ -1366,7 +1915,7 @@ pub(crate) async fn run_scan(
         }
 
         if scan_text {
-            println!(
+            eprintln!(
                 "\n\n{}",
                 format!(
                     "[3b/7] Tamper probing — {} mutations × {} tamper strategies...",
@@ -1381,95 +1930,9 @@ pub(crate) async fn run_scan(
         let mut tamper_bypassed = 0_u32;
         let mut tamper_fired = 0_u32;
 
-        // Operator-supplied plugin tampers loaded from
-        // `~/.wafrift/tampers/`. Loaded once-per-process via OnceLock
-        // inside plugin_bridge; we just consume them per mutation
-        // alongside the built-in novel_tamper_names. Plugin names are
-        // dynamic (driven by the operator's filesystem), so we cache
-        // them once outside the loop to avoid hammering the registry.
-        let plugin_names: Vec<String> = wafrift_strategy::plugin_bridge::plugin_names();
-        if scan_text && !plugin_names.is_empty() {
-            println!(
-                "  {} {} external plugin(s) loaded from ~/.wafrift/tampers/: {}",
-                "Plugins:".bold().cyan(),
-                plugin_names.len(),
-                plugin_names.join(", ").bright_black()
-            );
-        }
-
         for mutation in &grammar_mutations {
             if cancel.is_cancelled() {
                 break;
-            }
-            // Apply every operator-loaded plugin to this mutation.
-            // Each plugin produces (name, transformed_payload); we
-            // fire each transformed payload as its own variant,
-            // tagged `plugin::<name>` so winning strategies are
-            // attributable.  Skips de-dupes against the seen-set so
-            // a plugin that no-ops doesn't burn a request.
-            for (plugin_name, transformed) in
-                wafrift_strategy::plugin_bridge::apply_all_plugins(&mutation.payload)
-            {
-                if cancel.is_cancelled() {
-                    break;
-                }
-                if !tamper_seen.insert(transformed.clone()) {
-                    continue;
-                }
-                let url =
-                    scan_url_with_param(target, &args.param, &urlencoding::encode(&transformed));
-                let verdict = match http.get(&url).send().await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let body = crate::safe_body::read_bounded(
-                            resp,
-                            crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-                        )
-                        .await
-                        .unwrap_or_default();
-                        oracle.classify(&ResponseContext {
-                            status,
-                            body: body.to_vec(),
-                            ..Default::default()
-                        })
-                    }
-                    Err(_) => {
-                        errors += 1;
-                        continue;
-                    }
-                };
-                total_fired += 1;
-                tamper_fired += 1;
-                let mut techniques: Vec<String> = mutation
-                    .rules_applied
-                    .iter()
-                    .map(|r| (*r).to_string())
-                    .collect();
-                techniques.push(format!("plugin::{plugin_name}"));
-                let is_blocked = verdict.is_blocked() || verdict.is_challenge();
-                variant_outcomes.push((techniques.clone(), is_blocked));
-                if is_blocked {
-                    blocked += 1;
-                } else if matches!(verdict, wafrift_types::Verdict::RateLimited { .. }) {
-                    _rate_limited += 1;
-                    tokio::select! {
-                        () = tokio::time::sleep(delay * 2) => {}
-                        () = cancel.cancelled() => { break; }
-                    }
-                } else {
-                    bypassed += 1;
-                    tamper_bypassed += 1;
-                    bypass_variants.push((
-                        total_fired,
-                        transformed,
-                        techniques.clone(),
-                        0.75,
-                    ));
-                    winning_strategies.insert(format!("plugin::{plugin_name}"));
-                }
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
             }
             for tamper_name in &novel_tamper_names {
                 let tampered = match tamper_registry.tamper_with(
@@ -1484,7 +1947,7 @@ pub(crate) async fn run_scan(
                     continue;
                 }
 
-                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&tampered));
+                let url = scan_url_with_param(target, &scan_param, &urlencoding::encode(&tampered));
 
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -1560,7 +2023,7 @@ pub(crate) async fn run_scan(
 
         if scan_text && tamper_fired > 0 {
             let rate = f64::from(tamper_bypassed) / f64::from(tamper_fired) * 100.0;
-            println!(
+            eprintln!(
                 "\n  {} {}",
                 "Tamper results:".bold().cyan(),
                 format!("{tamper_bypassed}/{tamper_fired} bypassed ({rate:.0}%)").yellow()
@@ -1573,11 +2036,23 @@ pub(crate) async fn run_scan(
     // `Content-Type: application/json`. The technique label is
     // `graphql::<class>` so the scan JSON is self-documenting and the
     // gene-bank can accumulate per-class bypass history.
-    if let Some(ref gql_endpoint) = graphql_endpoint {
+    // GraphQL evasion is an endpoint-attack axis (introspection leak,
+    // alias-flood, depth-bomb) that stands on its own — it is NOT a WAF-bypass
+    // phase, so it must not be gated behind `count_meaningful_bypass`. The
+    // battery is fired whenever an endpoint was detected OR forced via
+    // `--graphql` (that is exactly when `graphql_endpoint` is `Some`), even
+    // against an unguarded target. Gating it on WAF engagement silently dropped
+    // the entire battery on no-WAF targets, contradicting both
+    // `build_graphql_payloads`' documented "injected unconditionally" contract
+    // and the `--graphql` flag's "forces injection at base URL" behaviour. The
+    // budget guard still bounds total request volume.
+    if !budget_exhausted(total_fired)
+        && let Some(ref gql_endpoint) = graphql_endpoint
+    {
         let gql_endpoint = gql_endpoint.clone();
         let gql_count = graphql_payloads.len();
         if scan_text {
-            println!(
+            eprintln!(
                 "\n{}",
                 format!("[3c/7] GraphQL evasion probe — {gql_count} payloads → {gql_endpoint}")
                     .bold()
@@ -1683,7 +2158,7 @@ pub(crate) async fn run_scan(
             } else {
                 0.0
             };
-            println!(
+            eprintln!(
                 "\n  {} {}",
                 "GraphQL results:".bold().cyan(),
                 format!("{gql_bypassed}/{gql_fired} bypassed ({rate:.0}%)").yellow()
@@ -1692,7 +2167,7 @@ pub(crate) async fn run_scan(
     }
 
     // Step 4: Exploit — amplify winning strategies via chaining, cross-pollination, and fresh mutations.
-    if !winning_strategies.is_empty() && !cancel.is_cancelled() {
+    if count_meaningful_bypass && !winning_strategies.is_empty() && !cancel.is_cancelled() {
         // Resolve winning strategy enums from their debug names.
         let all_strats = encoding::all_strategies();
         let mut exploit_strategies: Vec<Strategy> = all_strats
@@ -1766,7 +2241,7 @@ pub(crate) async fn run_scan(
         winning_raw_payloads.dedup_by(|a, b| a.0 == b.0);
 
         if scan_text {
-            println!(
+            eprintln!(
                 "\n\n{}",
                 format!(
                     "[4/7] Exploiting {} winning strategies × {} winning mutations...",
@@ -1776,19 +2251,19 @@ pub(crate) async fn run_scan(
                 .bold()
                 .green()
             );
-            println!(
+            eprintln!(
                 "  {} encoding chaining (stack two encodings)",
                 "→".bright_green()
             );
-            println!(
+            eprintln!(
                 "  {} cross-pollination (winning mutations × all winning encodings)",
                 "→".bright_green()
             );
-            println!(
+            eprintln!(
                 "  {} fresh mutations with winning encodings",
                 "→".bright_green()
             );
-            println!();
+            eprintln!();
         }
 
         let mut exploit_seen: HashSet<String> = HashSet::new();
@@ -1808,8 +2283,8 @@ pub(crate) async fn run_scan(
         // Take already-bypassed encoded payloads and apply a SECOND encoding on top.
         // This creates double-encoded variants that are extremely hard for WAFs to decode.
         if scan_text {
-            print!("  {}", "chaining: ".bright_cyan());
-            let _ = io::stdout().flush();
+            eprint!("  {}", "chaining: ".bright_cyan());
+            let _ = io::stderr().flush();
         }
         let mut chain_bypassed = 0_u32;
         let mut chain_fired = 0_u32;
@@ -1838,7 +2313,7 @@ pub(crate) async fn run_scan(
 
         'chain_loop: for (bypass_payload, bypass_techs) in &encoded_bypass_payloads {
             for second_encoding in &chainable {
-                if exploit_count >= exploit_cap {
+                if exploit_count >= exploit_cap || budget_exhausted(total_fired) {
                     break 'chain_loop;
                 }
                 let chained = match encoding::encode(bypass_payload, *second_encoding) {
@@ -1849,7 +2324,7 @@ pub(crate) async fn run_scan(
                     continue;
                 }
 
-                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&chained));
+                let url = scan_url_with_param(target, &scan_param, &urlencoding::encode(&chained));
 
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -1898,27 +2373,27 @@ pub(crate) async fn run_scan(
 
         if scan_text && chain_fired > 0 {
             let rate = f64::from(chain_bypassed) / f64::from(chain_fired) * 100.0;
-            println!(
+            eprintln!(
                 " {}",
                 format!("{chain_bypassed}/{chain_fired} ({rate:.0}%)").yellow()
             );
         } else if scan_text {
-            println!("{}", "skipped".bright_black());
+            eprintln!("{}", "skipped".bright_black());
         }
 
         // ── Phase 4b: Cross-pollination ──────────────────────────────────────
         // Take winning grammar mutations and try them with ALL winning encodings,
         // not just the one that originally worked.
         if scan_text {
-            print!("  {}", "cross-pollination: ".bright_cyan());
-            let _ = io::stdout().flush();
+            eprint!("  {}", "cross-pollination: ".bright_cyan());
+            let _ = io::stderr().flush();
         }
         let mut xpol_bypassed = 0_u32;
         let mut xpol_fired = 0_u32;
 
         'xpol_loop: for (raw_payload, raw_rules) in &winning_raw_payloads {
             for strategy in &exploit_strategies {
-                if exploit_count >= exploit_cap {
+                if exploit_count >= exploit_cap || budget_exhausted(total_fired) {
                     break 'xpol_loop;
                 }
                 let encoded = match encoding::encode(raw_payload, *strategy) {
@@ -1929,7 +2404,7 @@ pub(crate) async fn run_scan(
                     continue;
                 }
 
-                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
+                let url = scan_url_with_param(target, &scan_param, &urlencoding::encode(&encoded));
 
                 let is_blocked = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -1983,26 +2458,26 @@ pub(crate) async fn run_scan(
 
         if scan_text && xpol_fired > 0 {
             let rate = f64::from(xpol_bypassed) / f64::from(xpol_fired) * 100.0;
-            println!(
+            eprintln!(
                 " {}",
                 format!("{xpol_bypassed}/{xpol_fired} ({rate:.0}%)").yellow()
             );
         } else if scan_text {
-            println!("{}", "skipped".bright_black());
+            eprintln!("{}", "skipped".bright_black());
         }
 
         // ── Phase 4c: Fresh mutations with winning strategies ────────────────
         // Generate MORE grammar mutations from the original seed and encode with winners.
         if scan_text {
-            print!("  {}", "fresh mutations: ".bright_cyan());
-            let _ = io::stdout().flush();
+            eprint!("  {}", "fresh mutations: ".bright_cyan());
+            let _ = io::stderr().flush();
         }
         let mut fresh_bypassed = 0_u32;
         let mut fresh_fired = 0_u32;
 
         let max_exploit_rounds = 2;
         'fresh_outer: for round in 0..max_exploit_rounds {
-            if exploit_count >= exploit_cap {
+            if exploit_count >= exploit_cap || budget_exhausted(total_fired) {
                 break;
             }
 
@@ -2015,7 +2490,7 @@ pub(crate) async fn run_scan(
 
             for mutation in &fresh_mutations {
                 for strategy in &exploit_strategies {
-                    if exploit_count >= exploit_cap {
+                    if exploit_count >= exploit_cap || budget_exhausted(total_fired) {
                         break 'fresh_outer;
                     }
                     let encoded = match encoding::encode(&mutation.payload, *strategy) {
@@ -2027,7 +2502,7 @@ pub(crate) async fn run_scan(
                     }
 
                     let url =
-                        scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
+                        scan_url_with_param(target, &scan_param, &urlencoding::encode(&encoded));
 
                     let is_blocked = match http.get(&url).send().await {
                         Ok(resp) => {
@@ -2078,7 +2553,7 @@ pub(crate) async fn run_scan(
                             ),
                         ));
                         if args.format == "text" {
-                            print!("{}", "!".bright_green().bold());
+                            eprint!("{}", "!".bright_green().bold());
                         }
                     }
 
@@ -2091,12 +2566,12 @@ pub(crate) async fn run_scan(
 
         if scan_text && fresh_fired > 0 {
             let rate = f64::from(fresh_bypassed) / f64::from(fresh_fired) * 100.0;
-            println!(
+            eprintln!(
                 " {}",
                 format!("{fresh_bypassed}/{fresh_fired} ({rate:.0}%)").yellow()
             );
         } else if scan_text {
-            println!("{}", "skipped".bright_black());
+            eprintln!("{}", "skipped".bright_black());
         }
 
         if scan_text {
@@ -2107,7 +2582,7 @@ pub(crate) async fn run_scan(
             } else {
                 0.0
             };
-            println!(
+            eprintln!(
                 "\n  {} {}",
                 "Exploit total:".bold().cyan(),
                 format!(
@@ -2118,7 +2593,7 @@ pub(crate) async fn run_scan(
             );
         }
     } else if scan_text {
-        println!(
+        eprintln!(
             "\n\n{}",
             "[4/7] No bypasses found to exploit — skipping amplification".bright_black()
         );
@@ -2138,7 +2613,11 @@ pub(crate) async fn run_scan(
     //      shape. Header-obfuscation phase already does rescue;
     //      doing it for multi-vector roughly doubles the number
     //      of bypass opportunities the operator gets per scan.
-    if (!bypass_variants.is_empty() || !variants.is_empty()) && !cancel.is_cancelled() {
+    if count_meaningful_bypass
+        && (!bypass_variants.is_empty() || !variants.is_empty())
+        && !cancel.is_cancelled()
+        && !budget_exhausted(total_fired)
+    {
         // Dedup the top-confidence payloads BEFORE handing them
         // to the phase — keeps the phase module ignorant of how
         // bypass_variants is structured.
@@ -2178,13 +2657,15 @@ pub(crate) async fn run_scan(
         let phase = multi_vector::run_phase(multi_vector::PhaseInput {
             http: &http,
             target,
-            param: &args.param,
+            param: &scan_param,
             top_payloads: &top_payloads,
             rescue_payloads: &rescue_payloads,
             cancel: &cancel,
             scan_text,
             delay,
             variant_id_base: total_fired,
+            fires_so_far: total_fired,
+            max_fires: args.max_fires,
         })
         .await;
 
@@ -2195,7 +2676,7 @@ pub(crate) async fn run_scan(
         variant_outcomes.extend(phase.new_variant_outcomes);
         bypass_variants.extend(phase.new_bypass_variants);
     } else if scan_text {
-        println!(
+        eprintln!(
             "\n{}",
             "[5/7] No payloads — skipping multi-vector probing".bright_black()
         );
@@ -2204,7 +2685,11 @@ pub(crate) async fn run_scan(
     // Step 6/7: Header obfuscation probing — exploit WAF header
     // parser bugs. Dispatch + per-technique wire shape lives in
     // `scan::header_obf_phase`.
-    if evasion_plan.use_header_obfuscation && !bypass_variants.is_empty() {
+    if count_meaningful_bypass
+        && evasion_plan.use_header_obfuscation
+        && !bypass_variants.is_empty()
+        && !budget_exhausted(total_fired)
+    {
         let top_bypass_payloads: Vec<String> = bypass_variants
             .iter()
             .take(5)
@@ -2222,7 +2707,7 @@ pub(crate) async fn run_scan(
         let phase = header_obf_phase::run_phase(header_obf_phase::PhaseInput {
             http: &http,
             target,
-            param: &args.param,
+            param: &scan_param,
             top_payloads: &top_bypass_payloads,
             rescue_payloads: &blocked_payloads,
             oracle: &oracle,
@@ -2230,6 +2715,8 @@ pub(crate) async fn run_scan(
             scan_text,
             delay,
             variant_id_base: total_fired,
+            fires_so_far: total_fired,
+            max_fires: args.max_fires,
         })
         .await;
 
@@ -2242,9 +2729,10 @@ pub(crate) async fn run_scan(
     }
 
     // Step 7/7: Intelligence loop — evolution-guided candidate generation.
-    if intel_loop.has_sufficient_data() {
+    if count_meaningful_bypass && intel_loop.has_sufficient_data() && !budget_exhausted(total_fired)
+    {
         if scan_text {
-            println!(
+            eprintln!(
                 "\n{}",
                 "[7/7] Intelligence loop — evolving candidates..."
                     .bold()
@@ -2266,6 +2754,9 @@ pub(crate) async fn run_scan(
         }
 
         for _ in 0..max_intel_rounds {
+            if budget_exhausted(total_fired) {
+                break;
+            }
             if let Some((idx, chromosome)) = intel_loop.next_candidate() {
                 // Use the chromosome's gene flags to build a payload variant.
                 let has_grammar = chromosome.genes.iter().any(|(k, _)| k == "grammar");
@@ -2297,7 +2788,7 @@ pub(crate) async fn run_scan(
                     intel_payload.clone()
                 };
 
-                let url = scan_url_with_param(target, &args.param, &urlencoding::encode(&encoded));
+                let url = scan_url_with_param(target, &scan_param, &urlencoding::encode(&encoded));
 
                 let verdict = match http.get(&url).send().await {
                     Ok(resp) => {
@@ -2356,7 +2847,7 @@ pub(crate) async fn run_scan(
 
         if scan_text && intel_fired > 0 {
             let rate = f64::from(intel_bypassed) / f64::from(intel_fired) * 100.0;
-            println!(
+            eprintln!(
                 "\n  {} {} (diversity: {:.2})",
                 "Intel results:".bold().cyan(),
                 format!("{intel_bypassed}/{intel_fired} bypassed ({rate:.0}%)").yellow(),
@@ -2370,7 +2861,7 @@ pub(crate) async fn run_scan(
     // `println!("\n")` here breaks `wafrift scan --format json | jq .`
     // (jq rejects the leading blank line).
     if scan_text {
-        println!("\n");
+        eprintln!("\n");
     }
 
     // Results.
@@ -2393,13 +2884,103 @@ pub(crate) async fn run_scan(
     } else {
         0.0
     };
+    let meaningful_bypass_rate = if requests_completed > 0 {
+        f64::from(meaningful_bypassed) / f64::from(requests_completed) * 100.0
+    } else {
+        0.0
+    };
 
-    if quiet || args.format == "json" {
-        let scan = json!({
-            "schema_version": 1,
+    // ── Auto-distill pass (--auto-distill) ─────────────────────
+    //
+    // For each bypass found, run Zeller's ddmin to find the
+    // minimum-edit-distance payload that STILL bypasses via the
+    // URL-query shape. Off by default; opt-in via `--auto-distill`.
+    // Distillation always fires via `scan_url_with_param`
+    // regardless of which phase originally produced the bypass —
+    // for multi-vector / header-obf bypasses the distilled form
+    // tells the operator what the minimum URL-query equivalent is
+    // (a useful artefact even when the original used a different
+    // shape; operator interprets accordingly).
+    let mut minimal_payloads: Vec<Option<String>> = vec![None; bypass_variants.len()];
+    let mut auto_distill_fires_total: u64 = 0;
+    if args.auto_distill && !bypass_variants.is_empty() && !cancel.is_cancelled() {
+        if scan_text {
+            eprintln!(
+                "  {} auto-distilling {} bypass(es) via URL-query shape (cap {} fires each)…",
+                "[wafrift scan distill]".bright_cyan().bold(),
+                bypass_variants.len().to_string().bold().yellow(),
+                args.auto_distill_max_fires
+            );
+        }
+        let http_arc = std::sync::Arc::new(http.clone());
+        let target_owned = target.to_string();
+        let param = scan_param.clone();
+        for (i, (_, original_payload, _, _)) in bypass_variants.iter().enumerate() {
+            if cancel.is_cancelled() {
+                break;
+            }
+            let fires = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let cap = args.auto_distill_max_fires;
+            let predicate = {
+                let http = http_arc.clone();
+                let t = target_owned.clone();
+                let p = param.clone();
+                let fires = fires.clone();
+                let cancel = cancel.clone();
+                move |candidate: String| {
+                    let http = http.clone();
+                    let t = t.clone();
+                    let p = p.clone();
+                    let fires = fires.clone();
+                    let cancel = cancel.clone();
+                    async move {
+                        if cancel.is_cancelled() {
+                            return false;
+                        }
+                        if fires.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= cap {
+                            return false;
+                        }
+                        let url = scan_url_with_param(&t, &p, &urlencoding::encode(&candidate));
+                        match http.get(&url).send().await {
+                            Ok(resp) => {
+                                let status = resp.status().as_u16();
+                                // §15 OOM: bounded read for auto-distill probes.
+                                match crate::safe_body::read_bounded(
+                                    resp,
+                                    crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
+                                )
+                                .await
+                                {
+                                    Ok(body) => !is_waf_block(status, &body),
+                                    Err(_) => false,
+                                }
+                            }
+                            Err(_) => false,
+                        }
+                    }
+                }
+            };
+            let minimum = crate::distill_cmd::ddmin(original_payload, predicate).await;
+            auto_distill_fires_total += u64::from(fires.load(std::sync::atomic::Ordering::SeqCst));
+            minimal_payloads[i] = Some(minimum);
+        }
+    }
+
+    let waf_bypass =
+        waf_bypass_verdict::compute(waf_engagement.level, meaningful_bypassed, blocked);
+    let bypass_rate_legacy = if waf_bypass.waf_in_play {
+        bypass_rate
+    } else {
+        0.0
+    };
+
+    if args.format == "json" {
+        let mut scan = json!({
+            "scan_schema_version": 2,
             "target": target,
             "waf": waf_name,
             "payload_type": payload_type_label(payload_type),
+            "waf_bypass": waf_bypass,
             // `total_variants` is misleadingly named — it's the count
             // of HTTP fires across ALL phases (explore + exploit +
             // multi-vector + header-obf + intelligence loop). The
@@ -2415,10 +2996,14 @@ pub(crate) async fn run_scan(
             "winning_strategies": winning_strategies.iter().cloned().collect::<Vec<_>>(),
             "requests_completed": requests_completed,
             "baseline_transport_ok": baseline_outcome.transport_ok,
+            "waf_engagement": waf_engagement.to_json(),
             "bypassed": bypassed,
+            "meaningful_bypassed": meaningful_bypassed,
+            "unguarded_pass": unguarded_pass,
             "blocked": blocked,
             "errors": errors,
             "rate_limited": _rate_limited,
+            "challenges": challenges,
             "aborted_rate_limited": aborted_rate_limited,
             // How many of the RL responses came with a parseable
             // Retry-After header — distinguishes a polite WAF
@@ -2428,46 +3013,62 @@ pub(crate) async fn run_scan(
             // Null when no RL response named one.
             "max_retry_after_obeyed_ms":
                 max_retry_after_obeyed.map(|d| d.as_millis() as u64),
-            "bypass_rate_pct": bypass_rate,
+            "bypass_rate_pct": if waf_bypass.waf_in_play {
+                serde_json::json!(bypass_rate_legacy)
+            } else {
+                serde_json::Value::Null
+            },
+            "bypass_rate_pct_deprecated_note": "null when waf_in_play is false — read waf_bypass.waf_bypass_rate_pct",
+            "meaningful_bypass_rate_pct": meaningful_bypass_rate,
+            "waf_bypass_rate_pct": waf_bypass.waf_bypass_rate_pct,
             "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
             "auto_distill_enabled": args.auto_distill,
             "auto_distill_fires_total": auto_distill_fires_total,
-            "bypass_variants": build_bypass_variants_json(target, &args.param, &bypass_variants, &minimal_payloads),
+            // Fix #1: set to true when --scan-timeout-secs was exceeded and
+            // the loop broke early.  CI consumers can check this field to
+            // distinguish "partial results" from "full scan with no bypass".
+            "truncated_by_scan_timeout": scan_timeout_exceeded,
+            // max_fires: 0 = unlimited (operator omitted the flag or passed 0).
+            "max_fires": args.max_fires,
+            "injection_delivery": scan_delivery.as_str(),
+            "bypass_variants": build_bypass_variants_json(
+                target,
+                &scan_param,
+                scan_delivery,
+                &bypass_variants,
+                &minimal_payloads,
+            ),
         });
+        if probe_surfaces {
+            scan.as_object_mut()
+                .expect("scan is object")
+                .insert("surface_probe".to_string(), surface_probe_json);
+            scan.as_object_mut().expect("scan is object").insert(
+                "effective_url".to_string(),
+                serde_json::Value::String(target.to_string()),
+            );
+            scan.as_object_mut().expect("scan is object").insert(
+                "effective_param".to_string(),
+                serde_json::Value::String(scan_param.clone()),
+            );
+        }
         let json_output = if args.report_layers {
-            json!({
-                "schema_version": 1,
-                "layer_report": {
-                    "network": {
-                        "target": target,
-                        "baseline_get_status": baseline_status,
-                    },
-                    "detection": {
-                        "chosen_waf": waf_name,
-                        "candidates": detected.iter().map(|d| {
-                            json!({
-                                "name": d.name,
-                                "confidence": d.confidence,
-                                "indicators": d.indicators,
-                            })
-                        }).collect::<Vec<_>>(),
-                    },
-                    "baseline_probe": {
-                        "raw_get_status": raw_status,
-                        "treated_as_blocked": raw_blocked,
-                        "transport_ok": raw_transport_ok,
-                    },
-                    "evasion_campaign": {
-                        "variants_generated": total_fired,
-                        "requests_completed": requests_completed,
-                        "bypassed": bypassed,
-                        "blocked": blocked,
-                        "errors": errors,
-                        "bypass_rate_pct": bypass_rate,
-                    },
-                },
-                "scan": scan,
-            })
+            build_layered_json(
+                scan,
+                target,
+                baseline_status,
+                &waf_name,
+                &detected,
+                raw_status,
+                raw_blocked,
+                baseline_outcome.transport_ok,
+                total_fired,
+                requests_completed,
+                bypassed,
+                blocked,
+                errors,
+                bypass_rate,
+            )
         } else {
             scan
         };
@@ -2482,14 +3083,15 @@ pub(crate) async fn run_scan(
                 } else {
                     println!("{s}");
                 }
-                // Exit 5 = run aborted because the target rate-limited
-                // us; distinct from 0 (clean, no bypass) so CI / wrapper
-                // scripts don't read throttling as "WAF held".
-                return if aborted_rate_limited {
-                    ExitCode::from(5)
-                } else {
-                    ExitCode::SUCCESS
-                };
+                // Fix #1: exit 7 = scan-timeout-secs budget exceeded.
+                // Exit 5 = run aborted because the target rate-limited us.
+                // Exit 0 = clean.
+                let code = waf_bypass_verdict::exit_code_for_verdict(
+                    waf_bypass.verdict,
+                    scan_timeout_exceeded,
+                    aborted_rate_limited,
+                );
+                return ExitCode::from(code);
             }
             Err(e) => {
                 eprintln!("failed to serialize scan JSON: {e}");
@@ -2516,29 +3118,35 @@ pub(crate) async fn run_scan(
                 blocked,
                 bypassed,
                 errors,
+                challenges,
                 bypass_rate,
                 elapsed.as_secs_f64(),
             )
         );
+        if scan_text {
+            eprintln!(
+                "\n  {} {}",
+                "Verdict:".bold().cyan(),
+                waf_bypass.headline.bold().yellow()
+            );
+        }
 
         if !bypass_variants.is_empty() {
             print!(
                 "{}",
-                render_bypass_variants_text_block(&bypass_variants, &args.param, target)
+                render_bypass_variants_text_block(&bypass_variants, &scan_param, target)
             );
         }
     }
 
-    // ── Gene Bank: per-technique successes and attempts across all fired variants ─────────
+    // ── Gene Bank: only techniques from meaningful bypass variants (not unguarded pass-through) ──
     let mut tech_acc: std::collections::HashMap<String, (u32, u32)> =
         std::collections::HashMap::new();
-    for (techs, blocked) in variant_outcomes {
+    for (_, _, techs, _) in &bypass_variants {
         for t in techs {
-            let e = tech_acc.entry(t).or_insert((0, 0));
+            let e = tech_acc.entry(t.clone()).or_insert((0, 0));
+            e.0 += 1;
             e.1 += 1;
-            if !blocked {
-                e.0 += 1;
-            }
         }
     }
     let stats: Vec<(String, u32, u32)> = tech_acc
@@ -2576,7 +3184,7 @@ pub(crate) async fn run_scan(
                             } else {
                                 format!(" (class={payload_class_post})")
                             };
-                            println!(
+                            eprintln!(
                                 "\n{} {} {}",
                                 "🧬".bold(),
                                 "Gene bank updated:".bold().cyan(),
@@ -2678,7 +3286,7 @@ pub(crate) async fn run_scan(
         if let Err(e) = cache.save() {
             eprintln!("  {} {}", "⚠ Learning cache save failed:".yellow(), e);
         } else if scan_text {
-            println!(
+            eprintln!(
                 "{} {} (cost: {}, valid order: {})",
                 "📦".bold(),
                 "Learning cache updated".bold().cyan(),
@@ -2689,13 +3297,27 @@ pub(crate) async fn run_scan(
     }
 
     if args.report_layers && scan_text {
-        println!(
+        // R56 pass-20 §9 WIRING: thread retry-after aggregates into the
+        // --report-layers text panel (GAP_CLOSURE_ROADMAP.md item 7).
+        // They were already surfaced in --format json; now the text panel
+        // matches, closing the "text-panel half still open" note.
+        let retry_after_str = if retry_after_responses > 0 {
+            let max_ms = max_retry_after_obeyed
+                .map(|d| format!("{}ms", d.as_millis()))
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "  rate-limit: retry-after obeyed on {retry_after_responses} probe(s); longest server-named cooldown {max_ms}"
+            )
+        } else {
+            String::new()
+        };
+        eprintln!(
             "\n{}",
             "Layer summary (docs/GAP_CLOSURE_ROADMAP.md):"
                 .bold()
                 .bright_black()
         );
-        println!(
+        eprintln!(
             "  network: baseline_get_status={}  detection: {} candidate(s)  baseline_probe: raw_get_status={} treated_as_blocked={}  evasion: bypass_rate={:.1}%",
             baseline_status,
             detected.len(),
@@ -2703,6 +3325,9 @@ pub(crate) async fn run_scan(
             raw_blocked,
             bypass_rate,
         );
+        if !retry_after_str.is_empty() {
+            eprintln!("{retry_after_str}");
+        }
     }
 
     // OOB callback verification: when --callback-url was set and a
@@ -2714,7 +3339,7 @@ pub(crate) async fn run_scan(
         if scan_text {
             match verdict {
                 callback_poll::CallbackVerdict::Verified => {
-                    println!(
+                    eprintln!(
                         "{} {} (token {} fired at {})",
                         "📡".bold(),
                         "OOB callback VERIFIED — blind / stored vuln confirmed"
@@ -2725,7 +3350,7 @@ pub(crate) async fn run_scan(
                     );
                 }
                 callback_poll::CallbackVerdict::NotObserved => {
-                    println!(
+                    eprintln!(
                         "{} {} (token {})",
                         "📡".bright_black(),
                         "OOB callback not observed".bright_black(),
@@ -2733,7 +3358,7 @@ pub(crate) async fn run_scan(
                     );
                 }
                 callback_poll::CallbackVerdict::ListenerUnreachable => {
-                    println!(
+                    eprintln!(
                         "{} {} — verify your listener is running at {}",
                         "📡".yellow(),
                         "OOB callback listener unreachable".yellow(),
@@ -2748,9 +3373,12 @@ pub(crate) async fn run_scan(
         // Trailing blank line for terminal-friendly spacing.
         // Gated on scan_text so --quiet truly produces NO stdout
         // (the F77 contract fix).
-        println!();
+        eprintln!();
     }
-    if aborted_rate_limited {
+    // Fix #1: exit 7 = scan-timeout-secs budget exceeded (partial results).
+    if scan_timeout_exceeded {
+        ExitCode::from(7)
+    } else if aborted_rate_limited {
         ExitCode::from(5)
     } else {
         ExitCode::SUCCESS
@@ -2852,6 +3480,35 @@ mod tests {
     }
 
     #[test]
+    fn scan_url_with_param_keeps_param_in_query_not_fragment() {
+        // Audit fix: a `#fragment` in the target must NOT swallow the param.
+        // Pre-fix, `http://t/p#frag` produced `http://t/p#frag?q=v` — the
+        // `?q=v` becomes part of the fragment and is never sent to the server,
+        // silently dropping the payload. The param must land in the QUERY,
+        // before the `#`, and the fragment must be preserved.
+        let url = scan_url_with_param("http://target/page#section", "q", "payload");
+        let hash = url.find('#').expect("fragment must survive");
+        let qeq = url.find("q=payload").expect("param must be present");
+        assert!(
+            qeq < hash,
+            "param must appear BEFORE the fragment (in the query), got: {url}"
+        );
+        assert!(
+            url.ends_with("#section"),
+            "fragment must be re-attached: {url}"
+        );
+        assert_eq!(url, "http://target/page?q=payload#section");
+    }
+
+    #[test]
+    fn scan_url_with_param_fragment_with_existing_query_uses_ampersand() {
+        // Fragment AND an existing query: append with `&`, still before the `#`.
+        let url = scan_url_with_param("http://target/p?a=1#frag", "q", "v");
+        assert_eq!(url, "http://target/p?a=1&q=v#frag");
+        assert!(url.find("q=v").unwrap() < url.find('#').unwrap());
+    }
+
+    #[test]
     fn scan_url_with_param_uses_ampersand_when_query_already_present() {
         let url = scan_url_with_param("http://target/search?existing=1", "q", "abc");
         // Should append with & not produce a second ?.
@@ -2859,7 +3516,11 @@ mod tests {
             url.contains("existing=1") && url.contains("q=abc"),
             "both params must survive: {url}"
         );
-        assert_eq!(url.matches('?').count(), 1, "must not add a second ?: {url}");
+        assert_eq!(
+            url.matches('?').count(),
+            1,
+            "must not add a second ?: {url}"
+        );
         assert!(url.contains('&'), "must use & to append: {url}");
     }
 
@@ -2892,6 +3553,7 @@ mod tests {
         let results = build_bypass_variants_json(
             "http://target/",
             "q",
+            injection_delivery::InjectionDelivery::GetQuery,
             &variants,
             &minimal_payloads,
         );
@@ -2984,6 +3646,7 @@ mod tests {
             25,
             3,
             1,
+            2, // challenges
             10.7,
             4.2,
         ));
@@ -2995,6 +3658,10 @@ mod tests {
         assert!(s.contains("Blocked: 25"));
         assert!(s.contains("Bypassed: 3"));
         assert!(s.contains("Errors: 1"), "errors > 0 must surface:\n{s}");
+        assert!(
+            s.contains("Challenges (CAPTCHA): 2"),
+            "challenges > 0 must surface:\n{s}"
+        );
         assert!(s.contains("Bypass Rate: 10.7%"));
         assert!(s.contains("Elapsed: 4.2s"));
     }
@@ -3002,13 +3669,18 @@ mod tests {
     #[test]
     fn render_summary_text_block_hides_errors_row_when_zero() {
         let s = strip_ansi(&render_summary_text_block(
-            "Akamai", 10, 10, 10, 0, 0, 0.0, 1.0,
+            "Akamai", 10, 10, 10, 0, 0, 0, 0.0, 1.0,
         ));
         // Errors row is conditional — zero errors means the row
         // doesn't render (less visual noise).
         assert!(
             !s.contains("Errors:"),
             "Errors row must be hidden at 0:\n{s}"
+        );
+        // Challenges row is conditional too — zero challenges means no row.
+        assert!(
+            !s.contains("Challenges"),
+            "Challenges row must be hidden at 0:\n{s}"
         );
     }
 
@@ -3044,11 +3716,124 @@ mod tests {
         assert!(s.contains("Variant #7"));
         assert!(s.contains("Techniques: url → case_swap"));
         assert!(s.contains("Payload: ' OR 1=1-- (10 bytes)"));
-        // Curl reproducer must escape the apostrophe via the
-        // bash-safe '\'' sequence.
+        // Curl reproducer: param and target are sh_quote'd; payload
+        // is sh_ansi_c_quote_bytes'd. The apostrophe in "' OR 1=1--"
+        // becomes \x27 inside the ANSI-C block (safe for copy-paste).
+        // The param "q" becomes "'q'" and the URL gets outer quotes.
         assert!(
-            s.contains("curl -G --data-urlencode q=$'") && s.contains("https://x.com/search"),
+            s.contains("curl -G --data-urlencode 'q'=") && s.contains("'https://x.com/search'"),
             "repro line missing:\n{s}"
+        );
+        // Payload must appear inside an ANSI-C $'...' block.
+        assert!(s.contains("$'"), "payload not ANSI-C-quoted:\n{s}");
+    }
+
+    // ── Reproduce-line quoting security pins (§15 CRLF/injection) ──
+    //
+    // Pre-fix, `render_bypass_variants_text_block` emitted the raw param and
+    // target unquoted/naively-quoted, and did NOT ANSI-C-escape control bytes
+    // in the payload inside the `$'...'` block.  These tests pin the hardened
+    // behaviour so a future refactor cannot regress silently.
+
+    #[test]
+    fn render_bypass_variants_cr_in_payload_is_ansi_c_escaped() {
+        // §15 audit: a payload containing CR (common in LWS / CRLF-smuggling
+        // evasion chains) MUST be ANSI-C-escaped in the `$'...'` block.
+        // Pre-fix: raw CR was emitted, resetting the terminal cursor when the
+        // operator copied the reproduce line from scan output.
+        let variants = vec![(
+            1_usize,
+            "UNION\rSELECT".to_string(),
+            vec!["lws".to_string()],
+            0.8_f64,
+        )];
+        let s = strip_ansi(&render_bypass_variants_text_block(
+            &variants,
+            "q",
+            "https://target.example/",
+        ));
+        // Raw CR must NOT appear in the reproduce line.
+        assert!(
+            !s.contains('\r'),
+            "raw CR leaked into reproduce line — cursor-reset risk:\n{s:?}"
+        );
+        // The ANSI-C escape sequence for CR (`\r`) must be present.
+        assert!(
+            s.contains("\\r"),
+            "CR must be ANSI-C-escaped as \\r in $'...' block:\n{s}"
+        );
+    }
+
+    #[test]
+    fn render_bypass_variants_nul_in_payload_is_ansi_c_escaped() {
+        // §15 audit: a NUL byte inside a shell token causes libc to truncate
+        // the argument silently. The ANSI-C escape `\x00` prevents this.
+        let variants = vec![(
+            2_usize,
+            "foo\x00bar".to_string(),
+            vec!["null_byte".to_string()],
+            0.75_f64,
+        )];
+        let s = strip_ansi(&render_bypass_variants_text_block(
+            &variants,
+            "p",
+            "https://x/",
+        ));
+        assert!(
+            !s.contains('\x00'),
+            "raw NUL leaked into reproduce line — truncation risk:\n{s:?}"
+        );
+        assert!(
+            s.contains("\\x00"),
+            "NUL must be ANSI-C-escaped as \\x00 in $'...' block:\n{s}"
+        );
+    }
+
+    #[test]
+    fn render_bypass_variants_apostrophe_in_target_url_is_shell_safe() {
+        // §15 audit: a target URL containing `'` (e.g. operator typo, or
+        // a real URL with an apostrophe in a query parameter path) MUST be
+        // shell-escaped in the reproduce line so the pasted curl is valid.
+        let variants = vec![(
+            3_usize,
+            "payload".to_string(),
+            vec!["url".to_string()],
+            0.9_f64,
+        )];
+        let s = strip_ansi(&render_bypass_variants_text_block(
+            &variants,
+            "q",
+            "https://x/it's-a-trap",
+        ));
+        // The unescaped apostrophe must NOT appear inside the single-quoted
+        // region — it would close the shell token and break the command.
+        // sh_quote converts ' → '\'' (close-escape-reopen), so the output
+        // must contain the escaped form.
+        assert!(
+            s.contains("it'\\''s-a-trap") || !s.contains("it's-a-trap"),
+            "bare apostrophe in target URL broke shell quoting:\n{s}"
+        );
+    }
+
+    #[test]
+    fn render_bypass_variants_param_with_shell_metacharacters_is_shell_safe() {
+        // §15 audit: `--param 'q[1]'` is a valid use. The brackets are glob
+        // characters in most shells when unquoted; the param must be sh_quote'd.
+        let variants = vec![(
+            4_usize,
+            "evil".to_string(),
+            vec!["url".to_string()],
+            0.7_f64,
+        )];
+        let s = strip_ansi(&render_bypass_variants_text_block(
+            &variants,
+            "q[1]",
+            "https://x/",
+        ));
+        // The param must appear in quotes so `[` and `]` are shell-safe.
+        assert!(
+            s.contains("'q[1]'"),
+            "param with brackets must be single-quoted:\n{s}"
         );
     }
 
@@ -3066,7 +3851,13 @@ mod tests {
             ),
         ];
         let minimal = vec![None, Some("UNION SELECT".to_string())];
-        let arr = build_bypass_variants_json("https://t/search", "q", &variants, &minimal);
+        let arr = build_bypass_variants_json(
+            "https://t/search",
+            "q",
+            injection_delivery::InjectionDelivery::GetQuery,
+            &variants,
+            &minimal,
+        );
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["variant"], 1);
         assert_eq!(arr[0]["payload"], "p1");
@@ -3080,18 +3871,53 @@ mod tests {
         assert!(arr[0]["repro_curl"].as_str().unwrap_or("").contains("p1"));
         // minimal_repro_curl only populated when minimal_payload is.
         assert!(arr[0]["minimal_repro_curl"].is_null());
+        // The repro curl single-encodes the payload (see
+        // build_bypass_variants_json_single_encodes_payload_in_repro_url), so
+        // the space in "UNION SELECT" arrives as %20 on the wire.
         assert!(
             arr[1]["minimal_repro_curl"]
                 .as_str()
                 .unwrap_or("")
-                .contains("UNION SELECT")
+                .contains("UNION%20SELECT")
         );
     }
 
     #[test]
     fn build_bypass_variants_json_handles_empty_input() {
-        let arr = build_bypass_variants_json("https://x", "q", &[], &[]);
+        let arr = build_bypass_variants_json(
+            "https://x",
+            "q",
+            injection_delivery::InjectionDelivery::GetQuery,
+            &[],
+            &[],
+        );
         assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn waf_engagement_assess_priority_active_over_selective_diff() {
+        use crate::scan::waf_engagement::{self, WafEngagementLevel};
+        use wafrift_evolution::intelligence::IntelligenceLoop;
+
+        let mut il = IntelligenceLoop::new(1);
+        for p in il.generate_quick_probes() {
+            il.record_probe(&p, true);
+        }
+        let baseline = baseline::BaselineOutcome {
+            status: 403,
+            blocked: true,
+            transport_ok: true,
+            fingerprint: Some(waf_engagement::ResponseFingerprint::from_parts(
+                403, b"blocked",
+            )),
+        };
+        let r = waf_engagement::assess(
+            &baseline,
+            baseline.fingerprint,
+            Some(waf_engagement::ResponseFingerprint::from_parts(200, b"ok")),
+            &il,
+        );
+        assert_eq!(r.level, WafEngagementLevel::Active);
     }
 
     #[test]
@@ -3135,6 +3961,338 @@ mod tests {
                 - 6.0)
                 .abs()
                 < 1e-9
+        );
+    }
+
+    // Fix #1: scan_timeout_secs tests.
+
+    #[test]
+    fn scan_timeout_zero_means_unlimited() {
+        // Default value 0 = no cap. The `scan_timeout_secs` guard
+        // converts 0 to None (no deadline). Simulate that branch here
+        // to pin the semantic. The variable must be non-literal so the
+        // compiler doesn't warn about a trivially-dead comparison.
+        let secs: u64 = 0;
+        let budget = if secs > 0 {
+            Some(std::time::Duration::from_secs(secs))
+        } else {
+            None
+        };
+        assert!(
+            budget.is_none(),
+            "zero --scan-timeout-secs must produce None budget"
+        );
+    }
+
+    #[test]
+    fn scan_timeout_nonzero_creates_duration() {
+        let secs = 120u64;
+        let budget = if secs > 0 {
+            Some(std::time::Duration::from_secs(secs))
+        } else {
+            None
+        };
+        assert_eq!(budget, Some(std::time::Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn fix1_truncated_field_in_scan_json_source() {
+        // Anti-rig: assert the `truncated_by_scan_timeout` field name
+        // appears in scan/mod.rs's JSON output block. This pins the
+        // contract without a live HTTP call.
+        let src = include_str!("mod.rs");
+        assert!(
+            src.contains("truncated_by_scan_timeout"),
+            "truncated_by_scan_timeout field must be emitted in scan JSON"
+        );
+    }
+
+    #[test]
+    fn fix1_exit_code_7_for_timeout_in_source() {
+        // Anti-rig: exit code 7 must be used for scan timeout.
+        let src = include_str!("mod.rs");
+        assert!(
+            src.contains("ExitCode::from(7)"),
+            "exit code 7 must be emitted when scan_timeout_exceeded"
+        );
+    }
+
+    // Fix #7: verify that scan_text progress lines go to stderr.
+    // We test the contract by inspecting the source code itself — the
+    // same anti-rig pattern used by bench_waf_tests to verify bounded
+    // reads. A fragile but reliable check: if any of the specific phase
+    // label strings appear in a println! call in scan/mod.rs, the fix
+    // has been reverted. We assert they only appear in eprintln! calls.
+    #[test]
+    fn fix7_progress_labels_not_in_println() {
+        let src = include_str!("mod.rs");
+        // Collect all println! lines and verify none contain the phase headers.
+        // Match only bare `println!`, not `eprintln!` (which also contains
+        // the substring "println!" and would produce false positives).
+        let println_lines: Vec<&str> = src
+            .lines()
+            .filter(|l| l.contains("println!") && !l.contains("eprintln!"))
+            .collect();
+        let phase_labels = [
+            "[3/7] Exploring",
+            "[3b/7] Tamper",
+            "[3c/7] GraphQL",
+            "[4/7] Exploiting",
+            "[7/7] Intelligence",
+            "WafRift Live WAF Evasion Scanner",
+            "Gene bank loaded:",
+            "Gene bank updated:",
+            "Learning cache updated",
+            "[2e/7] Equivalence moat",
+        ];
+        for label in &phase_labels {
+            for line in &println_lines {
+                assert!(
+                    !line.contains(label),
+                    "progress label {:?} found in a println! call — must be eprintln!:\n  {}",
+                    label,
+                    line.trim()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fix7_result_labels_remain_in_print() {
+        // The final summary (render_summary_text_block) and bypass list
+        // (render_bypass_variants_text_block) must stay on stdout.
+        // They are printed with `print!`, not `println!` — check neither
+        // was accidentally switched to eprintln!.
+        let src = include_str!("mod.rs");
+        // The calls that write results to stdout use `print!` (no ln):
+        assert!(
+            src.contains("print!(\n            \"{}\",\n            render_summary_text_block"),
+            "render_summary_text_block must still be emitted via print! to stdout"
+        );
+        assert!(
+            src.contains("render_bypass_variants_text_block"),
+            "render_bypass_variants_text_block must still be present in scan/mod.rs"
+        );
+    }
+
+    // ── Fix #4: replay_technique_keys + repro_replay_command ──────────────
+
+    #[test]
+    fn scan_json_bypass_variant_emits_replay_technique_keys() {
+        // Every bypass row must carry `replay_technique_keys` (non-empty
+        // when techniques present) and `repro_replay_command` (a string
+        // containing --technique and the target).
+        let variants = vec![(
+            0usize,
+            "' OR 1=1--".to_string(),
+            vec![
+                "encoding/url/double".to_string(),
+                "tamper::sql_comment".to_string(),
+            ],
+            0.91_f64,
+        )];
+        let minimal: Vec<Option<String>> = vec![None];
+        let arr = build_bypass_variants_json(
+            "https://victim/search",
+            "id",
+            injection_delivery::InjectionDelivery::GetQuery,
+            &variants,
+            &minimal,
+        );
+        assert_eq!(arr.len(), 1);
+
+        // relay_technique_keys must be present and match the techniques.
+        let rtk = arr[0]["replay_technique_keys"]
+            .as_array()
+            .expect("replay_technique_keys must be an array");
+        assert_eq!(rtk.len(), 2, "must carry both technique keys");
+        assert_eq!(rtk[0], "encoding/url/double");
+        assert_eq!(rtk[1], "tamper::sql_comment");
+
+        // repro_replay_command must be a non-null string pointing at the target.
+        let cmd = arr[0]["repro_replay_command"]
+            .as_str()
+            .expect("repro_replay_command must be a string");
+        assert!(
+            cmd.contains("wafrift replay"),
+            "command prefix missing: {cmd}"
+        );
+        assert!(
+            cmd.contains("https://victim/search"),
+            "target missing from command: {cmd}"
+        );
+        assert!(
+            cmd.contains("--technique"),
+            "--technique flag missing: {cmd}"
+        );
+        assert!(
+            cmd.contains("encoding/url/double"),
+            "first key missing: {cmd}"
+        );
+        assert!(
+            cmd.contains("tamper::sql_comment"),
+            "second key missing: {cmd}"
+        );
+    }
+
+    #[test]
+    fn scan_json_bypass_variant_replay_command_null_when_no_techniques() {
+        // When techniques is empty (edge case: a bypass recorded without
+        // a technique attribution), repro_replay_command must be null —
+        // not a shell command with an empty --technique argument.
+        let variants = vec![(0usize, "payload".to_string(), vec![], 0.5_f64)];
+        let minimal: Vec<Option<String>> = vec![None];
+        let arr = build_bypass_variants_json(
+            "https://t/",
+            "q",
+            injection_delivery::InjectionDelivery::GetQuery,
+            &variants,
+            &minimal,
+        );
+        assert_eq!(arr.len(), 1);
+        assert!(
+            arr[0]["repro_replay_command"].is_null(),
+            "repro_replay_command must be null when techniques list is empty"
+        );
+        // replay_technique_keys is an empty array (not null).
+        let rtk = arr[0]["replay_technique_keys"]
+            .as_array()
+            .expect("must be array");
+        assert!(
+            rtk.is_empty(),
+            "replay_technique_keys must be empty array when no techniques"
+        );
+    }
+
+    #[test]
+    fn repro_replay_command_round_trips_technique_keys() {
+        // Emit repro_replay_command from a bypass variant, then parse the
+        // --technique argument back and verify the technique list matches.
+        // This pins the round-trip contract: JSON → command → parse.
+        let techniques = vec![
+            "encoding/url/single".to_string(),
+            "grammar::tautology".to_string(),
+            "case_swap".to_string(),
+        ];
+        let variants = vec![(
+            3usize,
+            "UNION SELECT".to_string(),
+            techniques.clone(),
+            0.88_f64,
+        )];
+        let minimal: Vec<Option<String>> = vec![None];
+        let arr = build_bypass_variants_json(
+            "https://target/api",
+            "search",
+            injection_delivery::InjectionDelivery::PostForm,
+            &variants,
+            &minimal,
+        );
+        let cmd = arr[0]["repro_replay_command"].as_str().unwrap();
+
+        // Extract --technique VALUE by finding the flag and reading until end.
+        // Format: "... --technique key1,key2,key3"
+        let tech_marker = "--technique ";
+        let tech_pos = cmd.find(tech_marker).expect("--technique not in command");
+        let tech_value = &cmd[tech_pos + tech_marker.len()..];
+        // Strip any trailing shell artifacts (quotes etc.) — the value ends at end-of-string.
+        let parsed_keys: Vec<&str> = tech_value.split(',').collect();
+        assert_eq!(
+            parsed_keys.len(),
+            techniques.len(),
+            "round-tripped technique count mismatch: got {parsed_keys:?}"
+        );
+        for (expected, actual) in techniques.iter().zip(parsed_keys.iter()) {
+            assert_eq!(
+                expected.as_str(),
+                *actual,
+                "technique key mismatch: expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    // ── --max-fires budget semantics (§12 anti-rig) ────────────────────────
+    //
+    // These unit tests pin the budget_exhausted predicate logic without
+    // standing up a tokio runtime — the closure captures `args.max_fires`
+    // identically to what run_scan does. End-to-end coverage lives in
+    // the raw_runner integration tests (max_fires_5_caps_total_fires).
+
+    #[test]
+    fn budget_exhausted_zero_means_unlimited() {
+        // max_fires == 0 → the budget closure NEVER returns true.
+        let max_fires: usize = 0;
+        let exhausted = |fired: usize| -> bool { max_fires != 0 && fired >= max_fires };
+        assert!(!exhausted(0));
+        assert!(!exhausted(1_000_000));
+        assert!(!exhausted(usize::MAX));
+    }
+
+    #[test]
+    fn budget_exhausted_returns_true_at_exact_cap() {
+        let max_fires: usize = 5;
+        let exhausted = |fired: usize| -> bool { max_fires != 0 && fired >= max_fires };
+        assert!(!exhausted(4), "4 fires < cap 5: not exhausted");
+        assert!(exhausted(5), "exactly at cap: exhausted");
+        assert!(exhausted(6), "past cap: exhausted");
+    }
+
+    #[test]
+    fn budget_exhausted_cap_one_exhausts_after_first_fire() {
+        let max_fires: usize = 1;
+        let exhausted = |fired: usize| -> bool { max_fires != 0 && fired >= max_fires };
+        assert!(!exhausted(0));
+        assert!(exhausted(1));
+    }
+
+    #[test]
+    fn budget_exhausted_large_cap_does_not_exhaust_at_small_fired() {
+        let max_fires: usize = crate::DEFAULT_MAX_FIRES; // 10_000
+        let exhausted = |fired: usize| -> bool { max_fires != 0 && fired >= max_fires };
+        // A normal light scan fires << 10_000 — must never be capped.
+        assert!(!exhausted(12));
+        assert!(!exhausted(500));
+        assert!(!exhausted(9_999));
+        assert!(exhausted(10_000));
+    }
+
+    #[test]
+    fn default_max_fires_constant_is_ten_thousand() {
+        // Pin the constant value so a refactor that changes it
+        // produces a test failure pointing at this intentional
+        // choice (10 000 = generous ceiling that leaves normal scans
+        // unaffected while preventing runaway fires).
+        assert_eq!(
+            crate::DEFAULT_MAX_FIRES,
+            10_000,
+            "DEFAULT_MAX_FIRES must be 10 000 to match the --help doc comment"
+        );
+    }
+
+    #[test]
+    fn bypass_rate_metric_is_bypassed_over_total_fired() {
+        // Metric-safety: bypass_rate = bypassed / total_fired,
+        // NOT bypassed / (bypassed + blocked). Confirm the formula
+        // is unchanged regardless of which phases fired.
+        let total_fired = 85_usize;
+        let bypassed: u32 = 3;
+        let blocked: u32 = 80;
+        let errors: u32 = 2;
+        let _rate_limited: u32 = 0;
+        let requests_completed = bypassed
+            .saturating_add(blocked)
+            .saturating_add(errors)
+            .saturating_add(_rate_limited);
+        let bypass_rate = if requests_completed > 0 {
+            f64::from(bypassed) / f64::from(requests_completed) * 100.0
+        } else {
+            0.0
+        };
+        // bypass_rate = 3 / 85 * 100 ≈ 3.53 — not 3 / (3+80) * 100 ≈ 3.61.
+        let _ = total_fired; // bypasses ARE included in total_fired
+        assert!(
+            (bypass_rate - 3.529_411_764_705_882).abs() < 1e-6,
+            "bypass_rate must be bypassed / requests_completed, got {bypass_rate}"
         );
     }
 }

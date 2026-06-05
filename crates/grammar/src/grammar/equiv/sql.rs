@@ -291,7 +291,8 @@ fn normalize(s: &str) -> String {
             i += 1;
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    // §7 DEDUP + §1 SPEED: shared helper avoids the temporary Vec<&str>.
+    super::collapse_whitespace(&out)
 }
 
 fn sig_tokens(norm: &str) -> Vec<String> {
@@ -320,8 +321,16 @@ pub fn still_executes(original: &str, cand: &str) -> bool {
         if want.is_empty() {
             return !nc.is_empty();
         }
-        // EVERY structural token of the original must remain.
-        want.iter().all(|t| nc.contains(t.as_str()))
+        // EVERY structural token of the original must remain — as a WHOLE
+        // token, not a substring. Substring containment (the prior
+        // `nc.contains(t)`) let a mutation that buries a keyword inside a
+        // larger identifier pass: `from` was "preserved" by `fromage`, `user`
+        // by `username`, `select` by `selected` — none of which is the SQL
+        // keyword any more. `contains_token` (the shared boundary-aware
+        // matcher, §7 DEDUP: one primitive for SQL + XSS) requires a token
+        // boundary on each alphanumeric edge so only a genuine surviving
+        // token counts.
+        want.iter().all(|t| super::contains_token(&nc, t))
     } else {
         // Auth-bypass / tautology. Valid iff a context break (quote /
         // paren / logical operator) survives AND the exploit mechanism
@@ -679,7 +688,7 @@ fn rw_insert_sep(toks: &mut Vec<Tok>, rng: &mut Rng) -> bool {
 /// and_tail_stable`. (8 → 10 in 0.2.17: the bandit must explore the
 /// new `header_value` / `cookie` arms or they are dead in the
 /// adaptive scan path.)
-pub const DELIVERY_ARMS: usize = 13;
+pub const DELIVERY_ARMS: usize = 15;
 
 /// Stable label for delivery-shape arm `i` (matches `delivery_set`
 /// order). Out-of-range ⇒ "query". Indices 0-9 are LOAD-BEARING for
@@ -702,6 +711,8 @@ pub fn delivery_kind_label(i: usize) -> &'static str {
         10 => "xml_body",
         11 => "json_nested_deep",
         12 => "graphql",
+        13 => "json_unicode_body",
+        14 => "utf7_multipart",
         _ => "query",
     }
 }
@@ -766,6 +777,21 @@ pub(crate) fn delivery_set(param: &str) -> Vec<DeliveryShape> {
             field: "search".to_string(),
             var: "v".to_string(),
         },
+        // JSON-unicode-normalisation gap: payload value written entirely
+        // as `\uXXXX`. The WAF keyword-matches the raw body and sees none
+        // of the attack; every backend JSON parser decodes the escapes to
+        // the exact payload (RFC 8259 §7). Sound iff the app JSON-parses
+        // the body — Content-Type is forced to application/json.
+        DeliveryShape::JsonUnicodeBody {
+            param: param.to_string(),
+        },
+        // Charset confusion: payload UTF-7-encoded in a multipart part with
+        // `charset=utf-7`. WAF byte-scans the shift sequences and matches
+        // nothing; a charset-honouring backend decodes the exact payload.
+        // Conditional (legacy IIS/.NET / CVE-2026-21876-class parsers).
+        DeliveryShape::Utf7MultipartField {
+            name: param.to_string(),
+        },
     ]
 }
 
@@ -784,7 +810,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all_deliveries, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     // The original must itself be a valid attack — the generator can
     // only preserve an exploit that exists, never manufacture one from
@@ -813,11 +839,11 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
 
     // Seed 2: sampled payload-string rewrites × delivery.
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut toks = base.clone();
         let mut dialect = Dialect::Generic;
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
 
         if rng.chance(4, 5) && rw_whitespace(&mut toks, &mut rng) {
             rules.push("ws_equiv");

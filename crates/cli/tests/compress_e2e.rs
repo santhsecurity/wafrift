@@ -12,21 +12,10 @@
 //! 5. Identity mode: body round-trips unchanged.
 //! 6. help: documents --algo and --format.
 
+mod common;
+use common::wafrift;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-        String::from_utf8_lossy(&output.stderr).into_owned(),
-    )
-}
 
 fn wafrift_stdin(args: &[&str], input: &[u8]) -> (i32, Vec<u8>, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
@@ -74,7 +63,8 @@ fn compress_appears_in_main_help() {
 #[test]
 fn compress_gzip_emits_content_encoding_on_stderr() {
     let payload = b"SELECT 1 FROM users WHERE 1=1--";
-    let (code, _stdout_bytes, stderr) = wafrift_stdin(&["compress", "--algo", "gzip", "--stdin"], payload);
+    let (code, _stdout_bytes, stderr) =
+        wafrift_stdin(&["compress", "--algo", "gzip", "--stdin"], payload);
     assert_eq!(code, 0, "gzip compress must exit 0; stderr: {stderr}");
     assert!(
         stderr.contains("Content-Encoding"),
@@ -89,7 +79,8 @@ fn compress_gzip_emits_content_encoding_on_stderr() {
 #[test]
 fn compress_gzip_output_differs_from_input() {
     let payload = b"SELECT 1 FROM users WHERE 1=1--";
-    let (code, stdout_bytes, stderr) = wafrift_stdin(&["compress", "--algo", "gzip", "--stdin"], payload);
+    let (code, stdout_bytes, stderr) =
+        wafrift_stdin(&["compress", "--algo", "gzip", "--stdin"], payload);
     assert_eq!(code, 0, "stderr: {stderr}");
     // Compressed bytes must differ from the raw input.
     assert_ne!(
@@ -98,10 +89,7 @@ fn compress_gzip_output_differs_from_input() {
         "gzip output must differ from plaintext input"
     );
     // Compressed output must be non-empty.
-    assert!(
-        !stdout_bytes.is_empty(),
-        "gzip output must be non-empty"
-    );
+    assert!(!stdout_bytes.is_empty(), "gzip output must be non-empty");
 }
 
 #[test]
@@ -135,10 +123,8 @@ fn compress_json_format_emits_base64_envelope() {
 
 #[test]
 fn compress_unknown_algorithm_exits_2() {
-    let (code, _stdout, stderr) = wafrift_stdin(
-        &["compress", "--algo", "rot13", "--stdin"],
-        b"payload",
-    );
+    let (code, _stdout, stderr) =
+        wafrift_stdin(&["compress", "--algo", "rot13", "--stdin"], b"payload");
     assert_eq!(code, 2, "unknown algo must exit 2; stderr: {stderr}");
     assert!(
         stderr.contains("rot13") || stderr.contains("unknown"),
@@ -150,16 +136,17 @@ fn compress_unknown_algorithm_exits_2() {
 fn compress_no_input_source_exits_1() {
     // Neither --stdin nor --input given — must exit 1 with a clear message.
     let (code, _stdout, stderr) = wafrift(&["compress", "--algo", "gzip"]);
-    assert_ne!(code, 0, "missing input source must not exit 0; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "missing input source must not exit 0; stderr: {stderr}"
+    );
 }
 
 #[test]
 fn compress_identity_algo_is_noop() {
     let payload = b"unchanged content here";
-    let (code, stdout_bytes, stderr) = wafrift_stdin(
-        &["compress", "--algo", "identity", "--stdin"],
-        payload,
-    );
+    let (code, stdout_bytes, stderr) =
+        wafrift_stdin(&["compress", "--algo", "identity", "--stdin"], payload);
     assert_eq!(code, 0, "identity must exit 0; stderr: {stderr}");
     // identity = no transformation.
     assert_eq!(

@@ -5,29 +5,58 @@ pub type GenePair = ((String, String), (String, String));
 pub type GenePairStat = ((String, String), (String, String), f64);
 
 /// Update gene statistics with a new evaluation result.
+///
+/// # Performance
+///
+/// The pre-fix code did an O(n) linear scan of `gene_stats` for EACH
+/// active gene in the chromosome — up to 8 genes × 500 entries = 4 000
+/// string comparisons per oracle verdict when the stats table was full.
+/// On a 1 000-verdict scan run that is ~4 M comparisons just for bookkeeping.
+///
+/// The fix builds a `(name, value) → index` HashMap in a single O(n)
+/// pass over `gene_stats`, then resolves each gene via O(1) lookup.
+/// Total cost per call: O(n + g) instead of O(n × g), where n = stats
+/// entries (≤500) and g = active genes in the chromosome (≤8).
 pub fn update_gene_stats(
     gene_stats: &mut Vec<GeneStatRecord>,
     genes: &[(String, String)],
     passed: bool,
 ) {
+    use std::collections::HashMap;
+
+    // Build a position index: (name_ref, value_ref) → index in gene_stats.
+    // We can't use &str keys borrowed from gene_stats while we mutate it,
+    // so use owned Strings. The Vec is capped at 500 entries, so the map
+    // is small (≤500 entries × 2 String clones ≈ a few KB).
+    let mut index: HashMap<(String, String), usize> = HashMap::with_capacity(gene_stats.len());
+    for (i, (n, v, _, _)) in gene_stats.iter().enumerate() {
+        index.insert((n.clone(), v.clone()), i);
+    }
+
     for (name, value) in genes {
         if value == "None" {
             continue;
         }
-        if let Some(stat) = gene_stats
-            .iter_mut()
-            .find(|(stat_name, stat_value, _, _)| stat_name == name && stat_value == value)
-        {
+        if let Some(&idx) = index.get(&(name.clone(), value.clone())) {
+            // O(1) update of the known position.
             if passed {
-                stat.2 += 1;
+                gene_stats[idx].2 = gene_stats[idx].2.saturating_add(1);
             }
-            stat.3 += 1;
+            gene_stats[idx].3 = gene_stats[idx].3.saturating_add(1);
         } else {
+            // New (name, value) pair — append and record it in the index so
+            // a later gene in this same batch (or a repeated pair) resolves
+            // to it via the same O(1) path. Owned keys mean the index does
+            // not borrow `gene_stats`, so this insert and the bumps above are
+            // borrow-safe — and it matches the pre-index behaviour, where a
+            // linear rescan would have found the just-pushed entry.
+            let new_idx = gene_stats.len();
             gene_stats.push((name.clone(), value.clone(), u32::from(passed), 1));
+            index.insert((name.clone(), value.clone()), new_idx);
         }
     }
 
-    // Prune to top 500 most-attempted entries to prevent unbounded growth
+    // Prune to top 500 most-attempted entries to prevent unbounded growth.
     if gene_stats.len() > 500 {
         gene_stats.sort_by_key(|a| std::cmp::Reverse(a.3));
         gene_stats.truncate(500);

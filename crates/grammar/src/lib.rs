@@ -30,8 +30,41 @@
 //! assert!(!xss.is_empty());
 //! assert!(xss.len() <= 3);
 //! ```
+//!
+//! Use coverage-guided diversity to avoid emitting duplicate rule combinations:
+//!
+//! ```
+//! use wafrift_grammar::{DiversityPolicy, MutationRequest, PayloadType, mutate_request};
+//!
+//! let req = MutationRequest {
+//!     max_count: 20,
+//!     diversity: DiversityPolicy::CoverageGuided,
+//!     exclude: Default::default(),
+//! };
+//! let variants = mutate_request("' OR 1=1--", PayloadType::Sql, &req);
+//! // CoverageGuided deduplicates by rules_applied combination.
+//! let mut rule_keys: Vec<String> = variants
+//!     .iter()
+//!     .map(|m| m.rules_applied.join(","))
+//!     .collect();
+//! rule_keys.sort();
+//! rule_keys.dedup();
+//! // Every rule combination appears at most once.
+//! assert_eq!(rule_keys.len(), variants.len());
+//! ```
 
 pub mod grammar;
 
 // Re-export the grammar module's public API at crate root.
-pub use grammar::{GrammarMutation, PayloadType, classify, mutate, mutate_as};
+//
+// §9 WIRING: mutate_request / MutationRequest / DiversityPolicy are part of
+// the documented API contract — scald-core calls them directly. Re-exporting
+// from the crate root makes the canonical import path obvious and prevents
+// consumer drift to the internal submodule path.
+pub use grammar::{
+    DiversityPolicy, GrammarMutation, MutationRequest, PayloadType, classify, feedback, mutate,
+    mutate_as, mutate_as_with_state, mutate_request, mutate_streaming,
+};
+// Re-export CfgMutatorState so callers can construct persistent oracle state
+// without importing the internal grammar::cfg_convergence submodule.
+pub use grammar::cfg_convergence::CfgMutatorState;

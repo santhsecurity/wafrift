@@ -13,22 +13,10 @@
 //! 6. Writing to an existing path with --force succeeds (exit 0).
 //! 7. --quiet suppresses the "Next steps" advisory text on stderr/stdout.
 
+mod common;
+use common::wafrift;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
 
 /// Return a temp-dir path that does NOT exist yet (suffix ensures parallel
 /// tests use distinct paths even if the OS recycles temp dirs quickly).
@@ -68,7 +56,10 @@ fn init_creates_toml_file_at_specified_path() {
     let path_str = path.to_str().expect("temp path is UTF-8");
 
     let (code, _stdout, stderr) = wafrift(&["init", "--output", path_str]);
-    assert_eq!(code, 0, "init must exit 0 for a fresh path; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "init must exit 0 for a fresh path; stderr: {stderr}"
+    );
 
     assert!(
         path.exists(),

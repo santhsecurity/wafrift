@@ -27,7 +27,10 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // Insertion-ordered: callers like bench-waf `take(args.variants)`
     // the FIRST N results, so priority order matters. We pre-pend the
     // naxsi-friendly absolute paths so they're always sampled first.
-    let mut results: Vec<String> = Vec::new();
+    // Default capacity 32 — empirical upper bound on this mutator's
+    // output across the bench corpus. Caller truncates, this is just
+    // an allocation hint.
+    let mut results: Vec<String> = Vec::with_capacity(32);
     let mut seen: HashSet<String> = HashSet::new();
     let push = |v: String, results: &mut Vec<String>, seen: &mut HashSet<String>| {
         if seen.insert(v.clone()) {

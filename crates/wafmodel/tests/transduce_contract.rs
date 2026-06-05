@@ -134,6 +134,25 @@ mod roundtrip_props {
             .flat_map(|b| format!("&#x{b:x};").into_bytes())
             .collect()
     }
+    /// Inject a NUL after every byte (input is NUL-free 0x20..0x7f).
+    fn nul_all(s: &[u8]) -> Vec<u8> {
+        s.iter().flat_map(|b| [*b, 0u8]).collect()
+    }
+    /// Overlong-encode every ASCII byte as its non-canonical 2-byte form.
+    fn overlong_all(s: &[u8]) -> Vec<u8> {
+        s.iter()
+            .flat_map(|b| [0xC0 | (b >> 6), 0x80 | (b & 0x3F)])
+            .collect()
+    }
+    /// Base64-encode the whole value (a whole-value transform).
+    fn b64_all(s: &[u8]) -> Vec<u8> {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(s).into_bytes()
+    }
+    /// Hex-encode the whole value (a whole-value transform).
+    fn hex_all(s: &[u8]) -> Vec<u8> {
+        hex::encode(s).into_bytes()
+    }
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(pc()))]
@@ -151,8 +170,18 @@ mod roundtrip_props {
             prop_assert_eq!(Stage::JsonUnescape.apply(&json_all(&p)), p.clone());
             // HTML-entity decode reverses &#xHH; encode.
             prop_assert_eq!(Stage::HtmlEntityDecode.apply(&ent_all(&p)), p.clone());
+            // NUL-strip reverses NUL injection.
+            prop_assert_eq!(Stage::StripNulls.apply(&nul_all(&p)), p.clone());
+            // Overlong UTF-8 decode reverses overlong encoding.
+            prop_assert_eq!(Stage::OverlongUtf8Decode.apply(&overlong_all(&p)), p.clone());
+            // Base64 decode reverses whole-value base64 encode.
+            prop_assert_eq!(Stage::Base64Decode.apply(&b64_all(&p)), p.clone());
+            // Hex decode reverses whole-value hex encode.
+            prop_assert_eq!(Stage::HexDecode.apply(&hex_all(&p)), p.clone());
             // Identity is identity; every stage is total (no panic) on
-            // arbitrary bytes — exercised by construction above.
+            // arbitrary bytes — exercised by construction above. The two text
+            // normalizers (NFKC/best-fit) round-trip in their own engine
+            // soundness proptests and the solver's all-stage anti-drift guard.
             prop_assert_eq!(Stage::Identity.apply(&p), p);
         }
     }

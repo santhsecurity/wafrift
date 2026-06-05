@@ -13,6 +13,7 @@ categories = ["network-programming", "web-programming"]
 [dependencies]
 wafrift-types = { workspace = true }
 rand = { workspace = true }
+guise = { workspace = true }
 
 [dev-dependencies]
 wafrift-detect = { path = "../detect" }

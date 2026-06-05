@@ -170,26 +170,69 @@ fn rw_unicode_escape(s: &str, rng: &mut Rng) -> String {
     out
 }
 
+/// The single top-level field a one-field operator document injects
+/// into, e.g. `username` in `{"username":{"$ne":"x"}}`. Returns `None`
+/// when the payload has no field (a bare top-level operator like
+/// `{"$where":…}`) or *more than one* field — in both cases the
+/// bracketed query-string form cannot faithfully carry the SAME query
+/// (a single `field[$op]=` param would mis-attribute operators to the
+/// wrong field), so the rewrite must decline rather than change the
+/// attack. Depth-1 keys only; an operator key (`$…`) is never a field.
+fn single_field(s: &str) -> Option<String> {
+    let b: Vec<char> = s.chars().collect();
+    let mut depth = 0i32;
+    let mut fields: Vec<String> = Vec::new();
+    let mut top_level_op = false;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth -= 1,
+            '"' | '\'' if depth == 1 => {
+                let q = b[i];
+                let mut key = String::new();
+                i += 1;
+                while i < b.len() && b[i] != q {
+                    key.push(b[i]);
+                    i += 1;
+                }
+                // is this quoted token a KEY (followed by `:`)?
+                let mut k = i + 1;
+                while k < b.len() && matches!(b[k], ' ' | '\t' | '\n' | '\r') {
+                    k += 1;
+                }
+                if k < b.len() && b[k] == ':' {
+                    if key.starts_with('$') {
+                        top_level_op = true;
+                    } else if key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && !key.is_empty()
+                    {
+                        fields.push(key);
+                    } else {
+                        return None; // a field name we can't safely bracket
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    match (fields.len(), top_level_op) {
+        (1, false) => Some(fields.pop().unwrap()),
+        _ => None,
+    }
+}
+
 /// Re-encode a JSON operator body as the equivalent bracketed
 /// query-string form: `{"p":{"$ne":"x"}}` → `p[$ne]=x` (Express/`qs`
-/// parse this back to the identical document).
+/// parse this back to the identical document). Declines (`None`) unless
+/// the document targets exactly one field — see [`single_field`].
 fn rw_to_bracket(s: &str) -> Option<String> {
     let pairs = canon(s);
     if pairs.is_empty() {
         return None;
     }
-    // best-effort param name: the bare token right before the first
-    // `{`/`[`; fall back to `q`.
-    let param = s
-        .split(['{', '['])
-        .next()
-        .map(|p| {
-            p.trim()
-                .trim_matches(['"', '\'', ':', '=', ' ', '?', '&'])
-                .to_string()
-        })
-        .filter(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-        .unwrap_or_else(|| "q".to_string());
+    let param = single_field(s)?;
     let mut q = String::new();
     for (i, (op, val)) in pairs.iter().enumerate() {
         if i > 0 {
@@ -225,7 +268,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_injects(payload, payload) {
         return out;
@@ -247,10 +290,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         if rng.chance(1, 2)
             && let Some(b) = rw_to_bracket(&s)
             && b != s
@@ -265,7 +308,13 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
                 rules.push("json_whitespace");
             }
         }
-        if rng.chance(3, 5) {
+        // `\uXXXX` escapes are JSON-string semantics — a parser only
+        // decodes them inside JSON. On a bracketed query-string key
+        // (`field[$op]=`) `$` is a LITERAL byte run, a different
+        // key, a different query — so escape JSON forms only, never a
+        // bracket form. (The field-blind oracle would wrongly accept
+        // the bracket+escape mix; this gate is the real soundness line.)
+        if !rules.contains(&"json_to_bracket") && rng.chance(3, 5) {
             let n = rw_unicode_escape(&s, &mut rng);
             if n != s {
                 s = n;
@@ -306,14 +355,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 40,
-            verify: true,
-            vary_delivery: true,
-            param: "username".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 40, "username")
     }
 
     #[test]
@@ -339,6 +381,60 @@ mod tests {
             r#"{"$where":"sleep(1)"}"#,
             r#"{"$where":"sleep(9)"}"#
         ));
+    }
+
+    #[test]
+    fn bracket_form_is_field_correct_and_never_unicode_escaped() {
+        // Soundness guard for the bracket transport. Two ways the
+        // field-blind oracle could be fooled, both forbidden here:
+        //   1. a `\uXXXX` escape inside a bracket KEY — literal in a
+        //      query string, so a different key / different query;
+        //   2. a bracket form that injects a field OTHER than the one
+        //      the operator document targeted (the old `q` fallback).
+        let atk = r#"{"username":{"$ne":"x"}}"#;
+        let mut saw_bracket = false;
+        for seed in 0..200u64 {
+            for m in generate(atk, &cfg(seed)) {
+                let is_bracket = m.payload.contains("[$") || m.payload.contains("%5b");
+                if is_bracket {
+                    saw_bracket = true;
+                    assert!(
+                        !m.payload.contains("\\u"),
+                        "UNSOUND bracket+unicode member: {:?}",
+                        m.payload
+                    );
+                    assert!(
+                        m.payload.starts_with("username["),
+                        "bracket injected the wrong field: {:?}",
+                        m.payload
+                    );
+                }
+                assert!(still_injects(atk, &m.payload), "unsound {:?}", m.payload);
+            }
+        }
+        assert!(saw_bracket, "bracket form never emitted for single-field");
+    }
+
+    #[test]
+    fn multi_field_declines_bracket_rather_than_misattribute() {
+        // `single_field` returns None for >1 field, so the bracket
+        // rewrite (which carries one `field[...]` param) cannot map a
+        // second field's operator onto the first. No member may be a
+        // bracket form for a two-field document.
+        assert_eq!(single_field(r#"{"username":{"$ne":"x"}}"#).as_deref(), Some("username"));
+        assert_eq!(single_field(r#"{"$where":"sleep(1)"}"#), None);
+        assert_eq!(single_field(r#"{"a":{"$gt":1},"b":{"$lt":9}}"#), None);
+        let atk = r#"{"username":{"$ne":null},"pw":{"$regex":".*"}}"#;
+        for seed in 0..120u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(
+                    !(m.payload.contains("[$") || m.payload.contains("%5b")),
+                    "multi-field must not bracket: {:?}",
+                    m.payload
+                );
+                assert!(still_injects(atk, &m.payload), "unsound {:?}", m.payload);
+            }
+        }
     }
 
     #[test]

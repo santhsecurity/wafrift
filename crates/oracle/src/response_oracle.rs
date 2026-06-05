@@ -70,15 +70,46 @@ impl ResponseOracle {
 
         // ── Response headers ──
         let header_signals = crate::signal_headers::classify_headers(&ctx.headers);
+        // A `waf_block_header:` marker is an EXPLICIT block indicator that, per
+        // signal_headers + block_headers.toml ("ONLY appear when a WAF actively
+        // blocks … even when the status is 200"), must count toward the block
+        // signal even on an allowed status. Plain `header:<vendor>` markers are
+        // mere vendor-ID (every Cloudflare 200 carries cf-ray) and must NOT be
+        // treated as a block — so we key strictly on the waf_block_header prefix.
+        let has_header_block = header_signals
+            .iter()
+            .any(|s| matches!(s, Signal::BodyMarker(m) if m.starts_with("waf_block_header:")));
         signals.extend(header_signals);
 
-        // ── Response time ──
-        // Prefer measured benign latency; otherwise default 200ms.
-        let baseline_ms = self
+        // -- Response time --
+        // When >= 3 calibration latency samples exist, use the statistical
+        // TimingOracle (mean + 3*sigma) for precise confirmation of blind
+        // attacks (pg_sleep / WAITFOR DELAY / ; ping -c 10). Fall back to the
+        // crude 3x ratio heuristic when fewer samples are available.
+        let timing_signal = self
             .calibration
             .as_ref()
-            .map_or(200, |c| c.benign_latency_ms.unwrap_or(200));
-        if let Some(s) = classify_response_time(baseline_ms, ctx.response_time_ms) {
+            .and_then(|cal| {
+                if let Some(oracle) = cal.build_timing_oracle() {
+                    if oracle.is_anomalous(ctx.response_time_ms as f64) {
+                        Some(wafrift_types::Signal::ResponseTimeAnomaly {
+                            baseline_ms: oracle.baseline_ms as u64,
+                            actual_ms: ctx.response_time_ms,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    // Fewer than 3 samples -- fall back to heuristic ratio.
+                    let baseline_ms = cal.benign_latency_ms.unwrap_or(200);
+                    classify_response_time(baseline_ms, ctx.response_time_ms)
+                }
+            })
+            .or_else(|| {
+                // No calibration at all -- use default 200ms baseline.
+                classify_response_time(200, ctx.response_time_ms)
+            });
+        if let Some(s) = timing_signal {
             signals.push(s);
         }
 
@@ -135,9 +166,12 @@ impl ResponseOracle {
         let has_rate_limit = signals
             .iter()
             .any(|s| matches!(s, Signal::BodyMarker(m) if m.contains("rate-limit")));
-        let has_block_marker = body_signals
-            .iter()
-            .any(|s| matches!(s, Signal::BodyMarker(_)));
+        // A block can be signalled by the body OR by an explicit waf_block_header
+        // (the latter holds even on a 200 status — see has_header_block above).
+        let has_block_marker = has_header_block
+            || body_signals
+                .iter()
+                .any(|s| matches!(s, Signal::BodyMarker(_)));
         let has_success_marker = body_signals
             .iter()
             .any(|s| matches!(s, Signal::SuccessMarker(_)));
@@ -214,7 +248,10 @@ impl ResponseOracle {
         if !competing.is_empty() {
             return Verdict::Ambiguous {
                 competing,
-                explanation: format!("status {} conflicts with body markers", ctx.status),
+                explanation: format!(
+                    "status {} conflicts with body/header block markers",
+                    ctx.status
+                ),
             };
         }
 
@@ -358,6 +395,118 @@ mod tests {
         assert!(v.is_ambiguous());
     }
 
+    /// §5/§6 regression: a clean 403 WAF block whose page contains the word
+    /// "successfully" (e.g. "successfully blocked") must classify as Blocked,
+    /// NOT Ambiguous. Pre-fix the loose "success" success-marker matched the
+    /// substring and the status-blocked-vs-success conflict rule produced a
+    /// false Ambiguous — derailing the evade loop's verdict.
+    #[test]
+    fn block_page_saying_successfully_blocked_is_blocked_not_ambiguous() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 403,
+            body: b"Request denied. Our WAF successfully blocked this attack.".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(v.is_blocked(), "must be Blocked, got {v:?}");
+        assert!(!v.is_ambiguous(), "must NOT be Ambiguous, got {v:?}");
+    }
+
+    /// A 401 page literally containing "unauthenticated" must not trip the
+    /// success path (old "authenticated" marker substring-matched it).
+    #[test]
+    fn unauthenticated_401_does_not_become_ambiguous() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 401,
+            body: b"401 Unauthorized: this request is unauthenticated.".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(
+            !v.is_ambiguous(),
+            "401 unauthenticated must not be Ambiguous, got {v:?}"
+        );
+    }
+
+    /// §6: a benign 200 with a "press F5 to refresh" hint must stay Allowed —
+    /// the old bare "f5" block marker matched the refresh-key text and forced
+    /// a false Ambiguous via the allowed-vs-block conflict rule.
+    #[test]
+    fn f5_refresh_hint_on_200_stays_allowed() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 200,
+            body: b"<p>If the page looks stale, press F5 to refresh.</p>".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(v.is_allowed(), "must be Allowed, got {v:?}");
+        assert!(!v.is_ambiguous(), "must NOT be Ambiguous, got {v:?}");
+    }
+
+    /// §6: a benign "please wait" loader must NOT classify as ChallengeRequired.
+    /// Challenge is the highest-precedence verdict (early return), so a false
+    /// positive here masks a real bypass and burns the solve path. Bare
+    /// "please wait" was removed from the challenge table.
+    #[test]
+    fn benign_please_wait_loader_is_not_a_challenge() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 200,
+            body: b"Please wait while your order is processed...".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(
+            !v.is_challenge(),
+            "benign loader must not be a challenge, got {v:?}"
+        );
+        assert!(v.is_allowed(), "should be Allowed, got {v:?}");
+    }
+
+    /// §5 false-NEGATIVE fix: signal_headers + block_headers.toml document that
+    /// a waf-block HEADER is a block signal "even with 200 status", but classify()
+    /// previously scanned only body_signals for the block-conflict, so a 200 +
+    /// `x-amzn-waf-action: block` was reported a clean Allowed — a PHANTOM BYPASS
+    /// (the worst error for an evasion tool: the WAF blocked, the tool says it got
+    /// through). The explicit waf_block_header must now surface the conflict.
+    #[test]
+    fn block_header_on_200_is_not_reported_as_clean_allowed() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 200,
+            headers: vec![("x-amzn-waf-action".to_string(), "block".to_string())],
+            body: b"ok".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(
+            !v.is_allowed(),
+            "200 + waf-block header must NOT be a clean Allowed (phantom bypass), got {v:?}"
+        );
+    }
+
+    /// Guard the other side (no over-firing): a plain vendor-ID header (cf-ray on
+    /// a normal 200) must NOT be treated as a block — every Cloudflare-fronted 200
+    /// carries cf-ray, so counting it would flag the entire internet as blocked.
+    #[test]
+    fn vendor_id_header_on_200_stays_allowed() {
+        let oracle = ResponseOracle::new();
+        let ctx = ResponseContext {
+            status: 200,
+            headers: vec![("cf-ray".to_string(), "abc123-SJC".to_string())],
+            body: b"welcome".to_vec(),
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        assert!(
+            v.is_allowed(),
+            "a vendor-ID header (cf-ray) on a clean 200 must stay Allowed, got {v:?}"
+        );
+    }
+
     #[test]
     fn adversarial_200_with_rst() {
         let oracle = ResponseOracle::new();
@@ -448,6 +597,56 @@ mod tests {
                 actual_ms: 500
             }
         )));
+    }
+
+
+    /// When >= 3 calibration latency samples are present, the statistical
+    /// TimingOracle is used (mean + 3*sigma). The oracle is more precise:
+    /// 200ms IS anomalous vs 100ms baseline (threshold ~105ms) but would NOT
+    /// be anomalous under the 3x ratio heuristic (threshold 300ms).
+    #[test]
+    fn statistical_timing_oracle_used_when_enough_samples() {
+        let mut cal = CalibrationSession::default();
+        for ms in [98u64, 100, 101, 99, 102] {
+            cal.record_benign_with_latency(200, &[], b"ok", ms);
+        }
+        cal.record_blocked(403, &[], b"blocked");
+        let oracle = ResponseOracle::new().with_calibration(cal);
+        let ctx = ResponseContext {
+            status: 200,
+            response_time_ms: 200, // anomalous vs ~105ms threshold, not vs 300ms
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        let signals = v.signals();
+        assert!(
+            signals.iter().any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
+            "statistical oracle must flag 200ms anomalous (threshold ~105ms): {:?}",
+            signals
+        );
+    }
+
+    /// With < 3 samples, falls back to 3x ratio. 200ms is NOT anomalous vs
+    /// 100ms baseline under 3x (threshold 300ms).
+    #[test]
+    fn ratio_fallback_used_below_min_samples() {
+        let mut cal = CalibrationSession::default();
+        cal.record_benign_with_latency(200, &[], b"ok", 100);
+        cal.record_benign_with_latency(200, &[], b"ok", 102);
+        cal.record_blocked(403, &[], b"blocked");
+        let oracle = ResponseOracle::new().with_calibration(cal);
+        let ctx = ResponseContext {
+            status: 200,
+            response_time_ms: 200, // not anomalous under 3x (300ms threshold)
+            ..Default::default()
+        };
+        let v = oracle.classify(&ctx);
+        let signals = v.signals();
+        assert!(
+            !signals.iter().any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
+            "below min samples, 200ms should not be flagged (3x=300ms): {:?}",
+            signals
+        );
     }
 
     // ── CF wiring tests ────────────────────────────────────────────────────

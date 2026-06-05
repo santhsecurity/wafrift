@@ -152,44 +152,24 @@ async fn cf_real_endpoint_parity_smoke() {
     assert!(b.contains("\"q\":\"hello\""), "echo body: {b}");
 
     // /echo URL-decodes
-    let (s, b) = fetch(
-        &client,
-        &format!("http://{addr}/echo?q=%3Cscript%3E"),
-    )
-    .await;
+    let (s, b) = fetch(&client, &format!("http://{addr}/echo?q=%3Cscript%3E")).await;
     assert_eq!(s, 200);
     assert!(b.contains("<script>"), "decode body: {b}");
 
     // /sql concats id into faked SELECT verbatim
-    let (s, b) = fetch(
-        &client,
-        &format!("http://{addr}/sql?id=1%20OR%201%3D1"),
-    )
-    .await;
+    let (s, b) = fetch(&client, &format!("http://{addr}/sql?id=1%20OR%201%3D1")).await;
     assert_eq!(s, 200);
-    assert!(
-        b.contains("WHERE id = '1 OR 1=1'"),
-        "sql body: {b}"
-    );
+    assert!(b.contains("WHERE id = '1 OR 1=1'"), "sql body: {b}");
 
     // /reflect-status returns requested code
-    let (s, _) = fetch(
-        &client,
-        &format!("http://{addr}/reflect-status?code=418"),
-    )
-    .await;
+    let (s, _) = fetch(&client, &format!("http://{addr}/reflect-status?code=418")).await;
     assert_eq!(s, 418);
 
     // /reflect-status clamps OOB to 200
-    let (s, _) = fetch(
-        &client,
-        &format!("http://{addr}/reflect-status?code=99999"),
-    )
-    .await;
+    let (s, _) = fetch(&client, &format!("http://{addr}/reflect-status?code=99999")).await;
     assert_eq!(s, 200);
 
     // Unknown → 404
-    let (s, _) =
-        fetch(&client, &format!("http://{addr}/no-such-route")).await;
+    let (s, _) = fetch(&client, &format!("http://{addr}/no-such-route")).await;
     assert_eq!(s, 404);
 }

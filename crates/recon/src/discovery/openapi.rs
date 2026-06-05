@@ -91,6 +91,39 @@ pub fn from_openapi(spec: &str) -> Result<Vec<DiscoveredEndpoint>, DiscoveryErro
         });
     };
 
+    // OpenAPI 3.x: prefer `servers[0].url` (absolute URL with scheme
+    // and host). Swagger 2.0: synthesize from `schemes[0]` + `host` +
+    // `basePath`. Falling back to `basePath` alone is the legacy
+    // behaviour and the source of the discover→scan workflow bug:
+    // path-only URLs flowed into `scan --from-discovery` which then
+    // fired at `https:///login` (empty host). Emit absolute when we
+    // can; downstream `scan --from-discovery` also re-joins against
+    // `--target` for any remaining relative entries.
+    let servers_base = root
+        .get("servers")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|s| s.get("url"))
+        .and_then(Value::as_str)
+        .map(|s| s.trim_end_matches('/').to_string());
+    let swagger2_base = if servers_base.is_some() {
+        None
+    } else {
+        let host = root.get("host").and_then(Value::as_str);
+        let scheme = root
+            .get("schemes")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_str)
+            .unwrap_or("https");
+        let base_path_only = root
+            .get("basePath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim_end_matches('/');
+        host.map(|h| format!("{scheme}://{h}{base_path_only}"))
+    };
+    let absolute_base = servers_base.or(swagger2_base);
     let base_path = root
         .get("basePath")
         .and_then(Value::as_str)
@@ -118,7 +151,10 @@ pub fn from_openapi(spec: &str) -> Result<Vec<DiscoveredEndpoint>, DiscoveryErro
             let Some(method) = parse_method(method_str) else {
                 continue;
             };
-            let url = format!("{base_path}{path}");
+            let url = match &absolute_base {
+                Some(base) => format!("{base}{path}"),
+                None => format!("{base_path}{path}"),
+            };
             let mut points = Vec::new();
             // path-level parameters apply to every operation
             if let Some(arr) = path_level_params {

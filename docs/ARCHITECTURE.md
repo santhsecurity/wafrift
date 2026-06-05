@@ -70,7 +70,7 @@ graph TD
   oracle --> strategy
   evolution --> strategy
   wafmodel --> strategy
-  strategy --> transport
+  transport --> strategy
   pool --> transport
   transport --> proxy
   transport --> cli
@@ -124,7 +124,7 @@ Adding a new evasion primitive: one file + one line in `mod.rs`.
 | Layer | Crate | One-line role |
 |---|---|---|
 | **Foundation** | `wafrift-types` | Shared types: `Request`, `Technique`, `EvasionResult`, `Verdict`, `EvasionConfig` |
-| **Wire-level mutators** | `wafrift-encoding` | 15+ encoding strategies (URL, Unicode, HTML entity, SQL comment, chunked, invisible chars, …) |
+| **Wire-level mutators** | `wafrift-encoding` | 40+ encoding strategies (URL ×3, Unicode, HTML entity, SQL comment, chunked, invisible chars, base64, hex, gzip/deflate, UTF-7, IIS %u, JSON-string, fullwidth, homoglyph, parameter pollution, …) |
 | | `wafrift-grammar` | Grammar-aware mutations — SQL, XSS, CMD, SSTI, path, LDAP, SSRF; variants validate against `sqlparser-rs` AST |
 | | `wafrift-content-type` | WAFFLED Content-Type switching — JSON / XML / multipart / form reformatting |
 | | `wafrift-smuggling` | CL.TE / TE.CL / TE.TE / CL.0 / H2C / WebSocket smuggling; safe + unsafe-probes feature gate |
@@ -177,6 +177,7 @@ Adding a new evasion primitive: one file + one line in `mod.rs`.
 | `discover` | Parse OpenAPI / GraphQL introspection / mine parameters into injection points |
 | `recon` | Origin discovery via CT logs + DNS history (authorized targets only) |
 | `origin-hints` | DNS hints for origin-bypass (authorized targets only) |
+| `probe` | Generate differential analysis probes |
 
 ### Scan
 | Subcommand | Role |
@@ -189,30 +190,38 @@ Adding a new evasion primitive: one file + one line in `mod.rs`.
 ### Parser-diff family
 | Subcommand | Role |
 |---|---|
-| `attack` | Unified orchestrator — runs all seven parser-diff probes concurrently |
-| `parser-diff` | URL-path shape variants (NUL, fullwidth slash, dot-segment, …) |
-| `header-diff` | Header-block variants (dup-header, XFF, LWS, Authorization case-mix) |
-| `body-diff` | Body-format variants (JSON dup-key, UTF-7, BOM, multipart collision) |
-| `query-diff` | Query-string variants (HPP, bracket notation, semicolon separator) |
-| `cache-diff` | Cache-key confusion (Host case, param order, fragment leak) |
-| `h2-diff` | HTTP/1.1 vs HTTP/2 differential |
-| `method-diff` | HTTP method variants (WebDAV, lowercase, H2 preface PRI) |
-| `gql-diff` | GraphQL parser disagreements (alias bomb, op-name spoof, introspection) |
-| `jwt-diff` | JWT validation scanner (alg:none, kid injection, role elevation) |
-| `cors-diff` | CORS misconfiguration scanner (10 origin-validation pitfalls) |
-| `trailer-diff` | HTTP chunked-trailer injection |
-| `ja3-diff` | TLS fingerprint differential (requires `--features tls-impersonate`) |
+| `diff <kind>` | **(primary verb; replaces the deprecated commands below)** Unified differential surface — one entry point for all parser-disagreement probes. Kinds: `path`, `header`, `body`, `query`, `cache`, `h2`, `method`, `gql`, `jwt`, `cors`, `trailer`, `ja3`, `all` (the seven path/header/body/query/cache/h2/method probes only — NOT gql/jwt/cors/trailer). |
+| `attack` | Unified orchestrator — runs all seven parser-diff probes concurrently **(deprecated alias — use `diff all`)** |
+| `parser-diff` | URL-path shape variants (NUL, fullwidth slash, dot-segment, …) **(deprecated alias — use `diff path`)** |
+| `header-diff` | Header-block variants (dup-header, XFF, LWS, Authorization case-mix) **(deprecated alias — use `diff header`)** |
+| `body-diff` | Body-format variants (JSON dup-key, UTF-7, BOM, multipart collision) **(deprecated alias — use `diff body`)** |
+| `query-diff` | Query-string variants (HPP, bracket notation, semicolon separator) **(deprecated alias — use `diff query`)** |
+| `cache-diff` | Cache-key confusion (Host case, param order, fragment leak) **(deprecated alias — use `diff cache`)** |
+| `h2-diff` | HTTP/1.1 vs HTTP/2 differential **(deprecated alias — use `diff h2`)** |
+| `method-diff` | HTTP method variants (WebDAV, lowercase, H2 preface PRI) **(deprecated alias — use `diff method`)** |
+| `gql-diff` | GraphQL parser disagreements (alias bomb, op-name spoof, introspection) **(deprecated alias — use `diff gql`)** |
+| `jwt-diff` | JWT validation scanner (alg:none, kid injection, role elevation) **(deprecated alias — use `diff jwt`)** |
+| `cors-diff` | CORS misconfiguration scanner (10 origin-validation pitfalls) **(deprecated alias — use `diff cors`)** |
+| `trailer-diff` | HTTP chunked-trailer injection **(deprecated alias — use `diff trailer`)** |
+| `ja3-diff` | TLS fingerprint differential (requires `--features tls-impersonate`) **(deprecated alias — use `diff ja3`)** |
 
 ### Smuggling
 | Subcommand | Role |
 |---|---|
 | `smuggle` | HTTP request smuggling CLI (CL.TE / TE.CL / CL.0 / detect / dry-run) |
+| `smuggle-emit` | Emit every smuggle probe across all 11 families as JSON (one per line); optional `--family <prefix>` filter |
+| `smuggle-cross-product` | Cartesian product of two smuggle-probe families as composed artifacts |
+| `smuggle-chain` | N-way composition: cartesian product across 2+ `--family` flags (`--cap N`); `--fire-target` to fire |
+| `smuggle-stats` | Operator probe-budget snapshot: count probes across the 11 smuggle families |
+| `smuggle-fire` | Fire every smuggle probe against a live target (`--target`) — the end-to-end execution pipeline |
 
 ### Attacker utilities
 | Subcommand | Role |
 |---|---|
 | `compress` | Wrap a body in gzip / deflate / brotli chains |
 | `distill` | Adversarial ddmin — find the minimal bypass payload (Zeller) |
+| `tmin` | Corpus minimizer (afl-tmin alias for `distill`) — same ddmin engine, familiar entry point |
+| `cluster` | Offline bypass clustering: group a `bench-waf` result by rule, class, and edit-distance |
 | `listener` | OOB callback receiver for blind SQLi / stored XSS / SSRF / OOB cmdi |
 
 ### Defender (WAF model)
@@ -240,6 +249,12 @@ Adding a new evasion primitive: one file + one line in `mod.rs`.
 | `man` | Generate troff man page |
 | `bench-waf` | Measure raw WAF block rate + wafrift bypass rate against a corpus |
 | `bench-diff` | Gate on regression between two `bench-waf` JSON blobs |
+| `hunt` | Long-running autonomous bypass campaign; resumable by `--campaign-id`; records winning payloads to a per-target corpus (never submits) |
+| `harvest` | Re-verify a hunt/bench corpus's bypasses live and emit review-ready HackerOne reports (never submits) |
+| `submit` | File ONE reviewed harvest report to HackerOne; dry-run unless `--confirm` (no auto/batch path) |
+| `sarif` | Emit SARIF 2.1.0 from a `bench-waf` or `scan` JSON (GitHub Code Scanning, Azure DevOps) |
+| `corpus` | Inspect a `bench-waf --corpus-out` artifact: stats, rule breakdown, edge-POP coverage |
+| `egress-example` | Print JSON egress preset snippets (Tor SOCKS5 etc.) for copy-paste into `.wafrift.toml` |
 
 ---
 
@@ -292,7 +307,7 @@ layout. Issue #82 tracks a planned carve into four organised subdirectories:
 
 ```
 crates/cli/src/
-├── recon/          detect_cmd, recon_cmd, discover_cmd, origin_hints
+├── recon/          detect_cmd, recon_cmd, discover_cmd, origin_hints, probe_cmd
 ├── scan/           scan, evade_cmd, bypass_probe, import_curl, replay
 ├── parserdiff/     attack_cmd, parser_diff_cmd, header_diff_cmd,
 │                   body_diff_cmd, query_diff_cmd, cache_diff_cmd,
@@ -300,8 +315,10 @@ crates/cli/src/
 │                   jwt_diff_cmd, cors_diff_cmd, trailer_diff_cmd,
 │                   ja3_diff_cmd
 ├── operator/       bank, bank_registry, seed, report, legendary,
-│                   listener_cmd, compress_cmd, distill_cmd,
-│                   smuggle_cmd, model_evade_cmd, wafmodel_cmd
+│                   listener_cmd, compress_cmd, distill_cmd, tmin_cmd,
+│                   smuggle_cmd, model_evade_cmd, wafmodel_cmd,
+│                   cluster_cmd, sarif_cmd, corpus_cmd, hunt_cmd,
+│                   egress_example
 └── meta/           init_cmd, config, man_cmd, explain, interactive
 ```
 

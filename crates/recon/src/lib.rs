@@ -36,20 +36,7 @@
 //! assert_eq!(origins, vec!["10.0.0.1", "192.168.1.1"]);
 //! ```
 
-use serde::Deserialize;
-use std::time::Duration;
 use thiserror::Error;
-
-/// Timeout for outbound CT log queries. crt.sh routinely takes 10-20s
-/// and occasionally hangs entirely; without a timeout `wafrift discover`
-/// would be a DoS-on-self for every blocked-up upstream.
-const CT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Hard cap on crt.sh response body size. A real CT-log JSON for a
-/// busy domain is a few MB at most; an adversarial / misbehaving
-/// mirror that streams multi-GB nonsense would otherwise OOM the
-/// scanner before `serde_json::from_str` ever sees the payload.
-const CT_RESPONSE_MAX_BYTES: usize = 32 * 1024 * 1024; // 32 MiB
 
 /// Public error type for the recon crate. Library callers should pattern-
 /// match on this rather than `anyhow::Error` so they can react to
@@ -72,85 +59,33 @@ pub enum ReconError {
     ResponseTooLarge { limit: usize, got: usize },
 }
 
-pub type Result<T> = std::result::Result<T, ReconError>;
-
-#[derive(Debug, Deserialize)]
-struct CrtShEntry {
-    name_value: String,
+/// Map the canonical [`ctlog`] error onto wafrift's public `ReconError`
+/// so the crt.sh transport + parse can be shared fleet-wide without
+/// changing this crate's error contract.
+impl From<ctlog::CtError> for ReconError {
+    fn from(e: ctlog::CtError) -> Self {
+        match e {
+            ctlog::CtError::Transport(t) => ReconError::Transport(t),
+            ctlog::CtError::BadStatus(s) => ReconError::BadStatus(s),
+            ctlog::CtError::Parse(p) => ReconError::Parse(p),
+            ctlog::CtError::ResponseTooLarge { limit, got } => {
+                ReconError::ResponseTooLarge { limit, got }
+            }
+        }
+    }
 }
+
+pub type Result<T> = std::result::Result<T, ReconError>;
 
 /// Discovers potential origin subdomains via Certificate Transparency logs (crt.sh).
 ///
-/// Returns a list of unique subdomains found for the target host.
+/// Returns a list of unique subdomains found for the target host. The
+/// crt.sh query URL, the bounded/timeout-guarded read, and the response
+/// normalization all live in the canonical [`ctlog`] crate (wafrift was
+/// the donor for that reader); this entry point preserves the historical
+/// `ReconError` contract callers match on.
 pub async fn discover_subdomains_ct(domain: &str) -> Result<Vec<String>> {
-    tracing::info!(domain, "querying crt.sh for CT logs");
-
-    let client = reqwest::Client::builder()
-        .timeout(CT_QUERY_TIMEOUT)
-        .build()?;
-    let url = format!("https://crt.sh/?q=%.{domain}&output=json");
-
-    let mut res = client.get(&url).send().await?;
-
-    if !res.status().is_success() {
-        return Err(ReconError::BadStatus(res.status()));
-    }
-
-    // Stream-bounded read: pull chunks until either EOF or we exceed
-    // the cap. Avoids `res.text()` which buffers the full body before
-    // returning — a malicious / runaway mirror could OOM us there
-    // because reqwest happily allocates for any Content-Length.
-    let mut body_bytes = Vec::with_capacity(64 * 1024);
-    while let Some(chunk) = res.chunk().await? {
-        if body_bytes.len() + chunk.len() > CT_RESPONSE_MAX_BYTES {
-            return Err(ReconError::ResponseTooLarge {
-                limit: CT_RESPONSE_MAX_BYTES,
-                got: body_bytes.len() + chunk.len(),
-            });
-        }
-        body_bytes.extend_from_slice(&chunk);
-    }
-    let body = String::from_utf8(body_bytes).map_err(|e| {
-        ReconError::Parse(serde_json::Error::io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("crt.sh response was not valid UTF-8: {e}"),
-        )))
-    })?;
-    let subdomains = parse_crtsh_response(&body, domain)?;
-
-    tracing::info!(
-        found = subdomains.len(),
-        "discovered subdomains via CT logs"
-    );
-    Ok(subdomains)
-}
-
-/// Parse a crt.sh JSON response into deduplicated subdomain list.
-///
-/// Extracted for testability — this is the pure logic without HTTP.
-fn parse_crtsh_response(body: &str, domain: &str) -> Result<Vec<String>> {
-    let entries: Vec<CrtShEntry> = serde_json::from_str(body)?;
-
-    // Normalise the caller-supplied domain once so it can be compared
-    // against the already-lowercased subdomain entries. Without this,
-    // passing domain="Example.COM" would cause s="example.com" != domain
-    // (case mismatch) and the base domain would leak into the results.
-    let domain_lower = domain.to_ascii_lowercase();
-
-    let mut subdomains: Vec<String> = entries
-        .into_iter()
-        .flat_map(|e| {
-            e.name_value
-                .split('\n')
-                .map(|s| s.trim().to_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .filter(|s| !s.is_empty() && !s.contains('*') && s.as_str() != domain_lower)
-        .collect();
-
-    subdomains.sort();
-    subdomains.dedup();
-    Ok(subdomains)
+    Ok(ctlog::discover_subdomains_ct(domain).await?)
 }
 
 /// Resolves a list of hostnames to IP addresses using local DNS.
@@ -211,128 +146,11 @@ pub fn filter_origin_ips(ips: &[String]) -> Vec<String> {
 mod tests {
     use super::*;
 
-    // ── parse_crtsh_response tests ─────────────────────────────────────
-
-    #[test]
-    fn parses_valid_crtsh_json() {
-        let json = r#"[
-            {"name_value": "api.example.com"},
-            {"name_value": "www.example.com\nmail.example.com"},
-            {"name_value": "*.example.com"},
-            {"name_value": "example.com"}
-        ]"#;
-
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(
-            result,
-            vec!["api.example.com", "mail.example.com", "www.example.com",]
-        );
-    }
-
-    #[test]
-    fn deduplicates_subdomains() {
-        let json = r#"[
-            {"name_value": "api.example.com"},
-            {"name_value": "api.example.com"},
-            {"name_value": "API.EXAMPLE.COM"}
-        ]"#;
-
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec!["api.example.com"]);
-    }
-
-    #[test]
-    fn filters_wildcards_and_base_domain() {
-        let json = r#"[
-            {"name_value": "*.example.com"},
-            {"name_value": "example.com"},
-            {"name_value": "sub.example.com"}
-        ]"#;
-
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec!["sub.example.com"]);
-    }
-
-    #[test]
-    fn handles_empty_json_array() {
-        let result = parse_crtsh_response("[]", "example.com").unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn rejects_invalid_json() {
-        let result = parse_crtsh_response("not json", "example.com");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn handles_multiline_name_values() {
-        let json = r#"[
-            {"name_value": "a.example.com\nb.example.com\nc.example.com"}
-        ]"#;
-
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(
-            result,
-            vec!["a.example.com", "b.example.com", "c.example.com",]
-        );
-    }
-
-    #[test]
-    fn trims_whitespace_in_entries() {
-        let json = r#"[
-            {"name_value": "  api.example.com  "},
-            {"name_value": "\n  www.example.com \n"}
-        ]"#;
-
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec!["api.example.com", "www.example.com",]);
-    }
-
-    // ── F132: domain case-normalisation regression tests ──────────────
-
-    #[test]
-    fn mixed_case_domain_excludes_base() {
-        // Caller passes "Example.COM" — crt.sh entries are normalised to
-        // lowercase. Before F132 the comparison s != domain was always
-        // true (case mismatch), causing "example.com" to appear in results.
-        let json = r#"[
-            {"name_value": "sub.example.com"},
-            {"name_value": "example.com"}
-        ]"#;
-        let result = parse_crtsh_response(json, "Example.COM").unwrap();
-        assert_eq!(result, vec!["sub.example.com"]);
-        assert!(!result.contains(&"example.com".to_string()));
-    }
-
-    #[test]
-    fn all_caps_domain_excludes_base() {
-        let json = r#"[{"name_value": "EXAMPLE.COM"},{"name_value": "api.example.com"}]"#;
-        let result = parse_crtsh_response(json, "EXAMPLE.COM").unwrap();
-        assert_eq!(result, vec!["api.example.com"]);
-    }
-
-    #[test]
-    fn camel_case_domain_excludes_base() {
-        let json = r#"[{"name_value": "mail.ExAmPlE.cOm"},{"name_value": "ExAmPlE.cOm"}]"#;
-        let result = parse_crtsh_response(json, "ExAmPlE.cOm").unwrap();
-        assert_eq!(result, vec!["mail.example.com"]);
-    }
-
-    #[test]
-    fn lowercase_domain_still_works() {
-        // Regression guard: existing lowercase behaviour must be unchanged.
-        let json = r#"[{"name_value": "api.example.com"},{"name_value": "example.com"}]"#;
-        let result = parse_crtsh_response(json, "example.com").unwrap();
-        assert_eq!(result, vec!["api.example.com"]);
-    }
-
-    #[test]
-    fn mixed_case_domain_empty_result_when_only_base() {
-        let json = r#"[{"name_value": "Example.COM"}]"#;
-        let result = parse_crtsh_response(json, "Example.COM").unwrap();
-        assert!(result.is_empty());
-    }
+    // crt.sh query-URL construction + response normalization (the parse
+    // path these tests used to cover) now live in the canonical `ctlog`
+    // crate and are exercised by `ctlog`'s own suite. wafrift consumes
+    // `ctlog::discover_subdomains_ct` via `discover_subdomains_ct` above;
+    // the edge-IP origin-filtering below is wafrift-specific and stays here.
 
     // ── is_edge_ip tests ───────────────────────────────────────────────
 

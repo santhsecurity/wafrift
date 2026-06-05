@@ -21,6 +21,106 @@
 //! mutation should round-trip through `wafrift_strategy::evade` with
 //! the parameter value lifted into the request body.
 
+/// HTTP Parameter Pollution variant.
+///
+/// HPP exploits the gap between which value a WAF parses (almost
+/// always the first occurrence of a duplicate key) and which value the
+/// backend parses (PHP/Express/Django/Rails typically take the LAST;
+/// arrays — `param[]=` — preserve all). A safe-looking pair on the
+/// WAF-visible side carries the WAF inspection while the backend
+/// reads the attack payload from a duplicate.
+///
+/// Pre-R74 the [`UrlStrategy::Hpp`] variant was a documented stub —
+/// `apply_bytes` only sees one value, so it had no way to add a second
+/// pair. The architectural fix lives here, operating on the
+/// `(name, value)` pair list directly.
+///
+/// Pass 21 R74 — closes pass-20 F4 / Innovation-audit F1 (LAW 1 stub).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HppStrategy {
+    /// `param=attack` → `param=safe&param=attack`. WAFs that take the
+    /// first value see `safe`; backends that take the last see the
+    /// attack. Most common HPP form in 2024–2026 real-world bypasses.
+    DuplicateFirst {
+        /// The "safe" value the WAF will inspect.
+        decoy: String,
+    },
+    /// `param=attack` → `param=attack&param=safe`. Inverse — backends
+    /// that take FIRST see the attack while WAFs that scan ALL pairs
+    /// dilute their attention with a benign trailer.
+    DuplicateLast {
+        /// The "safe" value emitted after the attack value.
+        decoy: String,
+    },
+    /// `param=attack` → `param[]=attack`. PHP-style array syntax.
+    /// Some Spring / Django middleware re-routes `param[]` to the same
+    /// handler that reads `param`, while WAF rules anchored on the
+    /// literal `param=` miss the bracketed form.
+    ArrBracket,
+}
+
+impl HppStrategy {
+    /// Stable technique label for the gene-bank.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::DuplicateFirst { .. } => "url:hpp_duplicate_first",
+            Self::DuplicateLast { .. } => "url:hpp_duplicate_last",
+            Self::ArrBracket => "url:hpp_arr_bracket",
+        }
+    }
+}
+
+/// Apply the chosen HPP strategy to a `(name, value)` pair list.
+///
+/// Returns a new pair list. Empty input returns empty output. Names
+/// that contain `&`, `=`, or `#` are passed through unchanged (the
+/// caller is responsible for not handing us pre-encoded structure
+/// bytes — feeding `"a&b"` as a name would have ambiguous semantics
+/// the moment we re-serialize via `&`-joining).
+///
+/// `pub` so the proxy / scan paths can dispatch this independently of
+/// [`mutate_url`]. The strategy-engine wiring lives one layer above.
+#[must_use]
+pub fn query_pollute_pairs(
+    pairs: &[(String, String)],
+    strategy: &HppStrategy,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::with_capacity(pairs.len() * 2);
+    for (name, value) in pairs {
+        // Defensive: a name containing structural delimiters would
+        // round-trip ambiguously. Pass through without polluting —
+        // honest no-op rather than producing malformed wire bytes.
+        if name.contains(['&', '=', '#']) {
+            out.push((name.clone(), value.clone()));
+            continue;
+        }
+        match strategy {
+            HppStrategy::DuplicateFirst { decoy } => {
+                out.push((name.clone(), decoy.clone()));
+                out.push((name.clone(), value.clone()));
+            }
+            HppStrategy::DuplicateLast { decoy } => {
+                out.push((name.clone(), value.clone()));
+                out.push((name.clone(), decoy.clone()));
+            }
+            HppStrategy::ArrBracket => {
+                // `param` → `param[]`. If the name already ends in
+                // `[]`, leave it alone — appending another `[]` would
+                // produce `param[][]` which is a different framework
+                // contract (Rails nested-array vs flat-array).
+                let new_name = if name.ends_with("[]") {
+                    name.clone()
+                } else {
+                    format!("{name}[]")
+                };
+                out.push((new_name, value.clone()));
+            }
+        }
+    }
+    out
+}
+
 /// Knobs for [`mutate_url`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UrlMutateConfig {
@@ -64,18 +164,19 @@ pub enum UrlStrategy {
     /// encodings that some upstream parsers normalise but signatures
     /// don't.
     NonCanonicalSpaces,
-    /// Insert empty PHP-style array brackets `[]` after the param name
-    /// to force HTTP Parameter Pollution path.
+    /// **DEPRECATED — use [`query_pollute_pairs`] with
+    /// [`HppStrategy::ArrBracket`] instead.**
     ///
-    /// **Audit (2026-05-10): NOT YET IMPLEMENTED.** `apply_bytes` only
-    /// receives the value — the (name, value) pair lives one layer up
-    /// in `mutate_query_string`. The current behaviour is a value
-    /// pass-through, which is a stub. Selecting this strategy will
-    /// log a `tracing::warn` but otherwise return the value unchanged
-    /// so existing callers don't break. Real HPP needs a query-level
-    /// mutator that operates on the pair list — track via a dedicated
-    /// `query_pollute_pairs()` function rather than as a `UrlStrategy`
-    /// variant.
+    /// This `UrlStrategy::Hpp` value-level variant is a stub: a single
+    /// `value` byte slice cannot express HPP (which requires
+    /// modifying the `(name, value)` pair set). Selecting it returns
+    /// the value unchanged and logs `url:hpp_unimplemented` so the
+    /// gene-bank doesn't get poisoned with a fake "winning HPP"
+    /// entry. The real implementation moved to `query_pollute_pairs`
+    /// in pass 21 R74; new callers must use that. Retained as `pub`
+    /// for LAW 2 backwards-compat — existing rule files that name
+    /// `url:hpp` keep parsing but emit the honest `_unimplemented`
+    /// label so the operator sees nothing was actually polluted.
     Hpp,
 }
 
@@ -626,5 +727,113 @@ mod tests {
     #[test]
     fn hpp_strategy_label_is_stable() {
         assert_eq!(UrlStrategy::Hpp.label(), "url:hpp");
+    }
+
+    // ── R74 pass-21: query_pollute_pairs (real HPP at pair layer) ──────
+
+    #[test]
+    fn hpp_duplicate_first_prepends_decoy() {
+        // `param=attack` → `[(param, safe), (param, attack)]`
+        // WAFs that take first see "safe"; backends (PHP/Express/
+        // Django) that take last see "attack". This is the canonical
+        // form of CVE-class HPP per OWASP HPP guide.
+        let pairs = vec![("param".to_string(), "attack".to_string())];
+        let out = query_pollute_pairs(
+            &pairs,
+            &HppStrategy::DuplicateFirst {
+                decoy: "safe".into(),
+            },
+        );
+        assert_eq!(
+            out,
+            vec![
+                ("param".into(), "safe".into()),
+                ("param".into(), "attack".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn hpp_duplicate_last_appends_decoy() {
+        let pairs = vec![("param".to_string(), "attack".to_string())];
+        let out = query_pollute_pairs(
+            &pairs,
+            &HppStrategy::DuplicateLast {
+                decoy: "safe".into(),
+            },
+        );
+        assert_eq!(
+            out,
+            vec![
+                ("param".into(), "attack".into()),
+                ("param".into(), "safe".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn hpp_arr_bracket_appends_bracket_suffix() {
+        // `param=attack` → `param[]=attack`. Spring / Django / Rails
+        // route `param[]` to the same handler that reads `param`,
+        // while WAF rules anchored on `param=` literal miss it.
+        let pairs = vec![("param".to_string(), "attack".to_string())];
+        let out = query_pollute_pairs(&pairs, &HppStrategy::ArrBracket);
+        assert_eq!(out, vec![("param[]".into(), "attack".into())]);
+    }
+
+    #[test]
+    fn hpp_arr_bracket_does_not_double_bracket_existing_array_param() {
+        // Anti-rig: if the name already ends in `[]`, applying
+        // ArrBracket twice would produce `param[][]` — a different
+        // framework contract (Rails nested-array). Pin the no-op
+        // behaviour so a future refactor doesn't accidentally
+        // re-bracket.
+        let pairs = vec![("param[]".to_string(), "v".to_string())];
+        let out = query_pollute_pairs(&pairs, &HppStrategy::ArrBracket);
+        assert_eq!(out, vec![("param[]".into(), "v".into())]);
+    }
+
+    #[test]
+    fn hpp_pollute_pairs_empty_input_returns_empty_output() {
+        let out = query_pollute_pairs(
+            &[],
+            &HppStrategy::DuplicateFirst {
+                decoy: "safe".into(),
+            },
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn hpp_pollute_pairs_name_with_structural_byte_passes_through() {
+        // Anti-rig: a name containing `&`, `=`, or `#` cannot
+        // round-trip cleanly through &-joining. Rather than emitting
+        // ambiguous bytes the caller has to disambiguate, pass through
+        // unchanged. R74 §15 audit-hunts.
+        let pairs = vec![("a&b".to_string(), "v".to_string())];
+        let out = query_pollute_pairs(
+            &pairs,
+            &HppStrategy::DuplicateFirst {
+                decoy: "safe".into(),
+            },
+        );
+        assert_eq!(out, pairs);
+    }
+
+    #[test]
+    fn hpp_strategy_labels_are_distinct() {
+        // The bandit dedups by technique label; collapsing two distinct
+        // HPP shapes into one label would silently merge their
+        // success-rate histories.
+        let s1 = HppStrategy::DuplicateFirst {
+            decoy: "x".into(),
+        };
+        let s2 = HppStrategy::DuplicateLast {
+            decoy: "x".into(),
+        };
+        let s3 = HppStrategy::ArrBracket;
+        assert_ne!(s1.label(), s2.label());
+        assert_ne!(s2.label(), s3.label());
+        assert_ne!(s1.label(), s3.label());
     }
 }

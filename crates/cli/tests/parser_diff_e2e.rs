@@ -16,16 +16,17 @@
 //! 7. --show-equal adds an equals_shown array to the JSON output.
 //! 8. Text format (non-quiet) does not emit a JSON object on stdout.
 
-use std::process::Command;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 /// Spawn a mock server that simulates the Tomcat semicolon-strip
 /// WAF/origin disagreement:
 ///   - `/admin`          → 403 Forbidden (the WAF-blocked path)
 ///   - `/admin;…`        → 200 OK   (the WAF lets it through because
-///                                    it doesn't recognise the semicolon
-///                                    variant as the protected route)
+///     it doesn't recognise the semicolon
+///     variant as the protected route)
 ///   - everything else   → 200 OK   (the safe baseline)
 ///
 /// Waits until the OS-level TCP accept queue is open before returning so the
@@ -58,7 +59,11 @@ async fn spawn_semicolon_mock() -> std::net::SocketAddr {
                 let (status, reason, body): (&str, &str, &str) = if path == "/admin" {
                     ("403", "Forbidden", "blocked")
                 } else if path.starts_with("/admin;") {
-                    ("200", "OK", "admin-panel-content-served-through-semicolon-seam")
+                    (
+                        "200",
+                        "OK",
+                        "admin-panel-content-served-through-semicolon-seam",
+                    )
                 } else {
                     ("200", "OK", "ok")
                 };
@@ -77,36 +82,50 @@ async fn spawn_semicolon_mock() -> std::net::SocketAddr {
     // rather than tokio's async connect to avoid the reactor-saturation issue
     // that manifests when 20+ test binaries run in parallel on Windows.
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
 }
 
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
+/// Mock where the baseline `/admin` serves normally (200) but EVERY
+/// mutated variant path is rate-limited (429). A correct parser-diff
+/// must treat 429 as throttle noise and emit ZERO divergences — the
+/// same gate bypass_probe applies.
+async fn spawn_throttle_mock() -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8 * 1024];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+                let (status, reason, body): (&str, &str, &str) = if path == "/admin" {
+                    ("200", "OK", "admin-baseline")
+                } else {
+                    ("429", "Too Many Requests", "rate-limited")
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    common::wait_for_server(addr);
+    addr
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -122,12 +141,29 @@ fn parser_diff_help_documents_options() {
 }
 
 #[test]
-fn parser_diff_appears_in_main_help() {
+// parser-diff consolidated under `wafrift diff path` (2026-05). LAW 2: flat
+// alias must keep working forever.
+fn parser_diff_is_grouped_under_diff_with_working_alias() {
+    // 1. The unified `diff` command is discoverable in top-level help.
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("parser-diff"),
-        "parser-diff must appear in top-level help: {stdout}"
+        stdout.contains("\n  diff"),
+        "`diff` must appear as a top-level command in --help: {stdout}"
+    );
+
+    // 2. Canonical new path exits 0.
+    let (code2, _stdout2, stderr2) = wafrift(&["diff", "path", "--help"]);
+    assert_eq!(
+        code2, 0,
+        "`wafrift diff path --help` must exit 0 — stderr:\n{stderr2}"
+    );
+
+    // 3. Deprecated flat alias still runs (LAW 2 backwards-compat).
+    let (code3, _stdout3, stderr3) = wafrift(&["parser-diff", "--help"]);
+    assert_eq!(
+        code3, 0,
+        "`wafrift parser-diff --help` must still exit 0 — stderr:\n{stderr3}"
     );
 }
 
@@ -217,14 +253,51 @@ fn parser_diff_detects_semicolon_strip_divergence() {
     // parser-diff emits severity in uppercase ("HIGH") consistent with probe_classify.
     let high_semicolon = divergences.iter().any(|d| {
         d["kind"].as_str().unwrap_or("") == "semicolon-strip"
-            && matches!(
-                d["severity"].as_str().unwrap_or(""),
-                "HIGH" | "high"
-            )
+            && matches!(d["severity"].as_str().unwrap_or(""), "HIGH" | "high")
     });
     assert!(
         high_semicolon,
         "semicolon-strip divergence must carry severity=HIGH/high (403→200): {v}"
+    );
+}
+
+#[test]
+fn parser_diff_suppresses_throttle_status_variants() {
+    // Regression: every mutated variant returns HTTP 429 (rate limited).
+    // A 200→429 flip is the target throttling us, NOT a parser
+    // disagreement — parser-diff must gate it as noise (the same gate
+    // bypass_probe applies) and emit ZERO divergences. Pre-fix it
+    // surfaced each 429 as a LOW divergence and buried real findings.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .unwrap();
+    let addr = rt.block_on(spawn_throttle_mock());
+
+    let (code, stdout, stderr) = wafrift(&[
+        "parser-diff",
+        &format!("http://{addr}/admin"),
+        "--format",
+        "json",
+        "--quiet",
+        "--delay-ms",
+        "0",
+        "--timeout-secs",
+        "10",
+    ]);
+    assert_eq!(code, 0, "parser-diff must exit 0; stderr: {stderr}");
+
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert!(
+        v["probes_fired"].as_u64().unwrap_or(0) > 0,
+        "probes must have fired: {v}"
+    );
+    let divergences = v["divergences"].as_array().expect("divergences array");
+    assert!(
+        divergences.is_empty(),
+        "429 throttle responses must be suppressed, not reported as divergences: {v}"
     );
 }
 
@@ -360,7 +433,10 @@ fn parser_diff_show_equal_adds_equals_shown_array() {
         "--timeout-secs",
         "10",
     ]);
-    assert_eq!(code, 0, "parser-diff --show-equal must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "parser-diff --show-equal must exit 0; stderr: {stderr}"
+    );
 
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
@@ -390,7 +466,10 @@ fn parser_diff_text_format_is_not_json_on_stdout() {
         "--timeout-secs",
         "10",
     ]);
-    assert_eq!(code, 0, "parser-diff text format must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "parser-diff text format must exit 0; stderr: {stderr}"
+    );
     // Text format must NOT emit a JSON object as the entire stdout.
     assert!(
         serde_json::from_str::<serde_json::Value>(stdout.trim()).is_err()

@@ -53,7 +53,7 @@ use serde_json::json;
 use wafrift_transport::stealth::{ImpersonateProfile, StealthClient, supported_profiles};
 
 #[derive(Args, Debug)]
-pub struct Ja3DiffArgs {
+pub(crate) struct Ja3DiffArgs {
     /// Target URL. Must be a non-bogon address (the stealth client
     /// refuses 127.0.0.1, RFC1918, link-local, CGN, Teredo, IMDS —
     /// same SSRF gate the proxy uses).
@@ -106,19 +106,10 @@ struct ProbeOutcome {
 }
 
 /// Entry point for the `wafrift ja3-diff` subcommand.
-pub fn run_ja3_diff(mut args: Ja3DiffArgs) -> ExitCode {
+pub(crate) fn run_ja3_diff(mut args: Ja3DiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!(
-                "{} failed to start tokio runtime: {e}",
-                "ja3-diff error:".red().bold()
-            );
-            return ExitCode::from(1);
-        }
-    };
-    rt.block_on(run_async(args))
+    // §7 DEDUPLICATION: delegate to the canonical runtime helper.
+    crate::helpers::block_on_with_runtime(run_async(args))
 }
 
 async fn run_async(args: Ja3DiffArgs) -> ExitCode {
@@ -300,23 +291,26 @@ fn classify_severity(outcomes: &mut [ProbeOutcome]) {
             // Same status class, different body — could be a JS
             // challenge page swapped in, or just dynamic content.
             // Threshold at 20% to mirror the parser-diff family.
-            let delta = if baseline_body_len == 0 {
-                if body_len == 0 { 0.0 } else { 100.0 }
-            } else {
-                ((body_len as f64 - baseline_body_len as f64).abs() / baseline_body_len as f64)
-                    * 100.0
-            };
+            //
+            // R64 pass-21 §7 DEDUP: delegate to
+            // `parser_diff_common::body_delta_pct` instead of
+            // re-implementing the formula. Pre-fix this site
+            // used `.abs()` (unsigned), while the canonical
+            // function is signed — wrap with .abs() at the
+            // call site to keep the existing "fire on growth OR
+            // shrinkage" behaviour, but the formula now comes
+            // from one canonical home. If `respdiff` ever swaps
+            // its delta semantics (e.g., similarity score),
+            // this site automatically tracks the change.
+            let delta =
+                crate::parser_diff_common::body_delta_pct(baseline_body_len, body_len).abs();
             o.severity = if delta > 20.0 { "medium" } else { "none" };
         }
     }
 }
 
 fn print_outcome_text(o: &ProbeOutcome) {
-    let badge = match o.severity {
-        "high" => o.severity.bright_red().bold(),
-        "medium" => o.severity.yellow().bold(),
-        _ => o.severity.bright_black(),
-    };
+    let badge = crate::parser_diff_common::severity_badge(o.severity);
     print!("  [{badge:>6}] {:<12} ", o.profile.bold());
     if let Some(e) = &o.error {
         println!("{} {}", "error:".bright_red(), e.bright_red());

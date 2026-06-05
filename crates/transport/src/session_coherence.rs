@@ -1,10 +1,10 @@
 //! Wire-time header-order coherence for stealth transports.
 //!
-//! `wafrift-fingerprint::session` ships the canonical browser
+//! `guise::http::session_coherence` ships the canonical browser
 //! header orders + H2 SETTINGS profiles, plus the `SessionPool`
 //! primitive that gives the same host the same browser profile
-//! across a session window. This module is the THIN bridge from
-//! that library to the live transport path:
+//! across a session window. This module is the thin bridge from
+//! the shared stealth substrate to the live transport path:
 //!
 //! - [`reorder_headers_for_profile`] takes the `--tls-impersonate`
 //!   profile name + the caller's header bag, and returns a reordered
@@ -13,20 +13,19 @@
 //!   the browser block at the tail — preserving the browser shape
 //!   without dropping anything.
 //!
-//! - [`SharedSessionPool`] wraps a [`wafrift_fingerprint::session::SessionPool`]
+//! - [`SharedSessionPool`] wraps a [`guise::http::session_coherence::SessionPool`]
 //!   in an `Arc` so the proxy can clone it across many tokio tasks
 //!   without re-allocating per-task profile state.
 //!
-//! Why this lives in `wafrift-transport` and not in fingerprint
-//! itself: the fingerprint crate is dep-light (no HTTP, no TLS).
-//! Pulling reqwest/rquest types in there would invert the dep
-//! graph. Keeping the bridge here means the wire-time concerns
-//! (header maps, request mutation) stay in the transport crate.
+//! Keeping the bridge here means the wire-time concerns (header maps,
+//! request mutation) stay in the transport crate while browser identity
+//! data remains centralized in `stealth`.
 
 use std::sync::Arc;
 
-use wafrift_fingerprint::fingerprint::BrowserProfile;
-use wafrift_fingerprint::session::{HeaderOrder, SessionPool, pair_for_name};
+use guise::fingerprint::StealthProfile;
+use guise::fingerprint::browser_catalog::HeaderProfile;
+use guise::http::session_coherence::{pair_for_name, pair_for_profile, HeaderOrder, SessionPool};
 
 /// Reorder `headers` to match the canonical insertion order of the
 /// named browser family. Returns the input unchanged if `profile_name`
@@ -44,6 +43,22 @@ pub fn reorder_headers_for_profile(
     }
 }
 
+/// Reorder `headers` to match a canonical stealth browser profile.
+///
+/// Use this when the caller already has a [`StealthProfile`]; it avoids lossy
+/// string-prefix family inference and delegates directly to the shared stealth
+/// profile-to-wire-shape contract.
+#[must_use]
+pub fn reorder_headers_for_stealth_profile(
+    profile: StealthProfile,
+    headers: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    match pair_for_profile(profile) {
+        Some((order, _h2)) => order.apply_in_order(headers),
+        None => headers,
+    }
+}
+
 /// Direct (HeaderOrder, _) lookup — exposed so callers that want
 /// the order without paying for the H2Profile clone get a small
 /// fast path. Returns `None` for unknown profiles.
@@ -52,13 +67,19 @@ pub fn header_order_for_profile(profile_name: &str) -> Option<HeaderOrder> {
     pair_for_name(profile_name).map(|(order, _)| order)
 }
 
+/// Direct HeaderOrder lookup for a canonical stealth browser profile.
+#[must_use]
+pub fn header_order_for_stealth_profile(profile: StealthProfile) -> Option<HeaderOrder> {
+    pair_for_profile(profile).map(|(order, _)| order)
+}
+
 /// Thread-safe wrapper around `SessionPool` for the proxy path
 /// (which spawns tokio tasks freely and needs cheap clones).
 ///
 /// The pool itself uses interior `RwLock`s so the `Arc` does not
 /// add lock contention beyond what `SessionPool` already manages —
 /// it only saves the per-clone heap allocation of cloning the
-/// underlying `Vec<&'static BrowserProfile>` profile list.
+/// underlying `Vec<&'static HeaderProfile>` profile list.
 #[derive(Clone)]
 pub struct SharedSessionPool(Arc<SessionPool>);
 
@@ -67,13 +88,13 @@ impl SharedSessionPool {
     /// semantics: 0 is coerced to 1; same-host calls return the same
     /// profile until the counter trips, then re-shuffle.
     #[must_use]
-    pub fn new(profiles: Vec<&'static BrowserProfile>, rotate_after_requests: u32) -> Self {
+    pub fn new(profiles: Vec<&'static HeaderProfile>, rotate_after_requests: u32) -> Self {
         Self(Arc::new(SessionPool::new(profiles, rotate_after_requests)))
     }
 
     /// Profile assigned to `host` for the current session. See
     /// `SessionPool::profile_for` for the rotation semantics.
-    pub fn profile_for(&self, host: &str) -> &'static BrowserProfile {
+    pub fn profile_for(&self, host: &str) -> &'static HeaderProfile {
         self.0.profile_for(host)
     }
 
@@ -92,7 +113,8 @@ impl SharedSessionPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wafrift_fingerprint::fingerprint::PROFILES;
+    use guise::fingerprint::StealthProfile;
+    use guise::fingerprint::browser_catalog::PROFILES;
 
     // ── reorder_headers_for_profile ────────────────────────────────
 
@@ -211,6 +233,47 @@ mod tests {
     fn header_order_unknown_profile_is_none() {
         assert!(header_order_for_profile("unknown").is_none());
         assert!(header_order_for_profile("").is_none());
+    }
+
+    #[test]
+    fn header_order_for_stealth_profile_uses_canonical_catalog_profile() {
+        assert_eq!(
+            header_order_for_stealth_profile(StealthProfile::ChromeAndroid)
+                .unwrap()
+                .family,
+            "chrome"
+        );
+        assert_eq!(
+            header_order_for_stealth_profile(StealthProfile::SafariIphone)
+                .unwrap()
+                .family,
+            "safari"
+        );
+        assert!(header_order_for_stealth_profile(StealthProfile::Ie11Windows).is_none());
+    }
+
+    #[test]
+    fn reorder_for_stealth_profile_does_not_require_profile_name_prefix() {
+        let input = vec![
+            ("Cookie".into(), "a=1".into()),
+            ("User-Agent".into(), "mobile-chrome".into()),
+            ("Host".into(), "m.example.com".into()),
+        ];
+        let out = reorder_headers_for_stealth_profile(StealthProfile::ChromeAndroid, input);
+
+        assert!(
+            out[0].0.eq_ignore_ascii_case("host"),
+            "canonical ChromeAndroid profile should use Chrome header order"
+        );
+        let ua_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
+            .unwrap();
+        let cookie_pos = out
+            .iter()
+            .position(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .unwrap();
+        assert!(ua_pos < cookie_pos);
     }
 
     // ── SharedSessionPool ──────────────────────────────────────────

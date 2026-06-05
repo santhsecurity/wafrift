@@ -4,7 +4,7 @@ use serde_json::json;
 use std::process::ExitCode;
 
 #[derive(Debug, clap::Args)]
-pub struct EgressExampleArgs {
+pub(crate) struct EgressExampleArgs {
     /// Preset name: `tor` (`SOCKS5h` to local Tor).
     #[arg(long, default_value = "tor", value_parser = ["tor"])]
     pub preset: String,
@@ -18,22 +18,20 @@ pub struct EgressExampleArgs {
     pub format: String,
 }
 
-pub fn run_egress_example(args: EgressExampleArgs, quiet: bool) -> ExitCode {
-    let snippet = match args.preset.as_str() {
-        "tor" => {
-            if !quiet {
-                eprintln!(
-                    "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor."
-                );
-            }
+pub(crate) fn run_egress_example(args: EgressExampleArgs) -> ExitCode {
+    let (snippet, comment) = match args.preset.as_str() {
+        "tor" => (
             json!({
-                "schema_version": 1,
                 "proxies": ["socks5h://127.0.0.1:9050"],
-            })
-        }
-        _ => {
-            eprintln!("unknown preset '{}'. Fix: use --preset tor.", args.preset);
-            return ExitCode::from(1);
+            }),
+            "# Tor: start a local Tor SOCKS listener (default 9050). `socks5h` resolves DNS via Tor.",
+        ),
+        other => {
+            eprintln!(
+                "unknown egress preset {other:?}. Available: tor. \
+                 (Run `wafrift egress-example --help` for the canonical list.)"
+            );
+            return ExitCode::from(2);
         }
     };
     if args.format == "human" {
@@ -45,7 +43,7 @@ pub fn run_egress_example(args: EgressExampleArgs, quiet: bool) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("JSON serialization failed: {e}");
+            eprintln!("{e}");
             ExitCode::from(1)
         }
     }

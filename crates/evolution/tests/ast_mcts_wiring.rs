@@ -151,7 +151,7 @@ fn ast_mcts_payload_distribution_differs_from_hill_climbing() {
         ast_payloads.iter().map(String::as_str).collect();
     // At least one rewritten variant must appear (the MCTS explores 16 rules × 4 positions).
     assert!(
-        unique.len() >= 1,
+        !unique.is_empty(),
         "AST-MCTS must produce at least one candidate payload"
     );
 }

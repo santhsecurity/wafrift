@@ -20,7 +20,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::ProxyState;
@@ -39,50 +38,15 @@ pub const MAX_GENE_BANK_BYTES: u64 = 64 * 1024 * 1024;
 /// `entry(...).or_default()` allocations before we start evicting.
 pub const MAX_RESTORED_HOSTS: usize = 10_000;
 
-/// Subset of `HostState` worth persisting across proxy restarts.
-/// Block counts and pending discovery state re-accumulate naturally;
-/// what we don't want to lose is the painstakingly-discovered winners
-/// pool, the per-host blocklist, and the statistical state needed to
-/// resume rotation exactly where it left off.
-///
-/// All fields added after the initial schema use `#[serde(default)]`
-/// so existing gene-bank JSON files that predate the field load
-/// cleanly without errors — the new fields simply get their Default.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PersistedHostState {
-    pub proven_winners: Vec<String>,
-    pub blocklisted: Vec<String>,
-    pub waf_name: Option<String>,
-    /// Per-technique stats: (name, successes, attempts). Persisting
-    /// these means the winner-pool evaluation on reload has real data
-    /// instead of starting from zero, so techniques promoted before a
-    /// restart keep their scores.
-    #[serde(default)]
-    pub technique_stats: Vec<(String, u32, u32)>,
-    /// Per-winner consecutive-block counter for drift detection:
-    /// (technique_name, consecutive_blocks_since_last_success). Allows
-    /// the proxy to evict a drifting winner immediately on restart rather
-    /// than after DRIFT_BLOCK_LIMIT additional blocks post-restart.
-    #[serde(default)]
-    pub winner_consecutive_blocks: Vec<(String, u32)>,
-    /// Round-robin rotation index into `proven_winners`. Stored as u64
-    /// for JSON compatibility (usize is platform-dependent; JSON round-
-    /// trip through u64 is lossless on all targets we support).
-    #[serde(default)]
-    pub rotation_index: u64,
-    /// Last successful technique name. Serialised as a human-readable
-    /// string (matches `Technique::to_string()`) for forward compat --
-    /// new Technique variants won't break old gene-bank files.
-    #[serde(default)]
-    pub last_success: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PersistedGeneBank {
-    /// Format version so future schema changes can be detected.
-    pub schema: u32,
-    pub hosts: HashMap<String, PersistedHostState>,
-}
+// R77 pass-21 §7 DEDUP: the on-disk schema lives in
+// `wafrift_types::gene_bank_io` so the proxy + the 4 cli tools
+// (bank/seed/report/replay) share a single canonical definition.
+// Pre-fix five crates carried five independent copies that had
+// silently drifted (replay was missing 3 of 4 fields; bank used
+// BTreeMap while others used HashMap). Anchor here at the
+// leaf-level types crate to make the next field addition a single
+// edit that propagates to every consumer at compile-time.
+pub use wafrift_types::gene_bank_io::{PersistedGeneBank, PersistedHostState};
 
 /// Resolve the operator's `--gene-bank` flag value to a concrete
 /// path, or `None` to disable persistence. The default (empty
@@ -150,33 +114,85 @@ pub fn load(path: &Path) -> PersistedGeneBank {
                 info!(path = %path.display(), "gene bank file is empty; starting fresh");
                 return PersistedGeneBank::default();
             }
-            match serde_json::from_str::<PersistedGeneBank>(&s) {
-                Ok(bank) => {
-                    if bank.schema > 1 {
-                        warn!(
-                            path = %path.display(),
-                            schema = bank.schema,
-                            "gene bank has newer schema than expected (1); data may be incomplete"
-                        );
+            // Distinguish schema-tagged (v1) from pre-schema (v0.1)
+            // by parsing as `Value` first and checking for a top-level
+            // `schema` key that is numeric. The canonical
+            // `PersistedGeneBank` carries `#[serde(default)]` on every
+            // field, so a permissive parse would silently accept a
+            // v0.1 flat-HashMap blob as a schema-0 empty bank and drop
+            // every host — see the `unknown_fields_are_ignored`
+            // contract in `wafrift_types::gene_bank_io::tests`.
+            //
+            // Numeric-typed check (not just key presence) is load-
+            // bearing: a v0.1 bank for a host whose DNS label is
+            // literally `schema` would have a non-numeric value under
+            // that key, and we must treat it as a host, not a schema
+            // tag, or we'd silently lose that host's discovery.
+            match serde_json::from_str::<serde_json::Value>(&s) {
+                Ok(serde_json::Value::Object(map)) => {
+                    let has_numeric_schema = map
+                        .get("schema")
+                        .is_some_and(serde_json::Value::is_u64);
+                    if has_numeric_schema {
+                        let value = serde_json::Value::Object(map);
+                        match serde_json::from_value::<PersistedGeneBank>(value) {
+                            Ok(bank) => {
+                                if bank.schema > 1 {
+                                    warn!(
+                                        path = %path.display(),
+                                        schema = bank.schema,
+                                        "gene bank has newer schema than expected (1); data may be incomplete"
+                                    );
+                                }
+                                bank
+                            }
+                            Err(e) => {
+                                warn!(
+                                    path = %path.display(),
+                                    error = %e,
+                                    "gene bank malformed (schema-tagged object failed strict parse); starting fresh. Fix: inspect the file and fix the JSON syntax, or delete it to start over."
+                                );
+                                PersistedGeneBank::default()
+                            }
+                        }
+                    } else {
+                        // v0.1 flat HashMap: no `schema` wrapper, every
+                        // top-level key is a host. Migrate to schema 1.
+                        // An empty `{}` still counts as a v0.1 bank with
+                        // zero hosts, not a schema-0 bank — the test
+                        // contract `load_gene_bank_v0_1_empty_object_migrates`
+                        // pins schema=1 here.
+                        let value = serde_json::Value::Object(map);
+                        match serde_json::from_value::<HashMap<String, PersistedHostState>>(value) {
+                            Ok(flat) => {
+                                warn!(
+                                    path = %path.display(),
+                                    "loaded v0.1 gene-bank (flat HashMap); migrating to schema 1"
+                                );
+                                PersistedGeneBank {
+                                    schema: 1,
+                                    hosts: flat,
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    path = %path.display(),
+                                    error = %e,
+                                    "gene bank malformed (v0.1 flat HashMap failed parse); starting fresh."
+                                );
+                                PersistedGeneBank::default()
+                            }
+                        }
                     }
-                    bank
+                }
+                Ok(_) => {
+                    warn!(
+                        path = %path.display(),
+                        "gene bank malformed (top-level JSON is not an object); starting fresh."
+                    );
+                    PersistedGeneBank::default()
                 }
                 Err(e) => {
-                    // Backward-compat: v0.1 gene-bank was a flat HashMap without
-                    // the schema wrapper. Don't discard a practitioner's saved
-                    // discovery just because they upgraded from an older build.
-                    if let Ok(flat) =
-                        serde_json::from_str::<HashMap<String, PersistedHostState>>(&s)
-                    {
-                        warn!(
-                            path = %path.display(),
-                            "loaded v0.1 gene-bank (flat HashMap); migrating to schema 1"
-                        );
-                        return PersistedGeneBank {
-                            schema: 1,
-                            hosts: flat,
-                        };
-                    }
                     warn!(
                         path = %path.display(),
                         error = %e,
@@ -206,7 +222,13 @@ pub fn load(path: &Path) -> PersistedGeneBank {
 /// retry, or escalate.
 pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        // Propagate rather than swallow: if the parent can't be created
+        // (permissions, a file in the way), the atomic write below would
+        // fail anyway — surfacing the actual `create_dir_all` error with
+        // its path is more actionable than a downstream "no such file".
+        // `create_dir_all` is idempotent (Ok when the dir already exists),
+        // so this never regresses the common path.
+        std::fs::create_dir_all(parent)?;
     }
     let mut bank = PersistedGeneBank {
         schema: 1,
@@ -234,14 +256,6 @@ pub fn save(state: &ProxyState, path: &Path) -> std::io::Result<()> {
                 proven_winners: hs.proven_winners.clone(),
                 blocklisted: hs.blocklisted.clone(),
                 waf_name: hs.waf_name.clone(),
-                // C2: persist the statistical state that survives restarts.
-                // technique_stats, winner_consecutive_blocks, and rotation_index
-                // allow the proxy to resume winner rotation without re-paying
-                // the full discovery cost. last_success gives immediate context.
-                technique_stats: hs.technique_stats.clone(),
-                winner_consecutive_blocks: hs.winner_consecutive_blocks.clone(),
-                rotation_index: hs.rotation_index as u64,
-                last_success: hs.last_success.as_ref().map(|t| t.to_string()),
             },
         );
     }
@@ -381,6 +395,37 @@ mod tests {
         let host = bank.hosts.get("example.com").expect("example.com migrated");
         assert_eq!(host.proven_winners, vec!["encoding::Double".to_string()]);
         assert_eq!(host.waf_name.as_deref(), Some("Cloudflare"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_v01_host_literally_named_schema_is_not_misread_as_v1_tag() {
+        // Adversarial backwards-compat: a v0.1 bank where the operator
+        // had genuine discovery state for a host whose DNS label is
+        // literally `schema`. The migration must NOT mistake the
+        // top-level `schema` key for a schema version tag — that would
+        // drop the host's data on load. Reading the value's type (must
+        // be numeric for v1) is what discriminates the two cases.
+        let path = std::env::temp_dir().join(format!(
+            "wafrift-genebank-load-host-named-schema-{}",
+            std::process::id()
+        ));
+        let legacy = r#"{
+            "schema": {
+                "proven_winners": ["encoding::Hex"],
+                "blocklisted": [],
+                "waf_name": "AWS"
+            }
+        }"#;
+        std::fs::write(&path, legacy).unwrap();
+        let bank = load(&path);
+        assert_eq!(bank.schema, 1, "must migrate to schema 1, not treat 'schema' as a version tag");
+        let host = bank
+            .hosts
+            .get("schema")
+            .expect("host named 'schema' must survive migration");
+        assert_eq!(host.proven_winners, vec!["encoding::Hex".to_string()]);
+        assert_eq!(host.waf_name.as_deref(), Some("AWS"));
         let _ = std::fs::remove_file(&path);
     }
 

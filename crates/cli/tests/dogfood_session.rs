@@ -14,9 +14,11 @@
 //! between clap → run_* → JSON emission has a hole.
 
 use std::io::Write;
-use std::process::Command;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 /// Realistic mock: combines header-aware dispatch, body-aware
 /// reflection, query-aware reflection, and cache-style headers.
@@ -80,36 +82,9 @@ async fn spawn_realistic_mock() -> std::net::SocketAddr {
     // blocking connect goes through the kernel's SYN-ACK path and succeeds
     // immediately without needing the application's accept() to have run.
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
-}
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
 }
 
 /// Helper: parse stdout as JSON; on failure include both stdout
@@ -397,8 +372,10 @@ fn dogfood_attack_repeats_produce_same_shape_three_runs() {
 #[test]
 fn dogfood_attack_subprobe_failures_are_isolated() {
     // Point at unreachable target — every sub-probe's baseline
-    // probe should fail. Orchestrator must still exit 0 + emit the
-    // unified structure.
+    // probe should fail. Since R44-I3: when ≥4 sub-probes error at
+    // the transport level the orchestrator exits 1 (not 0) so CI can
+    // detect "nothing landed" rather than interpreting "0 divergences"
+    // as a clean run. The JSON report is still emitted.
     let (code, stdout, stderr) = wafrift(&[
         "attack",
         "http://127.0.0.1:1/",
@@ -411,13 +388,14 @@ fn dogfood_attack_subprobe_failures_are_isolated() {
         "2",
     ]);
     assert_eq!(
-        code, 0,
-        "attack exit 0 even with all sub-probes failing — stderr:\n{stderr}"
+        code, 1,
+        "attack must exit 1 when all sub-probes fail (transport unreachable) — stderr:\n{stderr}"
     );
     let p = parse_or_explain(&stdout, &stderr, "attack-isolated-failure");
     let probes = p["probes"].as_object().expect("probes");
-    // Every family records SOME failure signal (either `error` or
-    // `errors > 0`).
+    // Every family records SOME failure signal. The h2-diff sub-probe
+    // uses `h2_errors` (count of per-probe transport failures) rather
+    // than a top-level `error` or `errors` field — check all three.
     for (family, body) in probes {
         let has_err = body.get("error").is_some();
         let has_errors = body
@@ -425,7 +403,7 @@ fn dogfood_attack_subprobe_failures_are_isolated() {
             .and_then(serde_json::Value::as_u64)
             .map(|n| n > 0)
             .unwrap_or(false);
-        // h2 sub-probe uses h2_errors (its own naming); other probes use errors.
+        // h2-diff records transport failures in `h2_errors`.
         let has_h2_errors = body
             .get("h2_errors")
             .and_then(serde_json::Value::as_u64)
@@ -441,13 +419,17 @@ fn dogfood_attack_subprobe_failures_are_isolated() {
 // ── scan URL-query mode + --auto-distill ─────────────────────
 
 #[test]
-fn dogfood_scan_url_query_with_auto_distill_emits_minimal_payload() {
+fn dogfood_scan_url_query_no_waf_verdict_does_not_fabricate_distill() {
     let t = Target::spawn();
-    // Use scan against the realistic mock — the SAFEPAYLOAD doesn't
-    // contain BLOCKED so it bypasses the mock's block rule. Every
-    // variant should also bypass (the mock blocks ONLY literal
-    // BLOCKED), so we should have bypass_variants AND minimal_payload
-    // populated under --auto-distill.
+    // The realistic mock only 403s the literal `BLOCKED`; it lets real attack
+    // canaries through, so it does NOT behave like a WAF. scan's surface probe
+    // therefore honestly classifies it `param_live_no_waf` and the bypass
+    // verdict is `WafNotInPlay` (exit 6) — you cannot "confirm a bypass" against
+    // a target with no detectable WAF. This test pins that honesty contract:
+    // even with --auto-distill set, scan must NOT manufacture bypasses or burn
+    // ddmin fires when there is nothing to bypass. (The real auto-distill /
+    // minimal_payload path against a *detected* WAF is covered by
+    // raw_request_e2e::raw_request_auto_distill_populates_minimal_payload_per_bypass.)
     let (code, stdout, stderr) = wafrift(&[
         "scan",
         "--target",
@@ -465,24 +447,38 @@ fn dogfood_scan_url_query_with_auto_distill_emits_minimal_payload() {
         "--format",
         "json",
     ]);
-    assert_eq!(code, 0, "scan exit 0 — stderr:\n{stderr}");
+    // WafNotInPlay → exit 6 per scan::waf_bypass_verdict::exit_code_for_verdict.
+    assert_eq!(
+        code, 6,
+        "no-WAF target must yield the WafNotInPlay verdict (exit 6); stderr:\n{stderr}"
+    );
     let p = parse_or_explain(&stdout, &stderr, "scan url-query auto-distill");
+    // The flag is still wired (operator asked for distillation)…
     assert_eq!(
         p["auto_distill_enabled"], true,
-        "auto_distill_enabled must be true"
+        "auto_distill_enabled must reflect the flag even when no WAF is in play"
+    );
+    // …but the verdict is honest: no WAF, no bypasses, no fabricated fires.
+    assert_eq!(
+        p["waf_bypass"]["verdict"], "waf_not_in_play",
+        "verdict must be waf_not_in_play against a non-WAF mock: {p}"
+    );
+    assert_eq!(
+        p["waf_bypass"]["waf_in_play"], false,
+        "waf_in_play must be false against a non-WAF mock: {p}"
     );
     let bypasses = p["bypass_variants"]
         .as_array()
         .expect("bypass_variants array");
-    // We expect at least some bypasses on a safe-payload mock.
-    if !bypasses.is_empty() {
-        // Each bypass should have a minimal_payload populated.
-        let any_with_minimal = bypasses.iter().any(|b| b["minimal_payload"].is_string());
-        assert!(
-            any_with_minimal,
-            "at least one bypass must carry minimal_payload string under --auto-distill: {p}"
-        );
-    }
+    assert!(
+        bypasses.is_empty(),
+        "no WAF in play ⇒ zero confirmed bypasses, not fabricated ones: {p}"
+    );
+    assert_eq!(
+        p["auto_distill_fires_total"].as_u64().unwrap_or(u64::MAX),
+        0,
+        "scan must not burn ddmin fires when there is nothing to distill: {p}"
+    );
 }
 
 // ── version: every command --help exits 0 and documents its key flags ──

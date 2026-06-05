@@ -4,6 +4,39 @@ use thiserror::Error;
 use wafrift_types::Request;
 use wafrift_types::session::CsrfInjectionLocation;
 
+/// Cookie jars are a few KB in practice (a few dozen cookies + CSRF
+/// tokens). 16 MiB catches `--session-jar /dev/zero`, hostile
+/// symlinks pointed at log files, or accidental aliasing — without
+/// rejecting any legitimate jar we've seen in the wild.
+const SESSION_JAR_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read a file as UTF-8 with a hard size cap enforced DURING the
+/// read (so symlinks reporting len=0 cannot evade the gate the way
+/// they would against a metadata()-then-read TOCTOU pattern).
+fn read_capped_text(path: &Path, max_bytes: u64) -> Result<String, std::io::Error> {
+    use std::io::Read;
+    let f = std::fs::File::open(path)?;
+    let mut limited = f.take(max_bytes + 1);
+    let mut buf = Vec::with_capacity(8 * 1024);
+    limited.read_to_end(&mut buf)?;
+    if (buf.len() as u64) > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{}: session jar exceeds {}-byte cap",
+                path.display(),
+                max_bytes,
+            ),
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{}: session jar is not valid UTF-8: {e}", path.display()),
+        )
+    })
+}
+
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error("Cookie jar corrupt at line {line}: {path}")]
@@ -25,9 +58,7 @@ pub enum SessionError {
     /// Body CSRF injection requires `application/x-www-form-urlencoded`.
     /// For multipart, JSON, or binary bodies the caller must use a header-
     /// based CSRF mechanism or inject the token out-of-band.
-    #[error(
-        "CSRF body injection requires application/x-www-form-urlencoded, got '{content_type}'"
-    )]
+    #[error("CSRF body injection requires application/x-www-form-urlencoded, got '{content_type}'")]
     CsrfInjectIncompatibleBody { content_type: String },
     /// Body CSRF injection failed because the existing body is not valid UTF-8.
     #[error("CSRF body injection failed: body is not valid UTF-8")]
@@ -53,7 +84,7 @@ pub fn load_jar(path: &Path) -> Result<SessionStore, SessionError> {
 
     let mut session = AuthSession::new("default");
 
-    let contents = std::fs::read_to_string(path).map_err(|e| SessionError::Io {
+    let contents = read_capped_text(path, SESSION_JAR_MAX_BYTES).map_err(|e| SessionError::Io {
         path: path.display().to_string(),
         source: e,
     })?;
@@ -158,7 +189,12 @@ pub fn inject_csrf(
         }
         authjar::CsrfInjection::QueryParam { name, value } => {
             let sep = if request.url.contains('?') { "&" } else { "?" };
-            request.url = format!("{}{sep}{}={}", request.url, name, urlencoding::encode(&value));
+            request.url = format!(
+                "{}{sep}{}={}",
+                request.url,
+                name,
+                urlencoding::encode(&value)
+            );
         }
         authjar::CsrfInjection::FormField { name, value } => {
             if let Some(ref mut body) = request.body {
@@ -179,11 +215,10 @@ pub fn inject_csrf(
                         content_type: ct.to_string(),
                     });
                 }
-                let body_str = std::str::from_utf8(body)
-                    .map_err(|_| SessionError::CsrfInjectInvalidUtf8)?;
+                let body_str =
+                    std::str::from_utf8(body).map_err(|_| SessionError::CsrfInjectInvalidUtf8)?;
                 let sep = if body_str.is_empty() { "" } else { "&" };
-                let new_body =
-                    format!("{}{sep}{}={}", body_str, name, urlencoding::encode(&value));
+                let new_body = format!("{}{sep}{}={}", body_str, name, urlencoding::encode(&value));
                 *body = new_body.into_bytes();
             }
         }
@@ -201,9 +236,29 @@ mod tests {
     use super::*;
     use authjar::SessionSettings;
 
+    /// Return a collision-resistant temp path for session-jar tests.
+    /// Uses PID + nanosecond timestamp so parallel `cargo test` workers
+    /// never collide even when running on the same machine.
+    fn tmp_jar_path(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "wafrift-jar-{}-{}-{}.{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+            suffix,
+            if suffix.ends_with("json") {
+                "json"
+            } else {
+                "txt"
+            },
+        ))
+    }
+
     #[test]
     fn load_jar_missing_file_returns_empty() {
-        let tmp = std::env::temp_dir().join("wafrift_test_nonexistent_jar_12345.txt");
+        let tmp = tmp_jar_path("nonexistent");
         let _ = std::fs::remove_file(&tmp);
         let store = load_jar(&tmp).unwrap();
         assert!(store.is_empty());
@@ -211,7 +266,7 @@ mod tests {
 
     #[test]
     fn load_jar_parses_cookie_line() {
-        let tmp = std::env::temp_dir().join("wafrift_test_jar_12345.txt");
+        let tmp = tmp_jar_path("parses");
         std::fs::write(&tmp, "session=abc123 | https://example.com/\n").unwrap();
         let store = load_jar(&tmp).unwrap();
         assert_eq!(store.len(), 1);
@@ -223,7 +278,7 @@ mod tests {
 
     #[test]
     fn load_jar_skips_comments_and_empty_lines() {
-        let tmp = std::env::temp_dir().join("wafrift_test_jar_comments_12345.txt");
+        let tmp = tmp_jar_path("comments");
         std::fs::write(
             &tmp,
             "# comment\n\nfoo=bar | https://example.com/\n# another comment\n",
@@ -239,7 +294,7 @@ mod tests {
 
     #[test]
     fn load_jar_invalid_format_errors() {
-        let tmp = std::env::temp_dir().join("wafrift_test_jar_bad_12345.txt");
+        let tmp = tmp_jar_path("bad");
         std::fs::write(&tmp, "badline\n").unwrap();
         let result = load_jar(&tmp);
         assert!(result.is_err());
@@ -248,7 +303,7 @@ mod tests {
 
     #[test]
     fn save_jar_creates_file_with_json() {
-        let tmp = std::env::temp_dir().join("wafrift_test_jar_save_12345.json");
+        let tmp = tmp_jar_path("save.json");
         let _ = std::fs::remove_file(&tmp);
         let mut store = SessionStore::new();
         store.add(AuthSession::new("default"));
@@ -260,7 +315,7 @@ mod tests {
 
     #[test]
     fn save_and_load_jar_roundtrip() {
-        let tmp = std::env::temp_dir().join("wafrift_cookie_jar_roundtrip_12345.json");
+        let tmp = tmp_jar_path("roundtrip.json");
         let _ = std::fs::remove_file(&tmp);
 
         let mut store = SessionStore::new();
@@ -344,18 +399,22 @@ mod tests {
         let mut req = Request::post("https://example.com/", b"{\"a\":1}");
         req.headers
             .push(("Content-Type".into(), "application/json".into()));
-        let err =
-            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
-        assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
+        let err = inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        assert!(matches!(
+            err,
+            SessionError::CsrfInjectIncompatibleBody { .. }
+        ));
     }
 
     #[test]
     fn inject_csrf_body_rejects_missing_content_type() {
         // No Content-Type header → treated as incompatible (not form-encoded)
         let mut req = Request::post("https://example.com/", b"id=1");
-        let err =
-            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
-        assert!(matches!(err, SessionError::CsrfInjectIncompatibleBody { .. }));
+        let err = inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        assert!(matches!(
+            err,
+            SessionError::CsrfInjectIncompatibleBody { .. }
+        ));
     }
 
     #[test]
@@ -365,8 +424,45 @@ mod tests {
             "Content-Type".into(),
             "application/x-www-form-urlencoded".into(),
         ));
-        let err =
-            inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
+        let err = inject_csrf(&mut req, "tok123", CsrfInjectionLocation::Body).unwrap_err();
         assert!(matches!(err, SessionError::CsrfInjectInvalidUtf8));
+    }
+
+    // ── Round 20: bounded session-jar reads (TOCTOU defence) ─────────
+    //
+    // Pre-fix `std::fs::read_to_string` over an operator-supplied
+    // path could OOM on `--session-jar /dev/zero`, a hostile symlink,
+    // or a runaway log file alias. The bounded reader caps DURING
+    // the read so symlinks reporting len=0 cannot evade the gate.
+
+    #[test]
+    fn read_capped_text_rejects_oversize_input() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!(
+            "wafrift-sess-overrun-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join("oversize.jar");
+        {
+            let mut f = std::fs::File::create(&path).expect("create");
+            f.write_all(&vec![b'x'; 4096]).expect("write");
+        }
+        let err = super::read_capped_text(&path, 256).expect_err("must reject");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds"), "msg: {err}");
+    }
+
+    #[test]
+    fn session_jar_cap_is_sane() {
+        assert!(
+            super::SESSION_JAR_MAX_BYTES >= 1024 * 1024,
+            "SESSION_JAR_MAX_BYTES below 1 MiB — could reject legitimate jars"
+        );
     }
 }

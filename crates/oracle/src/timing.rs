@@ -15,7 +15,8 @@
 //! stdev, then confirm only when an observed latency exceeds
 //! `mean + k * stdev` for `k = 3` by default (≈99.7% confidence).
 //!
-//! ```rust
+//! ```rust,ignore
+//! // `timing` is pub(crate) — use TimingOracle from within the oracle crate.
 //! use wafrift_oracle::timing::TimingOracle;
 //!
 //! // 5 benign-request latencies (ms).
@@ -39,7 +40,7 @@
 /// Gaussian assumption; for non-Gaussian latency distributions the
 /// real false-positive rate is bounded by Chebyshev (≤ 11%), still
 /// strict enough for bench use.
-pub const DEFAULT_K_SIGMA: f64 = 3.0;
+pub(crate) const DEFAULT_K_SIGMA: f64 = 3.0;
 
 /// Hard floor on stdev so a degenerate calibration (all 5 probes hit
 /// the same cached value) doesn't reduce the threshold to mean + 0,
@@ -48,7 +49,12 @@ const MIN_STDEV_MS: f64 = 25.0;
 
 /// Hard floor on baseline so a sub-millisecond baseline (loopback
 /// localhost target) doesn't make any 100ms variant look anomalous.
-const MIN_BASELINE_MS: f64 = 50.0;
+/// R55 pass-18 I5 (CLAUDE.md §7 DEDUP): renamed from the bare
+/// `MIN_BASELINE_MS` to disambiguate from
+/// `signal_response_time::MIN_SIGNAL_BASELINE_MS` (which is a u64
+/// 10-ms guard for the response-time signal extractor, a different
+/// oracle semantic with a 5x different floor).
+const MIN_TIMING_ORACLE_BASELINE_MS: f64 = 50.0;
 
 /// A timing oracle calibrated against a known-benign baseline.
 ///
@@ -70,7 +76,7 @@ impl TimingOracle {
     /// Caller is responsible for ensuring the calibration set is
     /// representative (benign requests to the same endpoint, same
     /// session, same time of day). An empty slice yields a permissive
-    /// oracle (`baseline = MIN_BASELINE_MS`, `stdev = MIN_STDEV_MS`)
+    /// oracle (`baseline = MIN_TIMING_ORACLE_BASELINE_MS`, `stdev = MIN_STDEV_MS`)
     /// rather than panicking — caller can still query it but should
     /// log the missing calibration.
     #[must_use]
@@ -85,7 +91,7 @@ impl TimingOracle {
     pub fn from_calibration_with_k(latencies_ms: &[f64], k_sigma: f64) -> Self {
         if latencies_ms.is_empty() {
             return Self {
-                baseline_ms: MIN_BASELINE_MS,
+                baseline_ms: MIN_TIMING_ORACLE_BASELINE_MS,
                 stdev_ms: MIN_STDEV_MS,
                 k_sigma,
             };
@@ -105,7 +111,7 @@ impl TimingOracle {
             MIN_STDEV_MS
         };
         Self {
-            baseline_ms: mean.max(MIN_BASELINE_MS),
+            baseline_ms: mean.max(MIN_TIMING_ORACLE_BASELINE_MS),
             stdev_ms: stdev,
             k_sigma,
         }
@@ -147,7 +153,7 @@ impl TimingOracle {
         // applied on the way out, so on the way in we have to undo it.
         let prior_m2 = self.stdev_ms.powi(2) * (prior_count as f64).max(1.0);
         let new_m2 = prior_m2 + delta * delta2;
-        self.baseline_ms = new_mean.max(MIN_BASELINE_MS);
+        self.baseline_ms = new_mean.max(MIN_TIMING_ORACLE_BASELINE_MS);
         self.stdev_ms = if n >= 2.0 {
             (new_m2 / (n - 1.0)).sqrt().max(MIN_STDEV_MS)
         } else {
@@ -164,7 +170,7 @@ mod tests {
     fn empty_calibration_yields_permissive_floor_oracle() {
         let o = TimingOracle::from_calibration(&[]);
         // Floors apply, oracle is queryable without panic.
-        assert!((o.baseline_ms - MIN_BASELINE_MS).abs() < 1e-9);
+        assert!((o.baseline_ms - MIN_TIMING_ORACLE_BASELINE_MS).abs() < 1e-9);
         assert!((o.stdev_ms - MIN_STDEV_MS).abs() < 1e-9);
         // A 5-second delay still triggers anomaly even on a permissive
         // oracle — caller can use the oracle even pre-calibration.
@@ -245,5 +251,61 @@ mod tests {
         // not anomalous under k=4 (threshold 220 ms).
         assert!(lenient.is_anomalous(200.0));
         assert!(!strict.is_anomalous(200.0));
+    }
+
+    // -- §12 boundary tests -------------------------------------------------
+
+    #[test]
+    fn exact_threshold_is_not_anomalous() {
+        // The oracle uses `actual > threshold` (strict), not `>=`.
+        // A response at exactly the threshold must NOT fire — that is the
+        // boundary invariant. One millisecond above it must fire.
+        let o = TimingOracle::from_calibration(&[100.0, 120.0, 140.0, 110.0, 130.0]);
+        let thresh = o.threshold_ms();
+        assert!(
+            !o.is_anomalous(thresh),
+            "exactly at threshold ({thresh} ms) must not be anomalous (strict >, not >=)"
+        );
+        assert!(
+            o.is_anomalous(thresh + 0.001),
+            "one tick past threshold ({:.3} ms) must be anomalous",
+            thresh + 0.001
+        );
+    }
+
+    #[test]
+    fn single_sample_calibration_does_not_panic() {
+        // With n=1 the sample stdev is undefined (division by 0); the floor
+        // MIN_STDEV_MS = 25ms applies and the oracle must remain queryable.
+        // baseline=500, stdev=25 (floor), threshold = 500 + 3*25 = 575ms.
+        let o = TimingOracle::from_calibration(&[500.0]);
+        assert_eq!(o.stdev_ms, MIN_STDEV_MS, "single-sample stdev must be the floor");
+        // 500ms (baseline itself) must not be anomalous.
+        assert!(!o.is_anomalous(500.0), "baseline response must not be anomalous");
+        // A big delay still fires.
+        assert!(o.is_anomalous(10_000.0), "10s delay must trigger even on single-sample cal");
+    }
+
+    #[test]
+    fn min_timing_oracle_baseline_ms_floor_applies() {
+        // If calibration samples are very small (sub-1ms), the baseline
+        // must be clamped to at least MIN_TIMING_ORACLE_BASELINE_MS so
+        // the threshold is reasonable, not 0.
+        let o = TimingOracle::from_calibration(&[0.1, 0.2, 0.3, 0.15, 0.25]);
+        assert!(
+            o.baseline_ms >= MIN_TIMING_ORACLE_BASELINE_MS,
+            "baseline must never fall below the floor: got {}",
+            o.baseline_ms
+        );
+    }
+
+    #[test]
+    fn threshold_monotonically_increases_with_k() {
+        let samples = &[200.0, 210.0, 220.0, 190.0, 205.0];
+        let t2 = TimingOracle::from_calibration_with_k(samples, 2.0).threshold_ms();
+        let t3 = TimingOracle::from_calibration_with_k(samples, 3.0).threshold_ms();
+        let t4 = TimingOracle::from_calibration_with_k(samples, 4.0).threshold_ms();
+        assert!(t2 < t3, "k=2 threshold must be less than k=3");
+        assert!(t3 < t4, "k=3 threshold must be less than k=4");
     }
 }

@@ -1,12 +1,26 @@
 //! Path traversal payload oracle.
 //!
-//! Path traversal payloads navigate the filesystem by using `../` sequences
-//! and target sensitive files. The oracle validates that:
-//! 1. **Traversal sequences survive** — `../` or encoded equivalents
-//! 2. **Target paths remain readable** — `/etc/passwd`, `/etc/shadow`, etc.
+//! Path traversal payloads escape the filesystem with `../` sequences (or
+//! encoded equivalents) toward a sensitive target. The oracle confirms the
+//! EFFECTIVE (post-transform) payload is still a structurally-valid traversal
+//! attack. Per the `verified_bypass` contract the bar is "still a valid attack"
+//! (not "textually identical to the original"), so it inspects the transformed
+//! bytes only and accepts EITHER:
 //!
-//! If encoding destroys the `../` sequences or the target path, the
-//! server won't resolve the file and the traversal fails.
+//! - a traversal SEQUENCE survives — `../` or a known encoded form
+//!   (`..%2f`, `..%5c`, `%2e%2e/`, …) from `sequences.toml`; OR
+//! - a literal target path (`/etc/passwd`, …) is present together with `..`.
+//!
+//! A bare traversal sequence with NO literal target is deliberately accepted:
+//! the target is frequently percent-/double-encoded (the whole point of the
+//! evasion), so it can't be matched textually — requiring a literal target
+//! here would false-negative exactly the encoded bypasses this oracle exists to
+//! validate. If a transform destroyed the traversal sequence entirely, the
+//! server can't climb directories and the check correctly fails.
+//!
+//! (Looser than the nosql/xxe/log4shell equivalence oracles, which CAN compare
+//! the decoded original↔candidate. A decode-then-verify path oracle that pins
+//! the original's target through the same decodings is a tracked enhancement.)
 
 use crate::ascii_scan::contains_ascii_insensitive;
 use crate::traits::PayloadOracle;

@@ -203,10 +203,10 @@ impl EdgePopCoverage {
     pub fn pops_covered_for_target(&self, target: &str) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
         for (key, entry) in &self.entries {
-            if let Some((_, t)) = split_key(key) {
-                if t == target {
-                    out.extend(entry.pops.iter().cloned());
-                }
+            if let Some((_, t)) = split_key(key)
+                && t == target
+            {
+                out.extend(entry.pops.iter().cloned());
             }
         }
         out
@@ -244,10 +244,10 @@ impl EdgePopCoverage {
     pub fn rank_egresses_for_discovery(&self, target: &str) -> Vec<(String, usize)> {
         let mut all: BTreeMap<String, usize> = BTreeMap::new();
         for (key, entry) in &self.entries {
-            if let Some((e, t)) = split_key(key) {
-                if t == target {
-                    all.insert(e.to_string(), entry.pops.len());
-                }
+            if let Some((e, t)) = split_key(key)
+                && t == target
+            {
+                all.insert(e.to_string(), entry.pops.len());
             }
         }
         let mut ranked: Vec<(String, usize)> = all
@@ -260,23 +260,14 @@ impl EdgePopCoverage {
 
     /// Persist atomically via tempfile + rename. The on-disk format
     /// is JSON for human-readable diffs across hunt sessions.
+    ///
+    /// R55 pass-19 I4 (CLAUDE.md §7 DEDUP): delegates to
+    /// `wafrift_types::loaders::write_atomic` so the atomic-write
+    /// recipe lives in one place. Pre-fix: 3 evolution modules each
+    /// rolled their own.
     pub fn save_atomic(&self, path: &Path) -> std::io::Result<()> {
-        use std::io::Write;
-
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        let tmp = path.with_extension("tmp");
-        {
-            let mut f = std::fs::File::create(&tmp)?;
-            let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-            f.write_all(&bytes)?;
-            f.sync_all()?;
-        }
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+        let bytes = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        wafrift_types::loaders::write_atomic(path, &bytes)
     }
 
     /// Load from disk; on missing file or corrupt JSON return
@@ -285,7 +276,10 @@ impl EdgePopCoverage {
     /// but a corrupt coverage map shouldn't crash a hunt round.
     #[must_use]
     pub fn load_or_default(path: &Path) -> Self {
-        let bytes = match std::fs::read(path) {
+        // Coverage maps grow with each pop+technique combination;
+        // 64 MiB is a soft ceiling above any realistic deployment.
+        const EDGE_POP_COVERAGE_MAX_BYTES: usize = 64 * 1024 * 1024;
+        let bytes = match crate::safe_io::read_capped_bytes(path, EDGE_POP_COVERAGE_MAX_BYTES) {
             Ok(b) => b,
             Err(_) => return Self::default(),
         };

@@ -25,10 +25,8 @@ use reqwest::{Client, Method, header::HeaderMap};
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
-
 #[derive(Args, Debug)]
-pub struct CorsDiffArgs {
+pub(crate) struct CorsDiffArgs {
     /// Target URL — typically an API endpoint that returns sensitive
     /// data when the operator's browser session is authenticated.
     pub url: String,
@@ -68,7 +66,7 @@ pub struct CorsDiffArgs {
 
 /// One CORS-misconfiguration probe.
 #[derive(Debug, Clone)]
-pub struct CorsProbe {
+pub(crate) struct CorsProbe {
     pub kind: &'static str,
     pub description: &'static str,
     /// HTTP method to send. GET for most probes; OPTIONS for
@@ -84,7 +82,7 @@ pub struct CorsProbe {
 /// Result of one CORS probe — what the target sent back in the
 /// CORS-related response headers.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct CorsDiffResult {
+pub(crate) struct CorsDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub probe_origin: Option<String>,
@@ -102,7 +100,7 @@ pub struct CorsDiffResult {
 /// extracted from the URL and used to build suffix/prefix-confusion
 /// Origins.
 #[must_use]
-pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
+pub(crate) fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     let mut out = Vec::new();
 
     // ── Plain attacker.example reflection ──
@@ -130,9 +128,13 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Subdomain suffix confusion ──
     out.push(CorsProbe {
         kind: "subdomain-suffix-confusion",
-        description: "Origin: https://{target}.attacker.example — naive substring \
-             match (.endsWith(target_host)) lets the attacker's subdomain \
-             through",
+        description: "Origin: https://{target}.attacker.example — the allowlisted \
+             host sits as a LEADING label of an attacker-owned domain (real \
+             registrable domain: attacker.example). Catches servers that \
+             PREFIX-match or substring-test the Origin \
+             (origin.starts_with(\"https://\"+host) / origin.contains(host)) \
+             instead of comparing the full host: the check passes, the page \
+             is the attacker's",
         method: "GET",
         origin: Some(format!("https://{target_host}.attacker.example")),
         extra_headers: Vec::new(),
@@ -141,8 +143,11 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     // ── Subdomain prefix confusion ──
     out.push(CorsProbe {
         kind: "subdomain-prefix-confusion",
-        description: "Origin: https://attacker.{target} — naive substring match \
-             (.startsWith(target_host)) lets the attacker through",
+        description: "Origin: https://attacker.{target} — an attacker-controlled \
+             label PREPENDED to the allowlisted host. Catches servers that \
+             SUFFIX-match (origin.ends_with(host)) to wave through 'any \
+             subdomain'; exploitable when the attacker controls a subdomain \
+             under that host (dangling-DNS / subdomain takeover)",
         method: "GET",
         origin: Some(format!("https://attacker.{target_host}")),
         extra_headers: Vec::new(),
@@ -223,7 +228,7 @@ pub fn generate_cors_variants(target_host: &str) -> Vec<CorsProbe> {
     out
 }
 
-pub async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
+pub(crate) async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -249,13 +254,11 @@ pub async fn run_cors_diff(mut args: CorsDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = match crate::helpers::acquire_diff_permit(&sem, "cors-diff").await {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("{} {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let counter = counter.clone();
@@ -400,8 +403,10 @@ async fn fire_cors(
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-    // Drain body to free the connection.
-    let _ = resp.bytes().await;
+    // Drain body to free the connection — §15 OOM: use bounded drain
+    // so a gzip bomb can't run the draining loop to exhaustion.
+    let _ =
+        crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES).await;
     Ok((status, headers))
 }
 
@@ -413,24 +418,13 @@ fn render_curl(
     origin: Option<&str>,
     extra_headers: &[(String, String)],
 ) -> String {
-    let mut out = String::from("curl -i");
-    if method != "GET" {
-        out.push_str(" -X ");
-        out.push_str(method);
-    }
+    // Prepend the optional Origin header then delegate to the canonical helper.
+    let mut headers: Vec<(String, String)> = Vec::new();
     if let Some(o) = origin {
-        out.push(' ');
-        out.push_str("-H ");
-        out.push_str(&shell_single_quote(&format!("Origin: {o}")));
+        headers.push(("Origin".to_string(), o.to_string()));
     }
-    for (n, v) in extra_headers {
-        out.push(' ');
-        out.push_str("-H ");
-        out.push_str(&shell_single_quote(&format!("{n}: {v}")));
-    }
-    out.push(' ');
-    out.push_str(&shell_single_quote(url));
-    out
+    headers.extend_from_slice(extra_headers);
+    crate::helpers::render_simple_curl(Some(method), url, &headers, None)
 }
 
 fn extract_host(url: &str) -> Option<String> {
@@ -440,18 +434,14 @@ fn extract_host(url: &str) -> Option<String> {
 }
 
 fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
             "target": args.url,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high":   high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -459,14 +449,12 @@ fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} CORS issue(s) — {} high, {} medium · {} error(s)",
-            "[wafrift cors-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "cors-diff",
+            "CORS issue(s)",
+            high,
+            medium,
+            errors,
         );
         // Pentest-dogfood UX (2026-05): when ZERO issues fire AND the
         // target never returned an Access-Control-* header on any
@@ -475,7 +463,7 @@ fn emit_output(args: &CorsDiffArgs, results: &[CorsDiffResult], errors: u32) {
         // Spell out the difference so an operator doesn't mistake
         // a non-CORS endpoint for a hardened one.
         let any_cors_header_seen = results.iter().any(|r| r.allow_origin.is_some());
-        if (high.len() + medium.len()) == 0 && !any_cors_header_seen && !results.is_empty() {
+        if (high + medium) == 0 && !any_cors_header_seen && !results.is_empty() {
             println!(
                 "  {} no Access-Control-* header observed on any probe — \
                  this target may not have a CORS surface at all (i.e. it's not \
@@ -628,6 +616,50 @@ mod tests {
                 .as_deref()
                 .unwrap()
                 .contains("attacker.api.example.com")
+        );
+    }
+
+    #[test]
+    fn cors_confusion_probes_match_their_documented_check_type() {
+        // Anti-rig for the §5 description fix: the suffix-confusion probe's
+        // origin is caught by a PREFIX/contains check (target as a leading
+        // label of the attacker domain), and the prefix-confusion probe's
+        // origin by a SUFFIX check (attacker label before target). A
+        // regression that swapped the two origin shapes would make the
+        // operator-facing descriptions wrong again — exactly the bug this
+        // pass fixed.
+        let host = "api.example.com";
+        let scheme_host = format!("https://{host}");
+        let v = generate_cors_variants(host);
+
+        let suffix = v
+            .iter()
+            .find(|p| p.kind == "subdomain-suffix-confusion")
+            .unwrap();
+        let so = suffix.origin.as_deref().unwrap();
+        // Caught by starts_with("https://"+host) / contains(host) — NOT ends_with(host).
+        assert!(
+            so.starts_with(&scheme_host),
+            "suffix-confusion origin must prefix-match: {so}"
+        );
+        assert!(
+            !so.ends_with(host),
+            "suffix-confusion origin must NOT end with host (that's the prefix probe): {so}"
+        );
+
+        let prefix = v
+            .iter()
+            .find(|p| p.kind == "subdomain-prefix-confusion")
+            .unwrap();
+        let po = prefix.origin.as_deref().unwrap();
+        // Caught by ends_with(host) — NOT starts_with("https://"+host).
+        assert!(
+            po.ends_with(host),
+            "prefix-confusion origin must suffix-match: {po}"
+        );
+        assert!(
+            !po.starts_with(&scheme_host),
+            "prefix-confusion origin must NOT start with https://host (that's the suffix probe): {po}"
         );
     }
 

@@ -42,16 +42,28 @@ pub struct AuthBypassProbe {
     pub description: &'static str,
 }
 
+/// Canonical size of the auth-bypass probe set returned by
+/// [`auth_bypass_probes`] — the single source of truth for the count.
+/// Render-time consumers that cite "N auth-bypass probes" (e.g.
+/// `wafrift legendary`'s report prose) interpolate this const so the
+/// number cannot drift. The static doc sites that can't interpolate a
+/// const (README, clap `#[arg]` help) are instead pinned by
+/// `tests/auth_bypass_probe_count_documented.rs`. Composition:
+/// URL-rewrite (6) + IP-trust (12×7=84) + Host-trust (4×4=16) +
+/// Method-override (4×6=24) + Scheme-trust (3×2=6) + Gateway-identity
+/// (18×5=90) + Header-smuggle-LWS (4) = 230.
+pub const AUTH_BYPASS_PROBE_COUNT: usize = 230;
+
 /// Generate the full set of routing / auth bypass probes for the given
 /// target. `target_path` is the protected resource the user is trying
 /// to reach (e.g. `/admin/users`, `/internal/api/keys`). For probes
 /// that don't take a path it is ignored.
 #[must_use]
 pub fn auth_bypass_probes(target_path: &str) -> Vec<AuthBypassProbe> {
-    // Pre-sized: the count is fixed at 230 and pinned by an integrity
-    // test. Pre-sizing eliminates 8-9 Vec reallocations during the
-    // family construction loops. Per perf-hunt finding F05.
-    let mut out = Vec::with_capacity(230);
+    // Pre-sized to the canonical count (pinned by an integrity test).
+    // Pre-sizing eliminates 8-9 Vec reallocations during the family
+    // construction loops. Per perf-hunt finding F05.
+    let mut out = Vec::with_capacity(AUTH_BYPASS_PROBE_COUNT);
 
     // ── URL-rewrite header family ────────────────────────────────────
     // IIS / ASP.NET / Apache mod_rewrite all honour these in various
@@ -409,6 +421,10 @@ mod tests {
         // + Scheme-trust (3 × 2 = 6) + Gateway-identity (18 × 5 = 90)
         // + Header-smuggle-LWS (4) = 230.
         let probes = auth_bypass_probes("/x");
-        assert_eq!(probes.len(), 230, "auth_bypass_probes count drift");
+        assert_eq!(
+            probes.len(),
+            AUTH_BYPASS_PROBE_COUNT,
+            "auth_bypass_probes count drift"
+        );
     }
 }

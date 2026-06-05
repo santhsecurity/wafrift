@@ -1,6 +1,7 @@
 use crate::lineage::Lineage;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use wafrift_types::pick::pick_ref_from_rng;
 
 /// A chromosome representing a combination of evasion techniques.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,16 +82,29 @@ impl Chromosome {
     }
 
     /// Compute a hash of this chromosome for deduplication.
+    ///
+    /// R48 pass-10 I4 (CLAUDE.md §15 AUDIT): pre-fix used
+    /// `DefaultHasher` which is non-collision-resistant — an adversary
+    /// controlling gene names (e.g. via crafted `--technique` flags or
+    /// `.wafrift.toml`) could engineer collisions to silently dedupe
+    /// distinct bypass discoveries from the corpus or mark live
+    /// candidates as already-visited in tabu search. Switched to
+    /// SHA-256, truncated to u64 — matches the lineage.rs::BypassEntry
+    /// collision-fix that the rest of the crate already adopted.
     #[must_use]
     pub fn hash(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
         for (name, value) in &self.genes {
-            name.hash(&mut hasher);
-            value.hash(&mut hasher);
+            hasher.update((name.len() as u64).to_le_bytes());
+            hasher.update(name.as_bytes());
+            hasher.update((value.len() as u64).to_le_bytes());
+            hasher.update(value.as_bytes());
         }
-        hasher.finish()
+        let digest = hasher.finalize();
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&digest[..8]);
+        u64::from_le_bytes(out)
     }
 }
 
@@ -194,10 +208,7 @@ impl GenePool {
     #[must_use]
     pub fn random_value(&self, gene_name: &str, rng: &mut impl Rng) -> Option<String> {
         let values = self.values_for(gene_name)?;
-        if values.is_empty() {
-            return None;
-        }
-        Some(values[rng.gen_range(0..values.len())].clone())
+        pick_ref_from_rng(values, rng).cloned()
     }
 
     /// Return all unique values across all gene pools.

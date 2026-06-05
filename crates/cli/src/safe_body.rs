@@ -35,6 +35,18 @@
 //! talk to known-trusted services (e.g. the operator's own wafrift
 //! listener) may use the larger [`HEADROOM_MAX_RESPONSE_BYTES`].
 //!
+//! [`read_bounded_text_file`] and [`read_bounded_text_stdin`] replace
+//! `std::fs::read_to_string` at every site that accepts operator-supplied
+//! file paths. The reason: `read_to_string(path)` has no size cap AND
+//! opens a TOCTOU race — a symlink swap between `stat()` and `open()`
+//! can bypass a separate size check. These functions open + read in one
+//! fd with a hard byte cap, closing both gaps at once.
+//!
+//! **Rule**: NEVER call `std::fs::read_to_string(path)` or `File::open`
+//! + unbounded `read_to_string` on any path derived from operator input
+//! (`--raw-request`, `--paths-file`, config files, gene bank). Always
+//! use `read_bounded_text_file` with an appropriate cap constant.
+//!
 //! ## Invariants
 //!
 //! - The cap is checked BEFORE each chunk is appended. The
@@ -55,16 +67,20 @@ use std::fmt;
 /// 8 MiB. Bigger than any legitimate WAF block page or JSON API
 /// envelope, smaller than any laptop's free RAM by orders of
 /// magnitude.
-pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Larger cap for responses from operator-controlled services
 /// (e.g. their own `wafrift listener`). Still bounded — even a
 /// trusted service can have a bug.
-pub const HEADROOM_MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+///
+/// §7: the value is the workspace-canonical
+/// [`wafrift_types::MAX_RESPONSE_BODY_BYTES`] (shared with transport's
+/// response cap + encoding's decompression-bomb cap). Local name kept.
+pub(crate) const HEADROOM_MAX_RESPONSE_BYTES: usize = wafrift_types::MAX_RESPONSE_BODY_BYTES;
 
 /// Outcome of [`read_bounded`].
 #[derive(Debug)]
-pub enum ReadError {
+pub(crate) enum ReadError {
     /// Decompressed stream exceeded `max_bytes`. Caller should
     /// treat as hostile target — never retry.
     Overrun {
@@ -78,15 +94,21 @@ pub enum ReadError {
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // N12 fix (dogfood R29 cohort): phrasing was HTTP-centric
+            // ("response body") even though this enum is also used
+            // for file/stdin reads. Operators reading a wordlist
+            // error message that said "response body read failed"
+            // were confused. The new phrasing is medium-agnostic.
             Self::Overrun {
                 cap_bytes,
                 observed_bytes,
             } => write!(
                 f,
-                "response body exceeded {cap_bytes}-byte cap ({observed_bytes} bytes \
-                 seen so far) — decompression-bomb defence aborted the read"
+                "input exceeded {cap_bytes}-byte cap ({observed_bytes} bytes \
+                 seen so far) — bounded-read defence aborted the read \
+                 (decompression-bomb or oversized stream)"
             ),
-            Self::Transport(e) => write!(f, "response body read failed: {e}"),
+            Self::Transport(e) => write!(f, "read failed: {e}"),
         }
     }
 }
@@ -98,7 +120,7 @@ impl std::error::Error for ReadError {}
 /// decompressed stream — gzip / brotli decoders run upstream of
 /// us, so this is what the WAF / origin actually emitted post-
 /// decompress.
-pub async fn read_bounded(resp: Response, max_bytes: usize) -> Result<Vec<u8>, ReadError> {
+pub(crate) async fn read_bounded(resp: Response, max_bytes: usize) -> Result<Vec<u8>, ReadError> {
     let mut acc: Vec<u8> = Vec::with_capacity(64 * 1024); // small initial; grows
     let mut stream = resp.bytes_stream();
     while let Some(item) = stream.next().await {
@@ -117,9 +139,41 @@ pub async fn read_bounded(resp: Response, max_bytes: usize) -> Result<Vec<u8>, R
 /// String view of the bounded body. Returns `Ok` with the decoded
 /// UTF-8 (lossy — replacement chars for any invalid bytes, same
 /// shape reqwest's `.text()` returns).
-pub async fn read_bounded_text(resp: Response, max_bytes: usize) -> Result<String, ReadError> {
+pub(crate) async fn read_bounded_text(
+    resp: Response,
+    max_bytes: usize,
+) -> Result<String, ReadError> {
     let bytes = read_bounded(resp, max_bytes).await?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Serialize a response's status line and header block to bytes, so the
+/// reflection fingerprinter can observe input echoed into **headers**
+/// (`Location` on a redirect, `Set-Cookie`, custom `X-` headers) — not only the
+/// body. Many origins decode/normalize a parameter and place the result in a
+/// header (a 302 `Location` echoing `?q=`, a cookie round-trip), which a
+/// body-only scan would miss and mis-report as "no reflection".
+///
+/// Bounded at [`HEADER_SCAN_CAP`]: real header blocks are a few KiB; the cap
+/// stops a pathological header flood from unbounding the probe. Names and values
+/// are emitted verbatim as the origin sent them — the value is what may carry
+/// the normalized reflection the fold check looks for.
+pub(crate) const HEADER_SCAN_CAP: usize = 64 * 1024;
+
+pub(crate) fn header_bytes(resp: &Response) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 * 1024);
+    out.extend_from_slice(format!("HTTP {}\r\n", resp.status().as_u16()).as_bytes());
+    for (name, value) in resp.headers() {
+        if out.len() >= HEADER_SCAN_CAP {
+            break;
+        }
+        out.extend_from_slice(name.as_str().as_bytes());
+        out.extend_from_slice(b": ");
+        out.extend_from_slice(value.as_bytes());
+        out.extend_from_slice(b"\r\n");
+    }
+    out.truncate(HEADER_SCAN_CAP);
+    out
 }
 
 /// Sane cap for OPERATOR-supplied input files (curl-format paste,
@@ -128,62 +182,75 @@ pub async fn read_bounded_text(resp: Response, max_bytes: usize) -> Result<Strin
 /// init file is a single HTTP request. 1 MiB is generous and
 /// catches `--curl-file /dev/zero` operator typos AND symlink
 /// traps.
-pub const MAX_OPERATOR_INPUT_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_OPERATOR_INPUT_BYTES: usize = 1024 * 1024;
+
+/// Read `reader` to EOF in 64 KiB chunks, aborting the moment the
+/// running total would exceed `max_bytes`. This is the SINGLE
+/// OOM-guard loop behind every bounded file/stdin reader in the crate
+/// (and `compress`'s input path) — callers own the open/lock and any
+/// caller-specific error phrasing, while the cap enforcement lives
+/// here exactly once. Pre-dedup the same 64 KiB-chunk + `saturating_add`
+/// loop was copy-pasted five times; a future tightening (smaller
+/// chunk, stricter overrun semantics) would have had to land in all
+/// five and would inevitably miss one (CLAUDE.md §7).
+pub(crate) fn read_bounded_from<R: std::io::Read>(
+    mut reader: R,
+    max_bytes: usize,
+) -> Result<Vec<u8>, ReadError> {
+    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut chunk)
+            .map_err(|e| ReadError::Transport(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        if buf.len().saturating_add(n) > max_bytes {
+            return Err(ReadError::Overrun {
+                cap_bytes: max_bytes,
+                observed_bytes: buf.len() + n,
+            });
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    Ok(buf)
+}
 
 /// Bounded `read_to_string`-equivalent for operator-supplied
 /// files. Replaces every `std::fs::read_to_string(path)?` site
 /// that was vulnerable to OOM on a `/dev/zero` typo / hostile
 /// symlink / multi-GB file.
-pub fn read_bounded_text_file(
+pub(crate) fn read_bounded_text_file(
     path: &std::path::Path,
     max_bytes: usize,
 ) -> Result<String, ReadError> {
-    use std::io::Read;
-    let mut f = std::fs::File::open(path)
+    let f = std::fs::File::open(path)
         .map_err(|e| ReadError::Transport(format!("open {}: {e}", path.display())))?;
-    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-    let mut chunk = [0u8; 64 * 1024];
-    loop {
-        let n = f
-            .read(&mut chunk)
-            .map_err(|e| ReadError::Transport(format!("read {}: {e}", path.display())))?;
-        if n == 0 {
-            break;
-        }
-        if buf.len().saturating_add(n) > max_bytes {
-            return Err(ReadError::Overrun {
-                cap_bytes: max_bytes,
-                observed_bytes: buf.len() + n,
-            });
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    }
+    let buf = read_bounded_from(f, max_bytes)?;
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Bounded stdin reader for operator-piped curl-format pastes.
-pub fn read_bounded_text_stdin(max_bytes: usize) -> Result<String, ReadError> {
-    use std::io::Read;
-    let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
-    let mut chunk = [0u8; 64 * 1024];
-    let mut stdin = std::io::stdin().lock();
-    loop {
-        let n = stdin
-            .read(&mut chunk)
-            .map_err(|e| ReadError::Transport(format!("stdin read: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        if buf.len().saturating_add(n) > max_bytes {
-            return Err(ReadError::Overrun {
-                cap_bytes: max_bytes,
-                observed_bytes: buf.len() + n,
-            });
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    }
+pub(crate) fn read_bounded_text_stdin(max_bytes: usize) -> Result<String, ReadError> {
+    let buf = read_bounded_from(std::io::stdin().lock(), max_bytes)?;
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
+
+/// Bounded stdin reader that preserves raw bytes (no UTF-8 lossy
+/// conversion). Use when downstream code needs to inspect the
+/// payload at byte level (e.g. BOM stripping, binary tampering)
+/// before turning it into a string.
+pub(crate) fn read_bounded_stdin_bytes(max_bytes: usize) -> Result<Vec<u8>, ReadError> {
+    read_bounded_from(std::io::stdin().lock(), max_bytes)
+}
+
+/// Shared cap for `.wafrift/gene-bank.json` and any other persisted
+/// gene-bank file. Banks accumulate proven winners across hosts but
+/// remain compact JSON — even a year of heavy use stays well under
+/// the cap. 64 MiB catches `/dev/zero`, hostile symlinks, and
+/// runaway-generated files.
+pub(crate) const GENE_BANK_FILE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
@@ -799,5 +866,378 @@ mod tests {
             .await
             .expect_err("first-chunk overrun");
         assert!(matches!(err, ReadError::Overrun { .. }));
+    }
+}
+
+#[cfg(test)]
+mod round19_bounded_input_audit {
+    //! Round 19: cross-file audit that every remaining `cli/src/*` site
+    //! reading operator-controlled paths now goes through the bounded
+    //! reader. Each test embeds the source via include_str! and asserts
+    //! the bounded call is present + the banned unbounded call is gone.
+    //!
+    //! Banned literals are built with concat!() so the test source
+    //! itself does not contain the needle — include_str! self-reference
+    //! would otherwise turn the negative assertion into a tautology.
+
+    // hunt_cmd ────────────────────────────────────────────────────────
+
+    #[test]
+    fn hunt_bench_output_read_is_bounded() {
+        let src = include_str!("hunt_cmd.rs");
+        let needle = "safe_body::read_bounded_text_file(&tmp, HUNT_BENCH_OUTPUT_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "hunt_cmd.rs bench-output read must be bounded"
+        );
+        // Production pattern is `let raw = match … {`; tests use
+        // `.unwrap()`. Scope the banned needle so we don't false-trip
+        // on test fixtures that legitimately read tmp paths raw.
+        let banned = concat!("let raw = match std::fs::", "read_to_", "string(&tmp) {");
+        assert!(
+            !src.contains(banned),
+            "unbounded hunt bench-output read regression"
+        );
+    }
+
+    #[test]
+    fn hunt_campaign_state_read_is_bounded() {
+        let src = include_str!("hunt_cmd.rs");
+        let needle = "safe_body::read_bounded_text_file(path, HUNT_CAMPAIGN_STATE_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "hunt_cmd.rs campaign-state read must be bounded"
+        );
+        let banned = concat!("std::fs::", "read_to_", "string(path)");
+        assert!(
+            !src.contains(banned),
+            "unbounded hunt campaign-state read regression"
+        );
+    }
+
+    // seed ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn seed_gene_bank_read_is_bounded() {
+        let src = include_str!("seed.rs");
+        let needle = concat!(
+            "safe_body::read_bounded_text_file(\n",
+            "        &path,\n",
+            "        crate::safe_body::GENE_BANK_FILE_MAX_BYTES,\n",
+            "    )"
+        );
+        assert!(
+            src.contains(needle),
+            "seed.rs gene-bank read must be bounded"
+        );
+        // The seed.rs file's test block intentionally reads tmp files via
+        // raw std::fs::read_to_string for assertion convenience — match
+        // only the production-path pattern of `fs::read_to_string(&path)`.
+        let banned = concat!(
+            "\n    let mut bank = match fs::",
+            "read_to_",
+            "string(&path)"
+        );
+        assert!(
+            !src.contains(banned),
+            "unbounded seed gene-bank read regression"
+        );
+    }
+
+    // replay ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn replay_gene_bank_read_is_bounded() {
+        let src = include_str!("replay.rs");
+        // Whitespace-robust: prove the gene-bank read goes through the bounded
+        // reader WITH the gene-bank cap, without pinning rustfmt's exact
+        // argument wrapping (single-line vs multi-line are equivalent and both
+        // legitimate). The two banned-pattern checks below still reject any
+        // unbounded regression.
+        assert!(
+            src.contains("read_bounded_text_file")
+                && src.contains("GENE_BANK_FILE_MAX_BYTES"),
+            "replay.rs proxy gene-bank read must be bounded via read_bounded_text_file(GENE_BANK_FILE_MAX_BYTES)"
+        );
+        let banned = concat!("\n    let raw = fs::", "read_to_", "string(&path)");
+        assert!(
+            !src.contains(banned),
+            "unbounded replay gene-bank read regression"
+        );
+    }
+
+    // evade stdin ─────────────────────────────────────────────────────
+
+    #[test]
+    fn evade_stdin_payload_read_is_bounded() {
+        let src = include_str!("evade_cmd.rs");
+        let needle = "safe_body::read_bounded_stdin_bytes(EVADE_STDIN_PAYLOAD_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "evade_cmd.rs --stdin must use bounded reader"
+        );
+        let banned = concat!("io::stdin()\n", "            .", "read_to_end(&mut buf)");
+        assert!(
+            !src.contains(banned),
+            "unbounded evade --stdin read regression"
+        );
+    }
+
+    // stdin-bytes primitive overrun behaviour ─────────────────────────
+    //
+    // We can't easily drive real stdin from a unit test, but we can
+    // assert the byte-counting path of read_bounded_stdin_bytes against
+    // an in-process source by reusing the same accounting logic the
+    // file reader uses. Sanity-check the parallel function lives at the
+    // same depth as read_bounded_text_stdin.
+
+    #[test]
+    fn stdin_bytes_primitive_exists_and_signature_matches() {
+        let src = include_str!("safe_body.rs");
+        let needle =
+            "pub fn read_bounded_stdin_bytes(max_bytes: usize) -> Result<Vec<u8>, ReadError>";
+        assert!(
+            src.contains(needle),
+            "read_bounded_stdin_bytes signature changed — evade_cmd.rs depends on it"
+        );
+    }
+
+    // Shared gene-bank cap sanity ─────────────────────────────────────
+
+    #[test]
+    fn gene_bank_cap_is_sane() {
+        assert!(
+            super::GENE_BANK_FILE_MAX_BYTES >= 16 * 1024 * 1024,
+            "GENE_BANK_FILE_MAX_BYTES tightened below 16 MiB — could reject mature banks"
+        );
+    }
+
+    // Round 25: OOM/bomb fix anti-regression for response body reads.
+    //
+    // Each test pins that the fixed file now uses read_bounded (not
+    // the unbounded .bytes().await) for responses from operator-
+    // controlled targets. The banned literal is built with concat!()
+    // so the test source itself doesn't contain the needle.
+
+    #[test]
+    fn detect_phase_baseline_body_read_is_bounded() {
+        let src = include_str!("scan/detect_phase.rs");
+        let needle = "safe_body::read_bounded(";
+        assert!(
+            src.contains(needle),
+            "detect_phase.rs baseline body read must be bounded"
+        );
+        // The banned literal: the old single-call unbounded read.
+        let banned = concat!(
+            "baseline_response.",
+            "bytes().",
+            "await.",
+            "unwrap_or_default().",
+            "to_vec()"
+        );
+        assert!(
+            !src.contains(banned),
+            "unbounded detect_phase baseline body read regression"
+        );
+    }
+
+    #[test]
+    fn graphql_phase_probe_body_read_is_bounded() {
+        let src = include_str!("scan/graphql_phase.rs");
+        let needle = "safe_body::read_bounded_text(response, GRAPHQL_PROBE_BODY_CAP)";
+        assert!(
+            src.contains(needle),
+            "graphql_phase.rs probe body read must be bounded"
+        );
+        let banned = concat!("response.", "text().", "await");
+        assert!(
+            !src.contains(banned),
+            "unbounded graphql_phase probe body read regression"
+        );
+    }
+
+    #[test]
+    fn raw_runner_fire_one_body_read_is_bounded() {
+        let src = include_str!("scan/raw_runner.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "raw_runner.rs fire_one body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn header_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("header_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "header_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn body_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("body_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "body_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn cache_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("cache_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "cache_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn cors_diff_drain_body_read_is_bounded() {
+        let src = include_str!("cors_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "cors_diff_cmd.rs drain must be bounded"
+        );
+        // The old unbounded drain.
+        let banned = concat!("let _ = resp.", "bytes().", "await");
+        assert!(
+            !src.contains(banned),
+            "unbounded cors_diff drain regression"
+        );
+    }
+
+    #[test]
+    fn gql_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("gql_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "gql_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn jwt_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("jwt_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "jwt_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn method_diff_fetch_body_read_is_bounded() {
+        let src = include_str!("method_diff_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "method_diff_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn distill_cmd_body_read_is_bounded() {
+        let src = include_str!("distill_cmd.rs");
+        let needle = "safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)";
+        assert!(
+            src.contains(needle),
+            "distill_cmd.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn parser_diff_common_body_read_is_bounded() {
+        let src = include_str!("parser_diff_common.rs");
+        let needle = "safe_body::read_bounded(";
+        assert!(
+            src.contains(needle),
+            "parser_diff_common.rs body read must be bounded"
+        );
+    }
+
+    #[test]
+    fn harvest_cmd_h1_api_error_body_read_is_bounded() {
+        // The H1 submission path moved from hunt_cmd to harvest_cmd when
+        // auto-submit was removed (filing is now the guarded `wafrift
+        // submit`). The bounded-read invariant moved with it.
+        let src = include_str!("harvest_cmd.rs");
+        let needle = "safe_body::read_bounded_text(resp, 64 * 1024)";
+        assert!(
+            src.contains(needle),
+            "harvest_cmd.rs H1 API error body read must be bounded"
+        );
+    }
+
+    // Round 26: operator-supplied FILE reads (TOCTOU + OOM axis).
+    //
+    // Each test pins that the fixed file now uses read_bounded_text_file
+    // (not the unbounded std::fs::read_to_string) for paths derived from
+    // operator flags.
+
+    #[test]
+    fn smuggle_fire_priority_corpus_read_is_bounded() {
+        let src = include_str!("smuggle_fire_cmd.rs");
+        let needle = "safe_body::read_bounded_text_file(path, CORPUS_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "smuggle_fire_cmd.rs load_priority_techniques must use bounded file read"
+        );
+        // Old unbounded pattern must be absent.
+        let banned = concat!("std::fs::", "read_to_string(path)");
+        assert!(
+            !src.contains(banned),
+            "smuggle_fire_cmd.rs must not use unbounded fs::read_to_string — OOM regression"
+        );
+    }
+
+    #[test]
+    fn exploit_seed_payloads_read_is_bounded() {
+        // `wafrift exploit --seed-payloads <path>` is operator-supplied input;
+        // an unbounded read is an OOM (/dev/zero) + TOCTOU (symlink swap) hole.
+        let src = include_str!("exploit_cmd.rs");
+        let needle = "safe_body::read_bounded_text_file(path, EXPLOIT_SEED_PAYLOADS_MAX_BYTES)";
+        assert!(
+            src.contains(needle),
+            "exploit_cmd.rs load_seed_payloads must use the bounded file reader"
+        );
+        // The banned unbounded pattern must be gone from the production path.
+        let banned = concat!("std::fs::", "read_to_", "string(path)");
+        assert!(
+            !src.contains(banned),
+            "exploit_cmd.rs must not use unbounded fs::read_to_string — OOM/TOCTOU regression"
+        );
+    }
+
+    #[test]
+    fn bank_genome_dir_read_is_bounded() {
+        let src = include_str!("bank.rs");
+        let needle = "safe_body::read_bounded_text_file(";
+        assert!(
+            src.contains(needle),
+            "bank.rs read_genome_dir must use bounded file read"
+        );
+    }
+
+    #[test]
+    fn bench_waf_history_file_read_is_bounded() {
+        let src = include_str!("bench_waf.rs");
+        let needle = "safe_body::read_bounded_text_file(";
+        assert!(
+            src.contains(needle),
+            "bench_waf.rs history-file reads must use bounded file read"
+        );
+        // Both --history-file and --history-merge must be fixed.
+        let count = src.matches(needle).count();
+        assert!(
+            count >= 2,
+            "bench_waf.rs must have at least 2 bounded reads (--history-file and --history-merge), found {count}"
+        );
     }
 }

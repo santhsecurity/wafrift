@@ -65,8 +65,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
+
+
 #[derive(Args, Debug)]
-pub struct ListenerArgs {
+pub(crate) struct ListenerArgs {
     /// Address to bind the callback receiver to. Defaults to
     /// loopback — public exposure (`0.0.0.0:PORT`) is an explicit
     /// opt-in so an operator does not accidentally stand up a
@@ -97,13 +99,19 @@ pub struct ListenerArgs {
     /// connections that send headers but never the body.
     #[arg(long, default_value_t = 10)]
     pub read_timeout_secs: u64,
+
+    /// IPv4 address to return in DNS A-record responses. Defaults to
+    /// `127.0.0.1`. Set to the server's public IP when running
+    /// a production interactsh-compat listener.
+    #[arg(long, value_name = "IP", default_value = "127.0.0.1")]
+    pub server_ip: String,
 }
 
 /// One observed inbound HTTP request — the smallest unit of evidence
 /// for an OOB callback. Serialised verbatim into NDJSON when
 /// `--format json` is selected.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Callback {
+pub(crate) struct Callback {
     /// Unix timestamp (seconds) the callback was received.
     pub received_at: u64,
     /// Source IP:port of the inbound connection. Parsed via
@@ -141,10 +149,10 @@ pub struct Callback {
 /// callbacks is roughly 100 MiB at the typical ~1 KiB payload
 /// shape — generous for an authentic pentest run, but bounded so
 /// a flood doesn't ramp into a DoS.
-pub const MAX_CALLBACK_LOG: usize = 100_000;
+pub(crate) const MAX_CALLBACK_LOG: usize = 100_000;
 
 #[derive(Debug, Default)]
-pub struct Registry {
+pub(crate) struct Registry {
     tokens: RwLock<HashMap<String, ()>>,
     // VecDeque (not Vec) so the FIFO eviction at the MAX_CALLBACK_LOG
     // cap is O(1) via pop_front() instead of O(n) via Vec::remove(0).
@@ -247,9 +255,11 @@ impl Registry {
 // `generate_token` + `base32_encode` live in `crate::callback_token`
 // — shared with `crate::scan` so the receiver (listener) and the
 // sender (scan's payload substitution) use one source of truth for
-// the token format. Re-export at the local path so existing
-// listener-only call sites keep compiling.
-pub use crate::callback_token::generate_token;
+// the token format. Re-export at the local path (pub(crate) so the
+// inner-crate visibility matches the source — outer pub use here
+// would widen visibility beyond what callback_token::generate_token
+// intends) so existing listener-only call sites keep compiling.
+pub(crate) use crate::callback_token::generate_token;
 
 /// Entry point for `wafrift listener`. Blocks until SIGINT / SIGTERM.
 ///
@@ -257,7 +267,7 @@ pub use crate::callback_token::generate_token;
 ///
 /// Returns `ExitCode::from(1)` if the bind address is malformed or
 /// the socket cannot be opened.
-pub fn run_listener(args: ListenerArgs) -> ExitCode {
+pub(crate) fn run_listener(args: ListenerArgs) -> ExitCode {
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -269,6 +279,32 @@ pub fn run_listener(args: ListenerArgs) -> ExitCode {
         }
     };
     rt.block_on(async move {
+        // R44 fix (dogfood pass 4): pre-fix tokens were printed
+        // BEFORE the bind attempt, so when the port was busy the
+        // operator had already copy-pasted four useless token
+        // strings into their payloads before the "address in use"
+        // error surfaced. Bind FIRST; mint and print tokens only
+        // after the socket is open and the listener is ready to
+        // receive callbacks.
+        let addr: SocketAddr = match args.bind.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                // R50 tail3 (CLAUDE.md §10 COHERENCE): malformed
+                // --bind value is an INPUT error, not an I/O
+                // failure. Exit 2 matches the documented exit-code
+                // table (pass-11 META).
+                eprintln!("{} bind {} parse: {e}", "error:".red(), args.bind);
+                return ExitCode::from(2);
+            }
+        };
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("{} bind {addr}: {e}", "error:".red());
+                return ExitCode::from(1);
+            }
+        };
+
         let registry = Arc::new(Registry::new());
         let minted = registry.mint(args.tokens).await;
 
@@ -287,7 +323,7 @@ pub fn run_listener(args: ListenerArgs) -> ExitCode {
             println!(
                 "{} {}",
                 "[wafrift listener]".bold().cyan(),
-                format!("binding {}", args.bind).bright_black()
+                format!("listening on {}", args.bind).bright_black()
             );
             for t in &minted {
                 println!("  {} {}", "token:".green(), t.bold());
@@ -297,21 +333,6 @@ pub fn run_listener(args: ListenerArgs) -> ExitCode {
                 "(embed any of the above in your payload; callbacks log below)".bright_black()
             );
         }
-
-        let addr: SocketAddr = match args.bind.parse() {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!("{} bind {} parse: {e}", "error:".red(), args.bind);
-                return ExitCode::from(1);
-            }
-        };
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("{} bind {addr}: {e}", "error:".red());
-                return ExitCode::from(1);
-            }
-        };
 
         let format = args.format.clone();
         let max_body = args.max_body_bytes;
@@ -327,12 +348,15 @@ pub fn run_listener(args: ListenerArgs) -> ExitCode {
             let registry_c = registry.clone();
             let format_c = format.clone();
             tokio::spawn(async move {
-                // handle_conn returns:
-                //   Err  — malformed request, drop it
-                //   Ok(None) — a `/_wafrift/...` management API hit,
-                //              already answered; do NOT log as callback
-                //   Ok(Some(cb)) — a real inbound, render + record
-                let cb = match handle_conn(sock, peer, &registry_c, max_body, read_timeout).await {
+                let cb = match handle_conn(
+                    sock,
+                    peer,
+                    &registry_c,
+                    max_body,
+                    read_timeout,
+                )
+                .await
+                {
                     Ok(Some(cb)) => cb,
                     Ok(None) | Err(_) => return,
                 };
@@ -551,6 +575,8 @@ async fn handle_conn(
         let body_str = String::from_utf8_lossy(&body);
         matched_token = registry.match_token_in(&body_str).await;
     }
+
+
 
     Ok(Some(Callback {
         received_at,

@@ -133,4 +133,85 @@ mod tests {
         let conn = collect_connection_header_names(&headers);
         assert!(conn.is_empty());
     }
+
+    // -- §12 boundary tests ------------------------------------------------
+
+    #[test]
+    fn connection_tokens_empty_value_produces_empty_set() {
+        // Empty Connection header value → no tokens.
+        let t = connection_header_tokens("");
+        assert!(t.is_empty(), "empty value must produce no tokens");
+    }
+
+    #[test]
+    fn connection_tokens_whitespace_only_produces_empty_set() {
+        // A value of only commas and spaces has no meaningful tokens.
+        let t = connection_header_tokens("  ,  ,  ");
+        assert!(
+            t.is_empty(),
+            "whitespace-only comma-separated value must yield no tokens: {t:?}"
+        );
+    }
+
+    #[test]
+    fn is_hop_by_hop_te_header() {
+        // TE is listed in RFC 7230 §6.1 as hop-by-hop; make sure it's covered.
+        assert!(is_hop_by_hop("te"), "TE must be hop-by-hop");
+        assert!(is_hop_by_hop("TE"), "TE must be hop-by-hop (uppercase)");
+    }
+
+    #[test]
+    fn is_hop_by_hop_unknown_header_is_not_hop_by_hop() {
+        // Non-connection management headers must pass through.
+        assert!(!is_hop_by_hop("X-Request-Id"));
+        assert!(!is_hop_by_hop("accept-encoding"));
+    }
+
+    #[test]
+    fn collect_connection_headers_from_hyper_empty_map() {
+        use hyper::HeaderMap;
+        let map = HeaderMap::new();
+        let conn = collect_connection_header_names_hyper(&map);
+        assert!(
+            conn.is_empty(),
+            "no Connection headers in hyper map → empty set"
+        );
+    }
+
+    #[test]
+    fn collect_connection_headers_from_hyper_single_value() {
+        use hyper::header::CONNECTION;
+        use hyper::header::HeaderValue;
+        use hyper::HeaderMap;
+        let mut map = HeaderMap::new();
+        map.insert(CONNECTION, HeaderValue::from_static("keep-alive, X-Hop"));
+        let conn = collect_connection_header_names_hyper(&map);
+        assert!(conn.contains("keep-alive"));
+        assert!(conn.contains("x-hop"));
+    }
+
+    #[test]
+    fn strip_all_hop_by_hop_headers_individually() {
+        // Every header in the RFC 7230 list must be stripped; none
+        // must sneak through the is_hop_by_hop gate.
+        let hop_headers = [
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "proxy-connection",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+            "x-forwarded-for",
+        ];
+        let empty_conn: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for h in hop_headers {
+            assert!(
+                should_strip_proxy_header(h, &empty_conn),
+                "{h} must be stripped by hop-by-hop check"
+            );
+        }
+    }
 }

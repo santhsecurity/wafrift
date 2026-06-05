@@ -1,6 +1,4 @@
 //! Determinism: pure mutators yield byte-identical output on repeated calls with fixed inputs.
-//!
-//! After the FNV-1a refactor (F140-F147), ALL strategies are deterministic.
 
 mod common;
 

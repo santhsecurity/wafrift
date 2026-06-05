@@ -27,7 +27,8 @@ pub fn plan_pipelines(
     cache: Option<&LearningCache>,
     verdict_history: &[Verdict],
 ) -> EvasionPlanOutput {
-    let mut pipelines = Vec::new();
+    // §1 SPEED: cap is 1 cached + 3 preset (light/medium/heavy) = 4 max.
+    let mut pipelines = Vec::with_capacity(4);
 
     // 1. Try cached winner first
     if let (Some(waf), Some(payload), Some(cache)) = (waf_fingerprint, payload_type, cache) {

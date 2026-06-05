@@ -1,5 +1,7 @@
 //! Built-in tamper strategy implementations.
 
+use std::fmt::Write as _;
+
 use super::TamperStrategy;
 
 /// URL encoding tamper strategy.
@@ -667,9 +669,12 @@ impl TamperStrategy for HexLiteralKeywordTamper {
                         content.push(inner);
                     }
                 }
+                // §1 SPEED: replaced `push_str(&format!("{b:02x}"))` (one
+                // String allocation per byte) with `write!(out, ...)` which
+                // formats directly into the pre-allocated `out` buffer.
                 out.push_str("0x");
                 for b in content.bytes() {
-                    out.push_str(&format!("{b:02x}"));
+                    let _ = write!(out, "{b:02x}");
                 }
             } else {
                 out.push(c);

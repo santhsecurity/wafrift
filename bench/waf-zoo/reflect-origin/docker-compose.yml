@@ -1,0 +1,83 @@
+# ModSecurity + OWASP CRS in front of a deliberately XSS-vulnerable reflective
+# origin — for EXECUTION benchmarking (does a payload that bypasses the WAF
+# actually RUN), not just bypass benchmarking.
+#
+# The rest of the zoo proxies to httpbin (JSON echo) so XSS can never execute;
+# this stack swaps in `reflect-origin`, which reflects `q` into a live HTML body
+# AND a DOM innerHTML sink, so `bench-waf --prove-execution` can measure the
+# honest bypass-vs-exploit split.
+#
+# Usage:
+#   docker compose -f bench/waf-zoo/reflect-origin/docker-compose.yml up -d
+#   # then, from the wafrift tree:
+#   WAFRIFT_DETONATE_BIN=$(command -v detonate) \
+#     wafrift bench-waf --base-url http://127.0.0.1:18106 --evade \
+#       --class xss --strategies heavy --variants 8 \
+#       --prove-execution --detonate-engine chrome --format json
+#
+# The origin reflects `q` into several execution contexts, chosen by the `ctx`
+# query parameter, so the sweep can ask whether a WAF bypass executes in the
+# context a real app exposes — not just the body+innerHTML one. The ctx grammar
+# is `[<transform>.]<render>`:
+#   render : body (default) | attr | attr_sq | js | js_sq | uri
+#            hpp  — app concatenates ALL repeated `q=` values (HTTP Parameter
+#                   Pollution); deliver the payload split into inert fragments so
+#                   the WAF sees no signature. `wafrift exploit --split-param`.
+#   transform (app decodes the value first — the WAF-opaque axis):
+#            b64 | hex | b32 | rot13            (base-N: CRS has no transform)
+#            zb64 (base64+zlib URL-state compression — CRS can't inflate DEFLATE)
+#            b58  (Bitcoin base58 bignum alphabet) | b64x2 (double-base64 chain)
+#            dd (double-URL) | jsesc (\uXXXX) | entity (&#60;)   NEGATIVE CONTROLS
+#   e.g. ctx=body | ctx=attr | ctx=b64 | ctx=b64.attr | ctx=hex.js | ctx=zb64.attr
+#   wafrift exploit --target 'http://127.0.0.1:18106/?ctx=js&q=X' --param q \
+#     --detonate-engine chrome --all
+#
+# WAF-OPAQUE app-transform exploitation (the axis that beats CRS at PL1-PL4):
+# the WAF sees an inert base64/hex/base32/rot13 blob carrying no XSS signature,
+# the app decodes it to live markup and it executes. wafrift produces and
+# detonate-proves these directly:
+#   wafrift exploit --target 'http://127.0.0.1:18106/?ctx=b64.body' --param q \
+#     --app-transform b64 --seed-payloads corpus_xss.txt \
+#     --detonate-engine chrome --all --max-fires 0
+#   # b64.attr / hex.js / etc. unlock the attribute- and JS-string-breakout
+#   # vector classes. base-N (`b64`,`hex`,`b32`,`rot13`) AND the categorically
+#   # distinct `zb64` (compression), `b58` (bignum), `b64x2` (chain) all
+#   # bypass+execute; `jsesc`,`entity`,`dd` are NEGATIVE CONTROLS (CRS models
+#   # those decoders, so they stay blocked).
+#   # Full matrix + execution count: bash transform_exec_sweep.sh
+#
+# Paranoia level is configurable: PARANOIA=4 docker compose ... up -d
+# (default 2, matching the AWS/Azure zoo stacks).
+services:
+  wafrift-reflect-waf:
+    image: owasp/modsecurity-crs:4-apache-202604040104@sha256:8eb19c64d84d48dd8435c878fb9b6d3028e5da292752155fd1e697dccc51b495
+    container_name: wafrift-reflect-waf
+    environment:
+      PARANOIA: "${PARANOIA:-2}"
+      BLOCKING_PARANOIA: "${PARANOIA:-2}"
+      DETECTION_PARANOIA: "${PARANOIA:-2}"
+      EXECUTING_PARANOIA: "${PARANOIA:-2}"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+      SERVER_NAME: "wafrift-reflect"
+      BACKEND: "http://reflect:80"
+    ports:
+      - "18106:8080"
+    depends_on:
+      - reflect
+    networks:
+      - wafrift-reflect
+
+  reflect:
+    # Deliberately XSS-vulnerable HTML reflector. Reachable ONLY on the internal
+    # compose network (no published port) — never expose it directly.
+    image: python:3.12-slim
+    container_name: wafrift-reflect-origin
+    command: ["python", "/srv/reflect_server.py"]
+    volumes:
+      - ./reflect_server.py:/srv/reflect_server.py:ro
+    networks:
+      - wafrift-reflect
+
+networks:
+  wafrift-reflect:

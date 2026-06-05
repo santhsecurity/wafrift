@@ -1,5 +1,7 @@
 //! Operator and delimiter mutation helpers.
 
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
+
 /// Find all balanced string-literal regions in a payload.
 ///
 /// Returns a list of `(start, end)` byte ranges for quoted regions.
@@ -82,10 +84,10 @@ pub(crate) fn replace_logical_operator(
             // space_to_random_blank (F140). With more than one
             // alternative the picked variant matters; deterministic
             // picking keeps gene-bank replay byte-identical.
-            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            let mut h: u64 = FNV_OFFSET_64;
             for b in payload.bytes().chain(target.bytes()) {
                 h ^= u64::from(b);
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                h = h.wrapping_mul(FNV_PRIME_64);
             }
             let replacement = &alternatives[(h as usize) % alternatives.len()];
             let mut result = String::with_capacity(payload.len() + replacement.len());

@@ -36,11 +36,14 @@ use reqwest::Client;
 use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
+#[cfg(test)]
+use wafrift_transport::jwt::b64url_decode;
+use wafrift_transport::jwt::{b64url_encode, decode_b64url_json};
+
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct JwtDiffArgs {
+pub(crate) struct JwtDiffArgs {
     /// Target URL — the protected resource that requires the JWT
     /// in its `Authorization: Bearer <jwt>` header.
     pub url: String,
@@ -102,7 +105,7 @@ pub struct JwtDiffArgs {
 
 /// One JWT validation probe.
 #[derive(Debug, Clone)]
-pub struct JwtProbe {
+pub(crate) struct JwtProbe {
     pub kind: &'static str,
     pub description: &'static str,
     /// The mutated JWT to send.
@@ -110,7 +113,7 @@ pub struct JwtProbe {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct JwtDiffResult {
+pub(crate) struct JwtDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub probe_status: u16,
@@ -125,7 +128,7 @@ pub struct JwtDiffResult {
 /// Generate the JWT-mutation probe set. Pure function. Takes the
 /// operator's baseline token and forks it N ways.
 #[must_use]
-pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
+pub(crate) fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     let mut out = Vec::new();
     let parts: Vec<&str> = baseline.split('.').collect();
     if parts.len() != 3 {
@@ -246,7 +249,7 @@ pub fn generate_jwt_variants(baseline: &str) -> Vec<JwtProbe> {
     out
 }
 
-pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
+pub(crate) async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     if args.token.split('.').count() != 3 {
         eprintln!(
@@ -273,10 +276,15 @@ pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
         );
     }
 
-    let baseline =
-        match fire_with_bearer(&http, &args.url, &args.method, args.body.as_deref(), &args.token)
-            .await
-        {
+    let baseline = match fire_with_bearer(
+        &http,
+        &args.url,
+        &args.method,
+        args.body.as_deref(),
+        &args.token,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(e) => {
             eprintln!(
@@ -306,7 +314,11 @@ pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(variants.len());
     for v in variants {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url_arc.clone();
         let method = method_arc.clone();
@@ -318,14 +330,8 @@ pub async fn run_jwt_diff(mut args: JwtDiffArgs) -> ExitCode {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let result = fire_with_bearer(
-                &http,
-                &url,
-                &method,
-                body.as_deref(),
-                &v.mutated_token,
-            )
-            .await;
+            let result =
+                fire_with_bearer(&http, &url, &method, body.as_deref(), &v.mutated_token).await;
             counter.fetch_add(1, Ordering::SeqCst);
             (v, result)
         }));
@@ -386,18 +392,18 @@ async fn fire_with_bearer(
     }
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
 }
 
 crate::impl_parser_diff_http_args!(JwtDiffArgs);
 
 fn render_curl(url: &str, token: &str) -> String {
-    format!(
-        "curl -i -H {} {}",
-        shell_single_quote(&format!("Authorization: Bearer {token}")),
-        shell_single_quote(url)
-    )
+    let auth_header = vec![("Authorization".to_string(), format!("Bearer {token}"))];
+    crate::helpers::render_simple_curl(None, url, &auth_header, None)
 }
 
 fn emit_output(
@@ -407,8 +413,7 @@ fn emit_output(
     baseline_body_len: usize,
     errors: u32,
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -417,28 +422,20 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high":   high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
-        match serde_json::to_string_pretty(&out) {
-            Ok(s) => println!("{s}"),
-            Err(e) => eprintln!("JSON error: {e}"),
-        }
+        crate::parser_diff_common::print_pretty_json(&out);
         return;
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} mutation(s) accepted by target — {} high, {} medium · {} error(s)",
-            "[wafrift jwt-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "jwt-diff",
+            "mutation(s) accepted by target",
+            high,
+            medium,
+            errors,
         );
     }
 
@@ -446,98 +443,22 @@ fn emit_output(
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} baseline HTTP {} ({} bytes) → probe HTTP {} ({} bytes, Δ {:+.1}%)",
-            "↘".bright_black(),
+        crate::parser_diff_common::print_baseline_probe_arrow(
             r.baseline_status,
             r.baseline_body_len,
             r.probe_status,
             r.probe_body_len,
-            r.body_delta_pct
+            r.body_delta_pct,
         );
         println!("    {}", r.curl_cmd);
     }
 }
 
-// ── Pure helpers: base64url + JWT (de)construction ──────────
-
-/// Encode bytes as URL-safe base64 WITHOUT padding (per RFC 7515
-/// §2 — JWS uses unpadded base64url throughout).
-fn b64url_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
-    let mut i = 0;
-    while i + 3 <= bytes.len() {
-        let b0 = bytes[i] as u32;
-        let b1 = bytes[i + 1] as u32;
-        let b2 = bytes[i + 2] as u32;
-        out.push(ALPHABET[((b0 >> 2) & 0x3F) as usize] as char);
-        out.push(ALPHABET[(((b0 << 4) | (b1 >> 4)) & 0x3F) as usize] as char);
-        out.push(ALPHABET[(((b1 << 2) | (b2 >> 6)) & 0x3F) as usize] as char);
-        out.push(ALPHABET[(b2 & 0x3F) as usize] as char);
-        i += 3;
-    }
-    let rem = bytes.len() - i;
-    if rem == 1 {
-        let b0 = bytes[i] as u32;
-        out.push(ALPHABET[((b0 >> 2) & 0x3F) as usize] as char);
-        out.push(ALPHABET[((b0 << 4) & 0x3F) as usize] as char);
-    } else if rem == 2 {
-        let b0 = bytes[i] as u32;
-        let b1 = bytes[i + 1] as u32;
-        out.push(ALPHABET[((b0 >> 2) & 0x3F) as usize] as char);
-        out.push(ALPHABET[(((b0 << 4) | (b1 >> 4)) & 0x3F) as usize] as char);
-        out.push(ALPHABET[((b1 << 2) & 0x3F) as usize] as char);
-    }
-    out
-}
-
-fn b64url_decode(s: &str) -> Option<Vec<u8>> {
-    const INVALID: u8 = 0xFF;
-    let mut table = [INVALID; 256];
-    for (i, c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-        .iter()
-        .enumerate()
-    {
-        table[*c as usize] = i as u8;
-    }
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let chunk_len = (bytes.len() - i).min(4);
-        if chunk_len < 2 {
-            return None;
-        }
-        let a = table[bytes[i] as usize];
-        let b = table[bytes[i + 1] as usize];
-        if a == INVALID || b == INVALID {
-            return None;
-        }
-        out.push(((a as u32) << 2 | (b as u32) >> 4) as u8);
-        if chunk_len >= 3 {
-            let c = table[bytes[i + 2] as usize];
-            if c == INVALID {
-                return None;
-            }
-            out.push((((b as u32) & 0xF) << 4 | (c as u32) >> 2) as u8);
-            if chunk_len == 4 {
-                let d = table[bytes[i + 3] as usize];
-                if d == INVALID {
-                    return None;
-                }
-                out.push((((c as u32) & 0x3) << 6 | (d as u32)) as u8);
-            }
-        }
-        i += chunk_len;
-    }
-    Some(out)
-}
-
-fn decode_b64url_json(s: &str) -> Option<Value> {
-    let bytes = b64url_decode(s)?;
-    serde_json::from_slice(&bytes).ok()
-}
+// ── JWT construction helper ──────────────────────────────────
+//
+// b64url_encode / b64url_decode / decode_b64url_json are the
+// canonical primitives from wafrift_transport::jwt (RFC 7515 §2).
+// They are imported above — do NOT re-implement here.
 
 fn build_jwt(header: &Value, payload: &Value, sig: &str) -> String {
     let h = b64url_encode(serde_json::to_string(header).unwrap_or_default().as_bytes());
@@ -836,7 +757,7 @@ mod tests {
             delay_ms: 0,
             concurrency: 4,
             // 30s: Windows loopback + starved current_thread runtime.
-            timeout_secs: 30,
+            timeout_secs: wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             insecure: false,
             proxy: None,
             header: Vec::new(),

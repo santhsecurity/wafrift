@@ -1,20 +1,7 @@
 //! Space-replacement strategies.
+use wafrift_types::hash::{FNV_PRIME_64, fnv1a_64};
 
 const SQL_BLANK_CHARS: &[char] = &['\t', '\n', '\r', '\x0b', '\x0c'];
-
-/// FNV-1a hash of (byte index, payload bytes) for deterministic blank-char selection.
-fn fnv1a_space_hash(space_idx: usize, payload: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in space_idx.to_le_bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    for b in payload.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
 
 /// Insert tab characters BETWEEN tokens by replacing spaces with tabs.
 ///
@@ -66,27 +53,23 @@ pub fn space_to_plus(payload: &str) -> String {
 /// pick is now driven by an FNV-1a hash of the full payload mixed with the
 /// space-position index, so identical input is byte-identical output and a
 /// captured bypass is reproducible.
+///
+/// §1 SPEED: uses canonical `fnv1a_64()` instead of a duplicate inline fold,
+/// and pre-sizes the output to `payload.len()` (single-byte replacements keep
+/// length constant). §7 DEDUP: the inline fold was byte-identical to `fnv1a_64`.
 pub fn space_to_random_blank(payload: &str) -> String {
-    // FNV-1a seed over the whole payload — every space gets the same
-    // run-stable seed mixed with its 0-based position among the chars.
-    let seed: u64 = payload
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325, |acc, b| {
-            (acc ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
-    payload
-        .chars()
-        .enumerate()
-        .map(|(i, c)| {
-            if c == ' ' {
-                let pick =
-                    seed.wrapping_add(i as u64).wrapping_mul(0x0000_0100_0000_01b3);
-                SQL_BLANK_CHARS[(pick as usize) % SQL_BLANK_CHARS.len()]
-            } else {
-                c
-            }
-        })
-        .collect()
+    // Canonical one-shot FNV-1a — §7 DEDUP eliminates the duplicate inline fold.
+    let seed: u64 = fnv1a_64(payload.as_bytes());
+    let mut out = String::with_capacity(payload.len());
+    for (i, c) in payload.chars().enumerate() {
+        if c == ' ' {
+            let pick = seed.wrapping_add(i as u64).wrapping_mul(FNV_PRIME_64);
+            out.push(SQL_BLANK_CHARS[(pick as usize) % SQL_BLANK_CHARS.len()]);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

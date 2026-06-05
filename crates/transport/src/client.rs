@@ -10,9 +10,23 @@ use wafrift_types::{EvasionConfig, Request, ip_addr_is_bogon};
 use crate::response::EvasionResponse;
 use crate::signal::{BlockClass, ResponseProfileDb, ResponseSignal};
 
-/// Maximum body size to read for WAF detection (100KB).
-/// WAF block pages are typically small; large responses are likely legitimate downloads.
-const MAX_BODY_READ_SIZE: usize = 100_000;
+/// Maximum body size to read for WAF detection.
+///
+/// CLAUDE.md §7 DEDUPLICATION note (R49 pass-11 I3): this is a
+/// TRANSPORT-layer cap for WAF block-page classification — distinct
+/// from `cli::safe_body::HEADROOM_MAX_RESPONSE_BYTES` (64 MiB) which
+/// caps operator-controlled response bodies for the CLI. They differ
+/// 600x because the use cases differ:
+///   - Block pages (this cap): Cloudflare interstitials ~80 KB,
+///     CAPTCHA pages with embedded JS ~200 KB. 256 KiB comfortably
+///     covers every modern challenge page.
+///   - CLI response reads (the cli cap): operator-specified targets
+///     that may legitimately stream MiB of attack-response data.
+///
+/// Pre-R49 this was 100 KB which silently truncated CAPTCHA pages
+/// (~200 KB) and could miscategorize them as "no WAF" because the
+/// block-class markers near the end of the JS payload were missed.
+const MAX_BODY_READ_SIZE: usize = 256 * 1024;
 
 /// An HTTP client that automatically applies WAF evasion techniques.
 ///
@@ -33,6 +47,22 @@ pub struct EvasionClient {
     profile_db: ResponseProfileDb,
 }
 
+fn shared_browser_headers() -> Result<reqwest::header::HeaderMap, EvasionError> {
+    guise::http::default_browser_header_map_without_compression().map_err(|e| {
+        EvasionError::InvalidRequest(format!("build shared stealth browser headers: {e}"))
+    })
+}
+
+fn apply_shared_browser_headers(
+    builder: reqwest::ClientBuilder,
+) -> Result<reqwest::ClientBuilder, EvasionError> {
+    Ok(builder
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .default_headers(shared_browser_headers()?))
+}
+
 impl EvasionClient {
     /// Acquire the host-state lock, recovering from poisoning.
     ///
@@ -45,8 +75,8 @@ impl EvasionClient {
             .unwrap_or_else(|poisoned: std::sync::PoisonError<_>| poisoned.into_inner())
     }
 
-    /// FIFO-evict at the 10k cap if needed, then register `host` in
-    /// the states map if absent and push it onto the FIFO tail.
+    /// FIFO-evict at the workspace-canonical cap if needed, then register
+    /// `host` in the states map if absent and push it onto the FIFO tail.
     /// Returns a mutable reference to the (possibly freshly-inserted)
     /// HostState.
     ///
@@ -62,7 +92,7 @@ impl EvasionClient {
     ) -> &'a mut HostState {
         // Cap-evict if at the bound AND the new key isn't already
         // present (already-present means no growth).
-        if states.len() >= 10_000 && !states.contains_key(host) {
+        if states.len() >= wafrift_types::HOST_STATES_CAP && !states.contains_key(host) {
             let mut fifo = self
                 .host_fifo
                 .lock()
@@ -97,28 +127,45 @@ impl EvasionClient {
     pub fn with_config(config: EvasionConfig) -> Result<Self, EvasionError> {
         config.validate().map_err(EvasionError::InvalidRequest)?;
 
-        let mut builder = crate::http_builder::base_client_builder(
+        let mut builder = apply_shared_browser_headers(crate::http_builder::base_client_builder(
             wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             config.insecure_tls,
             None,
-        )
-        .redirect(reqwest::redirect::Policy::limited(
+        ))?
+        // §15 SSRF: bogon-safe redirect policy (refuses 302 → cloud-metadata
+        // / RFC1918 / loopback, stops cross-origin auth leaks) — the core
+        // engine must be at least as safe as the CLI diff commands, which
+        // already use this. Canonical impl in `http_builder`; shared.
+        .redirect(crate::http_builder::safe_redirect_policy(
             wafrift_types::DEFAULT_MAX_REDIRECTS,
         ));
 
         #[cfg(feature = "proxy-pool")]
-        if !config.proxies.is_empty()
-            && let Some(pool) = crate::pool::ProxyPool::new(&config.proxies)
-                .map_err(|e| EvasionError::InvalidUrl(e.to_string()))?
-        {
-            let custom_proxy = reqwest::Proxy::custom(move |_url| {
-                if pool.is_empty() {
-                    None
-                } else {
-                    Some(pool.next_url())
-                }
-            });
-            builder = builder.proxy(custom_proxy);
+        if !config.proxies.is_empty() {
+            // Validate every proxy URL through proxywire's canonical strict
+            // parser (rejects bad schemes, embedded paths/queries — the SSRF
+            // guard) before any traffic is routed. We then round-robin the
+            // original credential-bearing strings: proxywire's
+            // `ProxyEndpoint::to_url()` intentionally drops `user:pass@`
+            // userinfo, which reqwest's custom-proxy URL form needs, so the
+            // raw strings (already validated) are what we rotate.
+            for proxy in &config.proxies {
+                proxywire::ProxyEndpoint::from_url(proxy)
+                    .map_err(|e| EvasionError::InvalidUrl(e.to_string()))?;
+            }
+            let urls: Vec<reqwest::Url> = config
+                .proxies
+                .iter()
+                .filter_map(|p| reqwest::Url::parse(p).ok())
+                .collect();
+            if !urls.is_empty() {
+                let cursor = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let custom_proxy = reqwest::Proxy::custom(move |_url| {
+                    let i = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Some(urls[i % urls.len()].clone())
+                });
+                builder = builder.proxy(custom_proxy);
+            }
         }
 
         for (domain, ip) in &config.origin_bypass {
@@ -139,6 +186,17 @@ impl EvasionClient {
     }
 
     /// Create with a custom reqwest client.
+    ///
+    /// # SSRF / bogon filtering
+    ///
+    /// Unlike [`Self::with_config`] — which installs the
+    /// `BogonFilteringResolver` so hostnames resolving to a bogon
+    /// (loopback / RFC1918 / link-local metadata) are refused at connect
+    /// time — this constructor trusts the CALLER's `client` as-is. If
+    /// untrusted hostnames may reach it, wire your own SSRF-safe DNS
+    /// resolver into the client before passing it. The upfront literal-IP
+    /// bogon rejection in [`Self::send`] still applies regardless, so
+    /// literal-bogon URLs are blocked either way.
     ///
     /// # Errors
     ///
@@ -202,10 +260,24 @@ impl EvasionClient {
         let max_attempts = self.config.max_attempts as usize;
 
         for attempt in 0..max_attempts {
-            // Get current host state and apply evasion
-            let (evaded, techniques) = {
+            // Get current host state and apply evasion.
+            //
+            // Snapshot the per-host state under the lock, then RELEASE
+            // the lock BEFORE the CPU-heavy `evade()` (regex-driven
+            // payload mutation, which can run for a noticeable time on
+            // large request bodies). Holding `host_states` across
+            // `evade` serialised EVERY host's request behind one host's
+            // mutation work — a global bottleneck under concurrent /
+            // multi-host load. The proxy crate already learned this
+            // (it snapshots state then runs `evade` in spawn_blocking
+            // outside the lock); the transport client now matches.
+            // `evade` borrows only `&request`/`&state`/`&self.config` —
+            // never the locked map — so the early release is sound.
+            let state = {
                 let states = self.lock_states();
-                let state = states.get(&host).cloned().unwrap_or_default();
+                states.get(&host).cloned().unwrap_or_default()
+            };
+            let (evaded, techniques) = {
                 let result = evade(&request, &state, &self.config);
                 (result.request, result.techniques)
             };
@@ -359,18 +431,21 @@ impl EvasionClient {
                         // accumulate hundreds of KB of unique technique
                         // names in HostState; the contains() guard only
                         // prevents duplicates within one push batch.
-                        const HOST_TECHNIQUE_CAP: usize = 200;
-                        for tech in prioritize.iter().take(HOST_TECHNIQUE_CAP) {
+                        // Canonical value: wafrift_types::HOST_TECHNIQUE_HINTS_CAP,
+                        // shared with strategy::host_state::MAX_HINTS_PER_LIST
+                        // so both enforcement sites stay in sync.
+                        let hints_cap = wafrift_types::HOST_TECHNIQUE_HINTS_CAP;
+                        for tech in prioritize.iter().take(hints_cap) {
                             if !state.prioritized_techniques.contains(tech) {
-                                if state.prioritized_techniques.len() >= HOST_TECHNIQUE_CAP {
+                                if state.prioritized_techniques.len() >= hints_cap {
                                     state.prioritized_techniques.remove(0);
                                 }
                                 state.prioritized_techniques.push(tech.clone());
                             }
                         }
-                        for tech in avoid.iter().take(HOST_TECHNIQUE_CAP) {
+                        for tech in avoid.iter().take(hints_cap) {
                             if !state.avoided_techniques.contains(tech) {
-                                if state.avoided_techniques.len() >= HOST_TECHNIQUE_CAP {
+                                if state.avoided_techniques.len() >= hints_cap {
                                     state.avoided_techniques.remove(0);
                                 }
                                 state.avoided_techniques.push(tech.clone());
@@ -482,8 +557,19 @@ impl EvasionClient {
 
     /// Read a bounded preview of the response body for WAF fingerprinting.
     ///
-    /// Takes ownership of the response and reads up to `MAX_BODY_READ_SIZE` bytes.
-    /// Returns `Some(bytes)` with body content, or `None` if the body couldn't be read.
+    /// Takes ownership of the response and reads up to `MAX_BODY_READ_SIZE` bytes
+    /// from the decompressed stream. The cap is enforced BEFORE full
+    /// materialisation: we read chunk-by-chunk via `Response::chunk()` and abort
+    /// the moment the running total would exceed the cap. This prevents a
+    /// hostile target from serving a ~1 KB gzip bomb that expands to GBs
+    /// (decompression-bomb / OOM attack — §15 AUDIT HUNT, R49).
+    ///
+    /// The `Content-Length` pre-check skips bodies the server CLAIMS are large
+    /// (> 10 MB); the chunk loop caps the actual decompressed bytes for every
+    /// other case (including chunked responses that omit `Content-Length`).
+    ///
+    /// Uses `reqwest::Response::chunk()` (no `futures_util` dependency needed)
+    /// so this fix is compile-time safe under every feature flag combination.
     async fn read_body_preview_from_response(response: reqwest::Response) -> Option<Vec<u8>> {
         // Check content length header to skip large downloads
         let content_length = response
@@ -492,29 +578,52 @@ impl EvasionClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<usize>().ok());
 
-        // Skip body check for large content (> 10MB) - likely a download, not a WAF page
+        // Skip body check for large content (> 10MB) — likely a download, not a WAF page.
         if let Some(len) = content_length
             && len > 10_000_000
         {
             return None;
         }
 
-        // Read up to MAX_BODY_READ_SIZE bytes
-        // For very large bodies, we limit what we read for WAF detection
-        match response.bytes().await {
-            Ok(bytes) => {
-                let preview_size = bytes.len().min(MAX_BODY_READ_SIZE);
-                if preview_size == 0 {
-                    None
-                } else {
-                    Some(bytes[..preview_size].to_vec())
+        // §15 OOM / decompression-bomb defence: read chunk-by-chunk, aborting
+        // as soon as the decompressed running total exceeds MAX_BODY_READ_SIZE.
+        // The old `.bytes().await` called here materialised the ENTIRE
+        // decompressed body before slicing to MAX_BODY_READ_SIZE — a
+        // Content-Length-less gzip bomb bypassed the pre-check above and
+        // expanded to gigabytes in memory before we could truncate.
+        let mut acc: Vec<u8> = Vec::with_capacity(MAX_BODY_READ_SIZE.min(16 * 1024));
+        let mut response = response;
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if acc.len().saturating_add(chunk.len()) > MAX_BODY_READ_SIZE {
+                        // Abort: cap exceeded. We already have `acc` bytes;
+                        // return what we have — it's sufficient for WAF
+                        // block-page classification.
+                        tracing::debug!(
+                            cap = MAX_BODY_READ_SIZE,
+                            accumulated = acc.len(),
+                            chunk_len = chunk.len(),
+                            "body preview cap exceeded — truncating (decompression-bomb defence)"
+                        );
+                        let remaining = MAX_BODY_READ_SIZE - acc.len();
+                        acc.extend_from_slice(&chunk[..remaining]);
+                        break;
+                    }
+                    acc.extend_from_slice(&chunk);
+                }
+                Ok(None) => break, // EOF
+                Err(e) => {
+                    tracing::debug!(error = %e, "Failed to read response body for WAF detection");
+                    if acc.is_empty() {
+                        return None;
+                    }
+                    break; // return whatever we accumulated before the error
                 }
             }
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to read response body for WAF detection");
-                None
-            }
         }
+
+        if acc.is_empty() { None } else { Some(acc) }
     }
 }
 
@@ -523,15 +632,28 @@ impl Default for EvasionClient {
         Self::new().unwrap_or_else(|_| {
             // Fallback: build with absolutely minimal config if default fails
             // (e.g. TLS backend unavailable in exotic environments).
-            let reqwest_client = reqwest::Client::builder()
+            let mut fallback_builder = reqwest::Client::builder()
+                .no_gzip()
+                .no_brotli()
+                .no_deflate()
                 .timeout(std::time::Duration::from_secs(
                     wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
-                ))
-                .build()
-                .unwrap_or_else(|e| {
+                ));
+            match shared_browser_headers() {
+                Ok(headers) => {
+                    fallback_builder = fallback_builder.default_headers(headers);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "shared browser headers unavailable in default fallback");
+                }
+            }
+            let reqwest_client = match fallback_builder.build() {
+                Ok(client) => client,
+                Err(e) => {
                     tracing::warn!(error = %e, "minimal reqwest client failed, using fallback");
                     reqwest::Client::new()
-                });
+                }
+            };
             Self {
                 inner: reqwest_client,
                 config: EvasionConfig::default(),
@@ -579,6 +701,49 @@ fn extract_host(url: &str) -> Result<String, EvasionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use guise::fingerprint::default_profile_facts;
+
+    fn captured_header<'a>(raw: &'a str, name: &str) -> Option<&'a str> {
+        raw.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
+    async fn capture_evasion_request(client: &EvasionClient) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let url = format!("http://{}/", listener.local_addr().expect("local addr"));
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            let mut request = Vec::new();
+            let mut buf = [0_u8; 1024];
+            loop {
+                let n = socket.read(&mut buf).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            socket
+                .write_all(
+                    b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .expect("write response");
+            String::from_utf8(request).expect("request is utf8")
+        });
+
+        let response = client.get(&url).await.expect("send capture request");
+        assert_eq!(response.inner.status().as_u16(), 204);
+        server.await.expect("server joins")
+    }
 
     // TEST 1-15: extract_host comprehensive tests
     #[test]
@@ -798,6 +963,34 @@ mod tests {
         assert!(client.stats().is_empty());
     }
 
+    #[tokio::test]
+    async fn default_transport_client_uses_shared_stealth_headers() {
+        let config = EvasionConfig {
+            allow_private_upstream: true,
+            fingerprint_rotation: false,
+            max_attempts: 1,
+            ..Default::default()
+        };
+        let client = EvasionClient::with_config(config).unwrap();
+        let raw_request = capture_evasion_request(&client).await;
+        let facts = default_profile_facts();
+
+        assert_eq!(
+            captured_header(&raw_request, "User-Agent"),
+            Some(facts.user_agent)
+        );
+        assert_eq!(captured_header(&raw_request, "Accept"), Some(facts.accept));
+        assert_eq!(
+            captured_header(&raw_request, "Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(
+            captured_header(&raw_request, "Sec-Fetch-Mode"),
+            Some("navigate")
+        );
+        assert_eq!(captured_header(&raw_request, "Accept-Encoding"), None);
+    }
+
     #[test]
     fn client_with_reqwest_custom_client() {
         let reqwest_client = reqwest::Client::new();
@@ -924,5 +1117,48 @@ mod tests {
                 .join()
                 .expect("reset thread must finish, not deadlock");
         }
+    }
+
+    // ── §15 OOM / decompression-bomb anti-regression ─────────
+
+    /// Pin that `read_body_preview_from_response` uses chunk-by-chunk
+    /// reading (`response.chunk().await`) and NOT the old unbounded
+    /// `.bytes().await`. The old code called `.bytes().await` then
+    /// sliced AFTER full materialisation — a hostile server could send
+    /// a gzip bomb (no Content-Length) that expanded to GBs before the
+    /// slice occurred.
+    #[test]
+    fn read_body_preview_uses_chunk_loop_not_unbounded_bytes() {
+        let src = include_str!("client.rs");
+        // New bounded pattern must be present.
+        assert!(
+            src.contains("response.chunk().await"),
+            "read_body_preview_from_response must read via .chunk() loop, not .bytes().await"
+        );
+        // Old unbounded pattern must be absent (built with concat! to
+        // avoid matching itself).
+        let banned = concat!("response.", "bytes().", "await");
+        assert!(
+            !src.contains(banned),
+            "transport client.rs must not call unbounded .bytes().await \
+             in read_body_preview_from_response — decompression-bomb regression"
+        );
+    }
+
+    /// Pin that the WAF body preview cap constant is reasonable:
+    /// large enough to cover any challenge page, small enough to
+    /// bound memory under an adversarial target.
+    #[test]
+    fn max_body_read_size_is_bounded_and_sufficient() {
+        // Must cover a 200 KB Cloudflare CAPTCHA page.
+        assert!(
+            MAX_BODY_READ_SIZE >= 200 * 1024,
+            "MAX_BODY_READ_SIZE too small — CAPTCHA pages up to 200 KB"
+        );
+        // Must not OOM the machine: cap at something well below free RAM.
+        assert!(
+            MAX_BODY_READ_SIZE <= 4 * 1024 * 1024,
+            "MAX_BODY_READ_SIZE too large — decompression-bomb cap should be <= 4 MiB"
+        );
     }
 }

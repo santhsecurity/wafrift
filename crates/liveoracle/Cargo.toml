@@ -1,0 +1,22 @@
+[package]
+name = "wafrift-liveoracle"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Reliability-aware live WAF-response classification: status + Tier-B block-page signatures + bounded transient retry, plus per-target self-calibration. Extracted from the wafrift CLI so any tool can reuse the calibrated oracle."
+readme = "README.md"
+repository.workspace = true
+keywords = ["waf", "oracle", "calibration", "security", "bypass"]
+categories = ["network-programming", "web-programming"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+wafrift-wafmodel = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

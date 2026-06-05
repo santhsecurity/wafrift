@@ -26,7 +26,7 @@ use wafrift_types::{Request, Technique};
 /// Each variant maps to a different evasion dimension that the MCTS tree
 /// can explore. Actions are composable — applying encoding after grammar
 /// mutation is a valid 2-step path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TechniqueAction {
     /// Apply a payload encoding strategy (URL, unicode, case alternation, etc.).
     Encode(String),
@@ -141,15 +141,10 @@ impl Environment for WafRiftEnv {
     type Action = TechniqueAction;
 
     fn legal_actions(&self) -> Vec<Self::Action> {
-        // Use BTreeSet as the accumulator so the action space is both
-        // deduplicated AND ordered deterministically across runs (Vec /
-        // HashSet both have implementation-defined order when built from
-        // heterogeneous sources like grammar_mutations).
-        use std::collections::BTreeSet;
-        let mut action_set: BTreeSet<Self::Action> = BTreeSet::new();
+        let mut actions = Vec::new();
 
         if self.applied_techniques.len() >= self.max_depth {
-            return Vec::new();
+            return actions;
         }
 
         // ── Dimension 1: Encoding strategies ──
@@ -161,7 +156,7 @@ impl Environment for WafRiftEnv {
             {
                 continue;
             }
-            action_set.insert(TechniqueAction::Encode(tech_name));
+            actions.push(TechniqueAction::Encode(tech_name));
         }
 
         // ── Dimension 2: Grammar mutations (only once per path) ──
@@ -193,17 +188,13 @@ impl Environment for WafRiftEnv {
             // unparseable as "no params" for action-list enumeration.
             let params = wafrift_content_type::parse_form_body(body).unwrap_or_default();
             if !params.is_empty() {
-                action_set.insert(TechniqueAction::ContentTypeSwitch(
-                    wafrift_content_type::ContentTypeTechnique::Multipart.technique_key().to_string(),
+                actions.push(TechniqueAction::ContentTypeSwitch("Multipart".to_string()));
+                actions.push(TechniqueAction::ContentTypeSwitch(
+                    "JsonUnicodeEscape".to_string(),
                 ));
-                action_set.insert(TechniqueAction::ContentTypeSwitch(
-                    wafrift_content_type::ContentTypeTechnique::JsonUnicodeEscape.technique_key().to_string(),
-                ));
-                action_set.insert(TechniqueAction::ContentTypeSwitch(
-                    wafrift_content_type::ContentTypeTechnique::XmlCdata.technique_key().to_string(),
-                ));
-                action_set.insert(TechniqueAction::ContentTypeSwitch(
-                    wafrift_content_type::ContentTypeTechnique::MultipartQuotedBoundary.technique_key().to_string(),
+                actions.push(TechniqueAction::ContentTypeSwitch("XmlCdata".to_string()));
+                actions.push(TechniqueAction::ContentTypeSwitch(
+                    "MultipartQuotedBoundary".to_string(),
                 ));
             }
         }
@@ -256,11 +247,11 @@ impl Environment for WafRiftEnv {
                 "NullByteInjection",
                 "DuplicateHeader",
             ] {
-                action_set.insert(TechniqueAction::HeaderTrick(trick.to_string()));
+                actions.push(TechniqueAction::HeaderTrick(trick.to_string()));
             }
         }
 
-        action_set.into_iter().collect()
+        actions
     }
 
     fn apply(&mut self, action: &Self::Action) {
@@ -304,11 +295,11 @@ impl Environment for WafRiftEnv {
                         // the rest of the form body so the request remains valid.
                         if let Some((first_pair, rest)) = body_str.split_once('&') {
                             if let Some((key, _value)) = first_pair.split_once('=') {
-                                let new_body = format!("{key}={}&{rest}", urlencoding::encode(&mutation.payload));
+                                let new_body = format!("{key}={}&{rest}", mutation.payload);
                                 self.req.body = Some(new_body.into_bytes());
                             }
                         } else if let Some((key, _value)) = body_str.split_once('=') {
-                            let new_body = format!("{key}={}", urlencoding::encode(&mutation.payload));
+                            let new_body = format!("{key}={}", mutation.payload);
                             self.req.body = Some(new_body.into_bytes());
                         } else {
                             self.req.body = Some(mutation.payload.clone().into_bytes());
@@ -329,14 +320,9 @@ impl Environment for WafRiftEnv {
                         .unwrap_or_default();
                     if !params.is_empty() {
                         let variants = wafrift_content_type::generate_variants(&params);
-                        // Use technique_key() for a stable, compiler-independent match
-                        // instead of format!("{:?}", …) which relies on the Debug impl.
-                        // Only set content_type_applied when a variant actually matched
-                        // and the body/headers were mutated — previously this flag was set
-                        // unconditionally, fabricating an "applied" signal on every no-op.
                         if let Some(variant) = variants
                             .into_iter()
-                            .find(|v| v.technique.technique_key() == technique_name.as_str())
+                            .find(|v| format!("{:?}", v.technique) == *technique_name)
                         {
                             self.req
                                 .headers
@@ -345,10 +331,10 @@ impl Environment for WafRiftEnv {
                                 .headers
                                 .push(("Content-Type".into(), variant.content_type));
                             self.req.body = Some(variant.body);
-                            self.content_type_applied = true;
                         }
                     }
                 }
+                self.content_type_applied = true;
             }
             TechniqueAction::HeaderTrick(trick_name) => {
                 // Dispatch on the trick name so MCTS-chosen actions
@@ -475,6 +461,13 @@ impl Environment for WafRiftEnv {
                         grammar::PayloadType::PathTraversal => {
                             use wafrift_oracle::traits::PayloadOracle;
                             let oracle = wafrift_oracle::path::PathOracle;
+                            if !oracle.is_semantically_valid(&decoded, &decoded) {
+                                return Outcome::Failure;
+                            }
+                        }
+                        grammar::PayloadType::Ssi => {
+                            use wafrift_oracle::traits::PayloadOracle;
+                            let oracle = wafrift_oracle::ssi::SsiOracle;
                             if !oracle.is_semantically_valid(&decoded, &decoded) {
                                 return Outcome::Failure;
                             }

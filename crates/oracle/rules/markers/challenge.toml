@@ -2,7 +2,13 @@
 #
 # Distinct from a hard block — challenges can sometimes be solved (e.g. via headless browser),
 # whereas a block is terminal for that request shape.
-
+#
+# Case-insensitive SUBSTRING match, and ChallengeRequired is the HIGHEST-precedence
+# verdict (the oracle returns it immediately), so a false positive here masks a real
+# bypass/block. Markers must be challenge-platform-specific. Bare "please wait" was
+# removed: it fired on benign loaders ("please wait while your order is processed") and
+# the real challenge pages it was meant to catch (Cloudflare / DDoS-Guard) are already
+# covered by "checking your browser" / "cf-im-under-attack" / "ddos-guard".
 patterns = [
     "challenge-platform",
     "cf-im-under-attack",
@@ -14,5 +20,4 @@ patterns = [
     "turnstile",
     "checking your browser",
     "ddos-guard",
-    "please wait",
 ]

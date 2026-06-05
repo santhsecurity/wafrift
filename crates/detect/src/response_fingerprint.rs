@@ -84,10 +84,11 @@ pub struct FingerprintDrift {
 #[must_use]
 pub fn fingerprint(status: u16, headers: &[(String, String)], body: &[u8]) -> ResponseFingerprint {
     let content_type = extract_content_type(headers);
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(4096)]);
+    let body_str =
+        String::from_utf8_lossy(&body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)]);
     let title = extract_title(&body_str);
     let has_block_markers = check_block_markers(&body_str);
-    let body_hash = hash_body(&body[..body.len().min(4096)]);
+    let body_hash = hash_body(&body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)]);
     let length_bucket = categorize_length(body.len());
 
     ResponseFingerprint {
@@ -352,5 +353,345 @@ mod tests {
             "<html><title>My Application</title><body>Hello</body></html>",
         );
         assert_eq!(fp.title.as_deref(), Some("my application"));
+    }
+
+    // ── Anti-rig: pin drift-weight constants ────────────────────────────
+
+    /// Anti-rig: every weight is named and used by `compare`. If someone
+    /// re-tunes a weight to improve a single benchmark, the drift
+    /// semantics silently change everywhere. Pin them all.
+    #[test]
+    fn drift_weight_status_is_30_percent() {
+        assert!(
+            (STATUS_DRIFT_WEIGHT - 0.30).abs() < f64::EPSILON,
+            "STATUS_DRIFT_WEIGHT changed: {STATUS_DRIFT_WEIGHT}"
+        );
+    }
+
+    #[test]
+    fn drift_weight_content_type_is_15_percent() {
+        assert!(
+            (CONTENT_TYPE_DRIFT_WEIGHT - 0.15).abs() < f64::EPSILON,
+            "CONTENT_TYPE_DRIFT_WEIGHT changed: {CONTENT_TYPE_DRIFT_WEIGHT}"
+        );
+    }
+
+    #[test]
+    fn drift_weight_length_is_20_percent() {
+        assert!(
+            (LENGTH_DRIFT_WEIGHT - 0.20).abs() < f64::EPSILON,
+            "LENGTH_DRIFT_WEIGHT changed: {LENGTH_DRIFT_WEIGHT}"
+        );
+    }
+
+    #[test]
+    fn drift_weight_title_is_15_percent() {
+        assert!(
+            (TITLE_DRIFT_WEIGHT - 0.15).abs() < f64::EPSILON,
+            "TITLE_DRIFT_WEIGHT changed: {TITLE_DRIFT_WEIGHT}"
+        );
+    }
+
+    #[test]
+    fn drift_weight_body_hash_is_10_percent() {
+        assert!(
+            (BODY_HASH_DRIFT_WEIGHT - 0.10).abs() < f64::EPSILON,
+            "BODY_HASH_DRIFT_WEIGHT changed: {BODY_HASH_DRIFT_WEIGHT}"
+        );
+    }
+
+    #[test]
+    fn drift_weight_block_markers_is_30_percent() {
+        assert!(
+            (BLOCK_MARKERS_DRIFT_WEIGHT - 0.30).abs() < f64::EPSILON,
+            "BLOCK_MARKERS_DRIFT_WEIGHT changed: {BLOCK_MARKERS_DRIFT_WEIGHT}"
+        );
+    }
+
+    /// Anti-rig: the likely-blocked threshold for 4xx + drift.
+    /// If someone raises it, subtle WAF blocks stop being detected.
+    #[test]
+    fn likely_blocked_4xx_threshold_is_0_40() {
+        assert!(
+            (LIKELY_BLOCKED_SCORE_4XX_THRESHOLD - 0.40).abs() < f64::EPSILON,
+            "4xx block threshold changed: {LIKELY_BLOCKED_SCORE_4XX_THRESHOLD}"
+        );
+    }
+
+    #[test]
+    fn likely_blocked_threshold_is_0_60() {
+        assert!(
+            (LIKELY_BLOCKED_SCORE_THRESHOLD - 0.60).abs() < f64::EPSILON,
+            "block-alone threshold changed: {LIKELY_BLOCKED_SCORE_THRESHOLD}"
+        );
+    }
+
+    // ── LengthBucket boundary values ────────────────────────────────────
+
+    /// Anti-rig: pin the exact thresholds. If someone changes 100 to 128
+    /// the bucket boundaries silently shift, breaking benchmark scoring.
+    #[test]
+    fn length_bucket_exact_boundaries() {
+        // Exact boundary values (one less and one more than the documented boundary).
+        assert_eq!(categorize_length(1), LengthBucket::Tiny, "1 → Tiny");
+        assert_eq!(categorize_length(100), LengthBucket::Tiny, "100 → Tiny");
+        assert_eq!(categorize_length(101), LengthBucket::Small, "101 → Small");
+        assert_eq!(
+            categorize_length(1_000),
+            LengthBucket::Small,
+            "1000 → Small"
+        );
+        assert_eq!(
+            categorize_length(1_001),
+            LengthBucket::Medium,
+            "1001 → Medium"
+        );
+        assert_eq!(
+            categorize_length(5_000),
+            LengthBucket::Medium,
+            "5000 → Medium"
+        );
+        assert_eq!(
+            categorize_length(5_001),
+            LengthBucket::Large,
+            "5001 → Large"
+        );
+        assert_eq!(
+            categorize_length(20_000),
+            LengthBucket::Large,
+            "20000 → Large"
+        );
+        assert_eq!(
+            categorize_length(20_001),
+            LengthBucket::VeryLarge,
+            "20001 → VeryLarge"
+        );
+        assert_eq!(
+            categorize_length(100_000),
+            LengthBucket::VeryLarge,
+            "100000 → VeryLarge"
+        );
+        assert_eq!(
+            categorize_length(100_001),
+            LengthBucket::Huge,
+            "100001 → Huge"
+        );
+        assert_eq!(
+            categorize_length(1_000_000),
+            LengthBucket::Huge,
+            "1000000 → Huge"
+        );
+        assert_eq!(
+            categorize_length(1_000_001),
+            LengthBucket::Massive,
+            "1000001 → Massive"
+        );
+    }
+
+    // ── compare() additivity / score cap ───────────────────────────────
+
+    /// Score is capped at 1.0 even when multiple high-weight components change.
+    #[test]
+    fn compare_score_never_exceeds_1_0() {
+        let baseline = html_response(200, "hello");
+        let worst_case = fingerprint(
+            503,
+            &[(
+                "content-type".to_string(),
+                "application/octet-stream".to_string(),
+            )],
+            b"access denied request blocked web application firewall forbidden",
+        );
+        let drift = compare(&baseline, &worst_case);
+        assert!(
+            drift.score <= 1.0,
+            "drift score must be capped at 1.0, got {}",
+            drift.score
+        );
+    }
+
+    /// Both block-markers present in baseline and sample — no new marker drift.
+    #[test]
+    fn compare_block_markers_both_present_no_marker_drift() {
+        let body = "access denied by firewall";
+        let a = html_response(403, body);
+        let b = html_response(403, body);
+        let drift = compare(&a, &b);
+        assert!(!drift.changed.contains(&"block_markers_appeared"));
+    }
+
+    /// Neither baseline nor sample has block markers — no marker signal.
+    #[test]
+    fn compare_no_block_markers_in_either_no_marker_drift() {
+        let a = html_response(200, "welcome to my site");
+        let b = html_response(200, "another page");
+        let drift = compare(&a, &b);
+        assert!(!drift.changed.contains(&"block_markers_appeared"));
+    }
+
+    /// Block markers present in baseline but not sample does NOT trigger
+    /// the `block_markers_appeared` signal (it only fires on NEW appearance).
+    #[test]
+    fn compare_block_markers_disappear_no_drift_signal() {
+        let baseline = html_response(403, "access denied");
+        let sample = html_response(200, "welcome");
+        let drift = compare(&baseline, &sample);
+        assert!(!drift.changed.contains(&"block_markers_appeared"));
+    }
+
+    // ── fingerprint() ────────────────────────────────────────────────────
+
+    /// Empty body produces Empty bucket and zero hash is distinct from
+    /// any real-data hash.
+    #[test]
+    fn fingerprint_empty_body() {
+        let fp = fingerprint(200, &[], &[]);
+        assert_eq!(fp.length_bucket, LengthBucket::Empty);
+        assert!(fp.title.is_none());
+        assert!(!fp.has_block_markers);
+    }
+
+    /// Body larger than 4 KB: fingerprint uses first 4 KB only (hash
+    /// must equal the hash of the truncated view, not the full body).
+    #[test]
+    fn fingerprint_body_truncated_at_4kb_for_hash() {
+        let small_body: Vec<u8> = vec![b'A'; 4096];
+        let large_body: Vec<u8> = {
+            let mut v = small_body.clone();
+            v.extend(vec![b'B'; 4096]); // second 4 KB differs
+            v
+        };
+        let fp_small = fingerprint(200, &[], &small_body);
+        let fp_large = fingerprint(200, &[], &large_body);
+        // Both should hash the same first 4 KB.
+        assert_eq!(
+            fp_small.body_hash, fp_large.body_hash,
+            "hash must use first 4 KB only"
+        );
+    }
+
+    /// Title tag with attributes (e.g. `lang`) must still be extracted.
+    #[test]
+    fn fingerprint_title_with_attributes() {
+        let fp = html_response(200, r#"<html><title lang="en">Hello World</title></html>"#);
+        assert_eq!(fp.title.as_deref(), Some("hello world"));
+    }
+
+    /// Content-Type with charset parameter must be stripped to media type.
+    #[test]
+    fn fingerprint_content_type_stripped_of_params() {
+        let fp = fingerprint(
+            200,
+            &[(
+                "Content-Type".to_string(),
+                "text/html; charset=utf-8".to_string(),
+            )],
+            b"body",
+        );
+        assert_eq!(fp.content_type, "text/html");
+    }
+
+    /// Content-Type header is case-insensitive.
+    #[test]
+    fn fingerprint_content_type_case_insensitive_header_name() {
+        let fp = fingerprint(
+            200,
+            &[("CONTENT-TYPE".to_string(), "application/json".to_string())],
+            b"{}",
+        );
+        assert_eq!(fp.content_type, "application/json");
+    }
+
+    /// No Content-Type header → empty string.
+    #[test]
+    fn fingerprint_missing_content_type_is_empty_string() {
+        let fp = fingerprint(200, &[], b"body");
+        assert_eq!(fp.content_type, "");
+    }
+
+    // ── Block markers ─────────────────────────────────────────────────────
+
+    /// Anti-rig: every canonical block marker keyword must trigger detection.
+    #[test]
+    fn block_marker_access_denied_detected() {
+        let fp = html_response(403, "access denied by policy");
+        assert!(fp.has_block_markers);
+    }
+
+    #[test]
+    fn block_marker_request_blocked_detected() {
+        let fp = html_response(403, "request blocked by firewall");
+        assert!(fp.has_block_markers);
+    }
+
+    #[test]
+    fn block_marker_forbidden_detected() {
+        let fp = html_response(403, "<html>forbidden</html>");
+        assert!(fp.has_block_markers);
+    }
+
+    #[test]
+    fn block_marker_just_a_moment_detected() {
+        let fp = html_response(503, "<title>Just a moment...</title>");
+        assert!(fp.has_block_markers);
+    }
+
+    #[test]
+    fn block_marker_ray_id_detected() {
+        let fp = html_response(403, "Ray ID: abc123def456");
+        assert!(fp.has_block_markers);
+    }
+
+    #[test]
+    fn block_marker_checking_your_browser_detected() {
+        let fp = html_response(200, "Checking your browser before accessing...");
+        assert!(fp.has_block_markers);
+    }
+
+    /// Anti-rig: bare "waf" (3-letter substring) must NOT trigger detection.
+    /// This was fixed in F95 — revert would cause false positives on words
+    /// like "wafer", "wafting", "WAFER-cookie", etc.
+    #[test]
+    fn bare_waf_substring_does_not_trigger_block_marker() {
+        let fp = html_response(200, "I enjoy wafers and wafting breezes");
+        assert!(
+            !fp.has_block_markers,
+            "bare 'waf' substring must NOT trigger block marker (F95 regression)"
+        );
+    }
+
+    #[test]
+    fn benign_html_no_block_markers() {
+        let fp = html_response(200, "<html><body>Welcome to my store</body></html>");
+        assert!(!fp.has_block_markers);
+    }
+
+    // ── Concurrent fingerprinting ─────────────────────────────────────────
+
+    /// `fingerprint()` is stateless — same input from N threads must
+    /// produce identical output.
+    #[test]
+    fn concurrent_fingerprint_is_deterministic() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let body = b"<html><title>Test Page</title><body>Hello World</body></html>";
+        let headers = vec![("content-type".to_string(), "text/html".to_string())];
+        let reference = Arc::new(fingerprint(200, &headers, body));
+        let headers = Arc::new(headers);
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let r = reference.clone();
+                let h = headers.clone();
+                thread::spawn(move || {
+                    let result = fingerprint(200, &h, body);
+                    assert_eq!(result, *r, "concurrent fingerprint result differs");
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("thread must not panic");
+        }
     }
 }

@@ -31,7 +31,9 @@ use std::path::PathBuf;
 use wafrift_evolution::coverage_feedback::PayloadClass;
 use wafrift_evolution::edge_pop_coverage::EdgePopCoverage;
 use wafrift_evolution::h1_dedup::{BypassFingerprint, H1Archive};
-use wafrift_evolution::hunt_corpus_bridge::{ProbeOutcome, ProbeRecord, record_probe};
+use wafrift_evolution::hunt_corpus_bridge::{
+    ProbeOutcome, ProbeRecord, UNATTRIBUTED_BUCKET, record_probe,
+};
 use wafrift_evolution::rule_corpus::RuleBypassCorpus;
 use wafrift_oracle::cloudflare::parse_cf_block;
 
@@ -45,9 +47,13 @@ use crate::equiv_engine::ProbeEnvelope;
 /// - `wafrift corpus stats` (read-only inspection, via [`crate::corpus_cmd::run_stats`])
 ///   constructs via [`Self::new`] and reads via [`Self::corpus`] / [`Self::coverage`].
 /// - `wafrift bench-waf --corpus-out <PATH>` (write path, via
-///   [`crate::bench_waf::run_payload_strategy`]) calls [`Self::record`]
-///   per probe and [`Self::flush`] once at end of run.
-pub struct CorpusRecorder {
+///   [`crate::bench_waf::run_payload_strategy`] and the equiv-cegis
+///   strategy) calls [`Self::record`] per probe and [`Self::flush`]
+///   once at end of run.
+/// - `wafrift hunt` (every round runs `bench-waf` with a per-target
+///   `--corpus-out` under `~/.wafrift`, so campaign probes accumulate
+///   into one re-verifiable corpus consumed by `wafrift harvest`).
+pub(crate) struct CorpusRecorder {
     /// Per-rule bypass / block corpus.
     corpus: RuleBypassCorpus,
     /// Cross-region CF edge POP coverage.
@@ -97,6 +103,14 @@ impl CorpusRecorder {
     /// fed through `parse_cf_block` to derive the rule attribution
     /// and edge POP automatically. Returns the bypass fingerprint
     /// and `is_novel` (true ⇔ fingerprint not in h1_archive).
+    ///
+    /// `delivery` is the JSON-serialized delivery shape the probe used
+    /// (`wafrift_grammar::grammar::equiv::DeliveryShape`). On a `Bypass`
+    /// it is attached to the just-recorded corpus entry so `wafrift
+    /// harvest` can re-fire the EXACT request that beat the WAF. `None`
+    /// (or the payload-mutation strategies that have no equivalence
+    /// shape) leaves the corpus entry's delivery empty — harvest then
+    /// falls back to the standard delivery shapes.
     pub fn record(
         &mut self,
         envelope: &ProbeEnvelope,
@@ -106,6 +120,7 @@ impl CorpusRecorder {
         egress_label: &str,
         target_host: &str,
         outcome: ProbeOutcome,
+        delivery: Option<&str>,
     ) -> (BypassFingerprint, bool) {
         self.probe_count = self.probe_count.saturating_add(1);
         let signal = parse_cf_block(&envelope.headers, &envelope.body);
@@ -131,6 +146,16 @@ impl CorpusRecorder {
             target_host,
             pop_raw,
         });
+        // Attach the winning delivery shape to the bypass we just wrote
+        // (same dedup key the recorder used). Only bypasses are
+        // re-verified by harvest, so blocks don't need it; `set_delivery`
+        // no-ops on an empty shape.
+        if outcome == ProbeOutcome::Bypass
+            && let Some(d) = delivery
+        {
+            let key = rule_attribution.unwrap_or(UNATTRIBUTED_BUCKET);
+            self.corpus.set_delivery(key, payload, d.to_string());
+        }
         let is_novel = !self.h1_archive.contains(&fp);
         if outcome == ProbeOutcome::Bypass && is_novel {
             self.novel_bypass_count = self.novel_bypass_count.saturating_add(1);
@@ -171,16 +196,51 @@ impl CorpusRecorder {
     }
 }
 
+/// Canonical per-target corpus + coverage paths under `~/.wafrift`.
+///
+/// SINGLE source of truth shared by the WRITE side (`wafrift hunt`
+/// turns the recorder on with these paths) and the READ side
+/// (`wafrift harvest` loads the corpus from the same path). If these
+/// ever diverged, harvest would silently read an empty corpus while
+/// hunt filled a different file — so both MUST call this one helper.
+///
+/// Keyed by a sanitized target slug (ASCII-alphanumeric, others → `_`,
+/// capped at 120 chars) so a path-traversal-shaped `base_url` can never
+/// escape `~/.wafrift`.
+pub(crate) fn default_corpus_paths(base_url: &str) -> (PathBuf, PathBuf) {
+    let dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".wafrift");
+    let slug = target_slug(base_url);
+    (
+        dir.join(format!("corpus-{slug}.json")),
+        dir.join(format!("coverage-{slug}.json")),
+    )
+}
+
+/// Canonical sanitized target slug: ASCII-alphanumeric kept, every other
+/// byte → `_`, capped at 120 chars. SINGLE source shared by corpus-path
+/// derivation (write side: hunt) and `wafrift harvest`'s default report
+/// dir (read side) — so a path-traversal-shaped `base_url` can never
+/// escape `~/.wafrift`, and the two sides can never disagree on where a
+/// target's artifacts live.
+pub(crate) fn target_slug(base_url: &str) -> String {
+    base_url
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .take(120)
+        .collect()
+}
+
 /// FNV-1a 64-bit hash of a byte slice — used by
 /// [`CorpusRecorder::record`] to derive a stable response-body
 /// fingerprint for corpus dedup of near-identical "blocked" pages.
+///
+/// Delegates to `wafrift_types::hash::fnv1a_64`, the canonical
+/// single home for the algorithm in this workspace. R57 pass-21 §7
+/// DEDUP — three byte-for-byte copies collapsed.
 fn fnv1a_64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in bytes {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
+    wafrift_types::hash::fnv1a_64(bytes)
 }
 
 #[cfg(test)]
@@ -246,11 +306,15 @@ mod tests {
             "egress-a",
             "example.com",
             ProbeOutcome::Block,
+            None,
         );
         assert!(r.corpus().total_blocks() >= 1);
         // SJC was the cf-ray POP suffix.
         let pops = r.coverage().pops_for("egress-a", "example.com");
-        assert!(pops.contains("SJC"), "coverage must record SJC POP, got {pops:?}");
+        assert!(
+            pops.contains("SJC"),
+            "coverage must record SJC POP, got {pops:?}"
+        );
         assert_eq!(r.probe_count(), 1);
         let _ = std::fs::remove_file(&corpus_p);
         let _ = std::fs::remove_file(&coverage_p);
@@ -260,12 +324,8 @@ mod tests {
     fn record_non_cf_response_uses_unattributed_bucket() {
         let corpus_p = tmp("corpus_no_cf");
         let coverage_p = tmp("coverage_no_cf");
-        let mut r = CorpusRecorder::new(
-            "non-cf-target",
-            corpus_p.clone(),
-            coverage_p.clone(),
-            None,
-        );
+        let mut r =
+            CorpusRecorder::new("non-cf-target", corpus_p.clone(), coverage_p.clone(), None);
         let env = envelope_no_cf();
         let (_, _) = r.record(
             &env,
@@ -275,9 +335,14 @@ mod tests {
             "egress-a",
             "no-cf.example",
             ProbeOutcome::Block,
+            None,
         );
         // No CF POP observed → coverage probe_count incremented but no POP.
-        assert!(r.coverage().pops_for("egress-a", "no-cf.example").is_empty());
+        assert!(
+            r.coverage()
+                .pops_for("egress-a", "no-cf.example")
+                .is_empty()
+        );
         assert_eq!(r.coverage().probes_for("egress-a", "no-cf.example"), 1);
         let _ = std::fs::remove_file(&corpus_p);
         let _ = std::fs::remove_file(&coverage_p);
@@ -287,12 +352,7 @@ mod tests {
     fn flush_persists_corpus_and_coverage() {
         let corpus_p = tmp("corpus_flush");
         let coverage_p = tmp("coverage_flush");
-        let mut r = CorpusRecorder::new(
-            "tf",
-            corpus_p.clone(),
-            coverage_p.clone(),
-            None,
-        );
+        let mut r = CorpusRecorder::new("tf", corpus_p.clone(), coverage_p.clone(), None);
         let env = envelope_with_cf_block();
         let _ = r.record(
             &env,
@@ -302,17 +362,13 @@ mod tests {
             "e",
             "h",
             ProbeOutcome::Bypass,
+            None,
         );
         r.flush().unwrap();
         assert!(corpus_p.exists());
         assert!(coverage_p.exists());
         // Load back and verify content.
-        let r2 = CorpusRecorder::new(
-            "tf",
-            corpus_p.clone(),
-            coverage_p.clone(),
-            None,
-        );
+        let r2 = CorpusRecorder::new("tf", corpus_p.clone(), coverage_p.clone(), None);
         assert!(r2.corpus().total_bypasses() >= 1);
         let _ = std::fs::remove_file(&corpus_p);
         let _ = std::fs::remove_file(&coverage_p);
@@ -325,11 +381,7 @@ mod tests {
         let archive_p = tmp("h1_archive");
         // Pre-seed archive with the fingerprint of "p" under rule cf:SJC:?
         let mut archive = H1Archive::new();
-        let fp = wafrift_evolution::h1_dedup::fingerprint(
-            "cf:SJC:?",
-            &[],
-            "p",
-        );
+        let fp = wafrift_evolution::h1_dedup::fingerprint("cf:SJC:?", &[], "p");
         archive.add_report(&fp);
         archive.save_atomic(&archive_p).unwrap();
 
@@ -348,6 +400,7 @@ mod tests {
             "e",
             "h",
             ProbeOutcome::Bypass,
+            None,
         );
         // The cf-ray sets POP=SJC and ruleset_hint absent (`?`) — the
         // pre-seeded fingerprint with key "cf:SJC:?" matches.
@@ -364,5 +417,56 @@ mod tests {
         assert_ne!(fnv1a_64(b"hello"), fnv1a_64(b"world"));
         // Empty input has the FNV-1a offset basis.
         assert_eq!(fnv1a_64(b""), 0xcbf29ce484222325);
+    }
+
+    #[test]
+    fn record_attaches_delivery_shape_to_bypass() {
+        // The delivery shape passed on a Bypass must land on the corpus
+        // entry — this is what lets `wafrift harvest` re-fire faithfully.
+        let corpus_p = tmp("corpus_deliv");
+        let coverage_p = tmp("coverage_deliv");
+        let mut r = CorpusRecorder::new("t", corpus_p.clone(), coverage_p.clone(), None);
+        let env = envelope_with_cf_block();
+        let shape = "{\"HppSplit\":{\"param\":\"q\",\"parts\":3}}";
+        let _ = r.record(
+            &env,
+            "1 OR 1=1 --",
+            cls(),
+            vec![],
+            "e",
+            "h",
+            ProbeOutcome::Bypass,
+            Some(shape),
+        );
+        // cf-ray POP=SJC, no ruleset hint → bucket key "cf:SJC:?".
+        let stored = &r.corpus().bypasses_for_rule("cf:SJC:?")[0];
+        assert_eq!(stored.delivery, shape);
+        let _ = std::fs::remove_file(&corpus_p);
+        let _ = std::fs::remove_file(&coverage_p);
+    }
+
+    #[test]
+    fn record_block_does_not_attach_delivery() {
+        // Only bypasses are re-verified, so a Block must not carry a
+        // delivery shape even if one is (defensively) supplied.
+        let corpus_p = tmp("corpus_deliv_block");
+        let coverage_p = tmp("coverage_deliv_block");
+        let mut r = CorpusRecorder::new("t", corpus_p.clone(), coverage_p.clone(), None);
+        let env = envelope_with_cf_block();
+        let _ = r.record(
+            &env,
+            "blocked-payload",
+            cls(),
+            vec![],
+            "e",
+            "h",
+            ProbeOutcome::Block,
+            Some("\"PathSegment\""),
+        );
+        // The block landed in a bucket; no bypass entry exists to carry it.
+        assert_eq!(r.corpus().total_bypasses(), 0);
+        assert!(r.corpus().total_blocks() >= 1);
+        let _ = std::fs::remove_file(&corpus_p);
+        let _ = std::fs::remove_file(&coverage_p);
     }
 }

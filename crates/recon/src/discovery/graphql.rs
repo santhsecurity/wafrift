@@ -55,12 +55,39 @@ pub async fn from_graphql(
     // was correct and only introspection was off. Peek at the body for
     // an `errors` array before deciding which classification to return.
     let status_ok = resp.status().is_success();
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|_| DiscoveryError::GraphQlEndpointNotFound {
-            url: endpoint.to_string(),
-        })?;
+    // §15 decompression-bomb defence: reqwest auto-decompresses gzip/br with
+    // NO size cap, so a hostile endpoint can answer a tiny introspection
+    // query with a ~1 KB bomb that expands to gigabytes and OOMs the
+    // scanner. Read chunk-by-chunk and stop at a generous cap — even a huge
+    // real introspection schema is single-digit MB, so 16 MiB sits far above
+    // any legitimate response while staying laptop-safe. Mirrors the sibling
+    // bounded reads (lib.rs `CT_RESPONSE_MAX_BYTES`, active/http.rs
+    // `DRAIN_CAP`, param_miner `read_bounded_len`).
+    const INTROSPECTION_RESPONSE_MAX_BYTES: usize = 16 * 1024 * 1024;
+    let mut resp = resp;
+    let mut bytes: Vec<u8> = Vec::with_capacity(64 * 1024);
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                if bytes.len().saturating_add(chunk.len()) > INTROSPECTION_RESPONSE_MAX_BYTES {
+                    // An oversized response to a tiny introspection query is
+                    // not a usable GraphQL endpoint — refuse rather than
+                    // buffer the bomb (same `GraphQlEndpointNotFound` bucket
+                    // the transport/parse failures below already use).
+                    return Err(DiscoveryError::GraphQlEndpointNotFound {
+                        url: endpoint.to_string(),
+                    });
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => {
+                return Err(DiscoveryError::GraphQlEndpointNotFound {
+                    url: endpoint.to_string(),
+                });
+            }
+        }
+    }
     if !status_ok {
         return Err(classify_non_success_response(&bytes, endpoint));
     }
@@ -274,6 +301,33 @@ mod tests {
         let eps = parse_introspection_response(&resp, "https://x").unwrap();
         assert_eq!(eps.len(), 1);
         assert!(eps[0].url.ends_with("valid"));
+    }
+
+    /// §15 anti-rig: the introspection body read must stay byte-bounded
+    /// (a `.chunk()` loop enforcing a cap), never reqwest's unbounded
+    /// auto-decompressing whole-body read — a hostile endpoint can answer a
+    /// tiny introspection query with a gzip bomb. A future "simplification"
+    /// back to the raw form is a decompression-bomb regression and must fail
+    /// here. (Mirrors the sibling `recon_http_body_drain_is_bounded`.)
+    #[test]
+    fn graphql_introspection_read_is_bounded() {
+        let src = include_str!("graphql.rs");
+        assert!(
+            src.contains("resp.chunk().await"),
+            "introspection body must drain via a bounded .chunk() loop"
+        );
+        assert!(
+            src.contains("INTROSPECTION_RESPONSE_MAX_BYTES"),
+            "introspection read must reference the byte cap constant"
+        );
+        // Old unbounded pattern must be absent (assembled via concat! so the
+        // banned literal doesn't appear in source and self-trip the check).
+        let banned = concat!("resp.", "bytes().", "await");
+        assert!(
+            !src.contains(banned),
+            "introspection read must not use unbounded .bytes().await — \
+             decompression-bomb regression"
+        );
     }
 
     // F128 regression: a 4xx response with `{"errors":[...]}` is the

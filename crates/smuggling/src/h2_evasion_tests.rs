@@ -563,4 +563,56 @@ mod tests {
         let s = std::str::from_utf8(payload).unwrap();
         assert_eq!(s, "u=7");
     }
+
+    // ── Round 28: UTF-8 boundary safety in N-way continuation split ──
+
+    #[test]
+    fn continuation_split_does_not_panic_on_multibyte_payload() {
+        let s = split_payload_across_n_continuations("x-evil", "🎉🎉", 3);
+        let mut rebuilt = String::new();
+        for frame in &s.continuation_frames {
+            for (_, v) in frame {
+                rebuilt.push_str(v);
+            }
+        }
+        assert_eq!(rebuilt, "🎉🎉", "reconstructed payload must match input");
+    }
+
+    #[test]
+    fn continuation_split_preserves_ascii_payload_round_trip() {
+        let s = split_payload_across_n_continuations(
+            "x-payload",
+            "abcdefghij",
+            5,
+        );
+        let mut rebuilt = String::new();
+        for frame in &s.continuation_frames {
+            for (_, v) in frame {
+                rebuilt.push_str(v);
+            }
+        }
+        assert_eq!(rebuilt, "abcdefghij");
+    }
+
+    #[test]
+    fn continuation_split_handles_single_wide_codepoint_with_tight_n() {
+        let s = split_payload_across_n_continuations("x-single", "🎉", 8);
+        let mut rebuilt = String::new();
+        for frame in &s.continuation_frames {
+            for (_, v) in frame {
+                rebuilt.push_str(v);
+            }
+        }
+        assert_eq!(rebuilt, "🎉");
+    }
+
+    #[test]
+    fn continuation_split_emits_at_most_n_frames() {
+        let s = split_payload_across_n_continuations("x-many", "🎉🎉🎉", 10);
+        assert!(
+            s.continuation_frames.len() <= 10,
+            "got {} frames, expected at most 10",
+            s.continuation_frames.len()
+        );
+    }
 }

@@ -70,12 +70,16 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum EgressError {
     /// The pool was constructed with an empty list of egress entries.
-    #[error("egress pool is empty — supply at least one --socks5, --http-proxy, or --tailscale-exit-node")]
+    #[error(
+        "egress pool is empty — supply at least one --socks5, --http-proxy, or --tailscale-exit-node"
+    )]
     EmptyPool,
     /// Every entry in the pool is currently in its cooldown window for
     /// `target`. The caller should surface this as a diagnostic and
     /// either wait or abort the probe run for this host.
-    #[error("all {count} egress entries are cooled for target {target:?}; retry after {cooldown_secs}s")]
+    #[error(
+        "all {count} egress entries are cooled for target {target:?}; retry after {cooldown_secs}s"
+    )]
     EntirePoolCooled {
         target: String,
         count: usize,
@@ -94,42 +98,42 @@ pub enum EgressError {
 /// Returns the original string on success so callers can use it directly
 /// with [`reqwest::Proxy`] without re-boxing.
 pub fn parse_socks5_url(raw: &str) -> Result<String, EgressError> {
-    let lower = raw.to_ascii_lowercase();
-    if !lower.starts_with("socks5://") && !lower.starts_with("socks5h://") {
-        return Err(EgressError::InvalidUrl {
+    // Validate through proxywire's canonical strict parser — the single source
+    // of truth for proxy-URL syntax + the scheme allow-list (rejects bad
+    // schemes, embedded paths/queries, missing host/port). Then confirm the
+    // SOCKS5 family. The original credential-bearing string is returned so
+    // `reqwest::Proxy::all` keeps any `user:pass@` userinfo.
+    let endpoint = proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
+        url: raw.to_owned(),
+        reason: e.to_string(),
+    })?;
+    match endpoint.protocol {
+        proxywire::ProxyProtocol::Socks5 | proxywire::ProxyProtocol::Socks5LocalDns => {
+            Ok(raw.to_owned())
+        }
+        _ => Err(EgressError::InvalidUrl {
             url: raw.to_owned(),
             reason: "expected socks5:// or socks5h:// scheme".to_owned(),
-        });
+        }),
     }
-    // reqwest::Proxy::all will do the full parse later; we just need to reject
-    // obvious garbage (missing the ://host part) before it gets into the pool.
-    let after_scheme = raw.splitn(3, "://").nth(1).unwrap_or("");
-    if after_scheme.is_empty() {
-        return Err(EgressError::InvalidUrl {
-            url: raw.to_owned(),
-            reason: "missing host after scheme".to_owned(),
-        });
-    }
-    Ok(raw.to_owned())
 }
 
 /// Validate that `raw` is an HTTP or HTTPS proxy URL.
 pub fn parse_http_proxy_url(raw: &str) -> Result<String, EgressError> {
-    let lower = raw.to_ascii_lowercase();
-    if !lower.starts_with("http://") && !lower.starts_with("https://") {
-        return Err(EgressError::InvalidUrl {
+    // Validate through proxywire's canonical strict parser (see
+    // [`parse_socks5_url`]) and confirm the HTTP(S) family. proxywire maps both
+    // `http://` and `https://` to `ProxyProtocol::HttpConnect`.
+    let endpoint = proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
+        url: raw.to_owned(),
+        reason: e.to_string(),
+    })?;
+    match endpoint.protocol {
+        proxywire::ProxyProtocol::HttpConnect => Ok(raw.to_owned()),
+        _ => Err(EgressError::InvalidUrl {
             url: raw.to_owned(),
             reason: "expected http:// or https:// scheme".to_owned(),
-        });
+        }),
     }
-    let after_scheme = raw.splitn(3, "://").nth(1).unwrap_or("");
-    if after_scheme.is_empty() {
-        return Err(EgressError::InvalidUrl {
-            url: raw.to_owned(),
-            reason: "missing host after scheme".to_owned(),
-        });
-    }
-    Ok(raw.to_owned())
 }
 
 // ── egress backend ────────────────────────────────────────────────────────────
@@ -184,7 +188,7 @@ impl TargetCooldown {
     }
 
     fn is_cooled(&self, now: Instant) -> bool {
-        self.cooled_until.map_or(false, |until| now < until)
+        self.cooled_until.is_some_and(|until| now < until)
     }
 
     /// Record a challenge response. Returns `true` when the threshold is
@@ -209,10 +213,10 @@ impl TargetCooldown {
     /// clear any expired cooldown.
     fn record_pass(&mut self, now: Instant) {
         self.consecutive_challenges = 0;
-        if let Some(until) = self.cooled_until {
-            if now >= until {
-                self.cooled_until = None;
-            }
+        if let Some(until) = self.cooled_until
+            && now >= until
+        {
+            self.cooled_until = None;
         }
     }
 }
@@ -253,34 +257,30 @@ impl EgressEntry {
     /// operators a clear diagnostic.
     pub fn apply_to_builder(&self, builder: ClientBuilder) -> ClientBuilder {
         match &self.backend {
-            EgressBackend::Socks5(url) => {
-                match reqwest::Proxy::all(url) {
-                    Ok(proxy) => builder.proxy(proxy),
-                    Err(e) => {
-                        tracing::error!(
-                            url = url.as_str(),
-                            err = %e,
-                            "SOCKS5 proxy URL failed reqwest::Proxy::all after validation — \
-                             routing direct (BUG: report to wafrift maintainers)"
-                        );
-                        builder
-                    }
+            EgressBackend::Socks5(url) => match reqwest::Proxy::all(url) {
+                Ok(proxy) => builder.proxy(proxy),
+                Err(e) => {
+                    tracing::error!(
+                        url = url.as_str(),
+                        err = %e,
+                        "SOCKS5 proxy URL failed reqwest::Proxy::all after validation — \
+                         routing direct (BUG: report to wafrift maintainers)"
+                    );
+                    builder
                 }
-            }
-            EgressBackend::HttpProxy(url) => {
-                match reqwest::Proxy::all(url) {
-                    Ok(proxy) => builder.proxy(proxy),
-                    Err(e) => {
-                        tracing::error!(
-                            url = url.as_str(),
-                            err = %e,
-                            "HTTP proxy URL failed reqwest::Proxy::all after validation — \
-                             routing direct (BUG: report to wafrift maintainers)"
-                        );
-                        builder
-                    }
+            },
+            EgressBackend::HttpProxy(url) => match reqwest::Proxy::all(url) {
+                Ok(proxy) => builder.proxy(proxy),
+                Err(e) => {
+                    tracing::error!(
+                        url = url.as_str(),
+                        err = %e,
+                        "HTTP proxy URL failed reqwest::Proxy::all after validation — \
+                         routing direct (BUG: report to wafrift maintainers)"
+                    );
+                    builder
                 }
-            }
+            },
             EgressBackend::TailscaleNode { socks_addr, .. } => {
                 let socks_url = format!("socks5://{socks_addr}");
                 match reqwest::Proxy::all(&socks_url) {
@@ -313,7 +313,7 @@ impl EgressEntry {
 
     fn is_cooled_for(&self, target: &str, now: Instant) -> bool {
         let guard = self.cooldowns.lock().unwrap_or_else(|p| p.into_inner());
-        guard.get(target).map_or(false, |c| c.is_cooled(now))
+        guard.get(target).is_some_and(|c| c.is_cooled(now))
     }
 
     /// Signal that this entry received a challenge response for `target`.
@@ -322,7 +322,9 @@ impl EgressEntry {
     pub fn record_challenge(&self, target: &str, threshold: u32, cooldown: Duration) -> bool {
         let now = Instant::now();
         let mut guard = self.cooldowns.lock().unwrap_or_else(|p| p.into_inner());
-        let entry = guard.entry(target.to_owned()).or_insert_with(TargetCooldown::new);
+        let entry = guard
+            .entry(target.to_owned())
+            .or_insert_with(TargetCooldown::new);
         let cooled = entry.record_challenge(threshold, cooldown, now);
         if cooled {
             tracing::warn!(
@@ -340,7 +342,9 @@ impl EgressEntry {
     pub fn record_pass(&self, target: &str) {
         let now = Instant::now();
         let mut guard = self.cooldowns.lock().unwrap_or_else(|p| p.into_inner());
-        let entry = guard.entry(target.to_owned()).or_insert_with(TargetCooldown::new);
+        let entry = guard
+            .entry(target.to_owned())
+            .or_insert_with(TargetCooldown::new);
         entry.record_pass(now);
     }
 }
@@ -558,10 +562,20 @@ impl EgressPoolBuilder {
             .into_iter()
             .map(|b| Arc::new(EgressEntry::new(b)))
             .collect();
+        // R63 pass-21 §6: route through `wafrift_types` constants so the
+        // builder fallback and the CLI default never drift. Pre-fix the
+        // numbers `3` and `300` were open-coded here AND in cli/config —
+        // an operator who tuned the CLI default to e.g. 2/180 wouldn't
+        // see it apply to clients built via this Builder.
         Ok(EgressPool {
             entries,
-            challenge_threshold: self.challenge_threshold.unwrap_or(3),
-            cooldown: Duration::from_secs(self.cooldown_secs.unwrap_or(300)),
+            challenge_threshold: self
+                .challenge_threshold
+                .unwrap_or(wafrift_types::DEFAULT_EGRESS_CHALLENGE_THRESHOLD),
+            cooldown: Duration::from_secs(
+                self.cooldown_secs
+                    .unwrap_or(wafrift_types::DEFAULT_EGRESS_COOLDOWN_SECS),
+            ),
             cursor: Mutex::new(0),
             seed: self.seed,
         })
@@ -657,7 +671,10 @@ mod tests {
         // Two challenges — still available.
         entry.record_challenge("target.com", 3, Duration::from_secs(300));
         entry.record_challenge("target.com", 3, Duration::from_secs(300));
-        assert!(pool.next_for("target.com").is_ok(), "should still be available");
+        assert!(
+            pool.next_for("target.com").is_ok(),
+            "should still be available"
+        );
 
         // Third challenge — now cooled.
         entry.record_challenge("target.com", 3, Duration::from_secs(300));
@@ -728,7 +745,10 @@ mod tests {
         let seq_b: Vec<String> = (0..8)
             .map(|_| pool_b.next_for("host").unwrap().backend.label().to_owned())
             .collect();
-        assert_eq!(seq_a, seq_b, "seeded pools must produce identical sequences");
+        assert_eq!(
+            seq_a, seq_b,
+            "seeded pools must produce identical sequences"
+        );
     }
 
     // ── TEST 6 — empty pool returns EmptyPool error ────────────────────────
@@ -899,7 +919,10 @@ mod tests {
         let cooled = entry.record_challenge("x.com", 0, Duration::from_secs(300));
         assert!(cooled, "threshold=0: first challenge must trigger cooldown");
         assert!(
-            matches!(pool.next_for("x.com"), Err(EgressError::EntirePoolCooled { .. })),
+            matches!(
+                pool.next_for("x.com"),
+                Err(EgressError::EntirePoolCooled { .. })
+            ),
             "pool must be cooled after threshold=0 challenge"
         );
     }

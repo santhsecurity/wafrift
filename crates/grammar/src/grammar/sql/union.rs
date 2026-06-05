@@ -54,7 +54,8 @@ pub(crate) const UNION_ALTERNATIVES: &[&str] = &[
 /// UNION requires matching column counts. These probe from 1–25 columns
 /// to find the correct count. Returns payloads with NULL placeholders.
 pub(crate) fn union_column_probes(max_columns: u32) -> Vec<SqlMutation> {
-    let mut results = Vec::new();
+    // 3 variants per column count (basic, comment-terminated, hash-comment)
+    let mut results = Vec::with_capacity((max_columns.min(25) as usize) * 3);
 
     for n in 1..=max_columns.min(25) {
         let nulls: Vec<&str> = vec!["NULL"; n as usize];
@@ -88,7 +89,7 @@ pub(crate) fn union_column_probes(max_columns: u32) -> Vec<SqlMutation> {
 /// Generate UNION-based mutations for an existing payload.
 pub(crate) fn union_mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     let lower = payload.to_ascii_lowercase();
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
 
     // Only apply if the payload contains UNION
     if !lower.contains("union") {

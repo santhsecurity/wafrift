@@ -1,0 +1,23 @@
+{
+  "waf_name": "cloudflare",
+  "techniques": [
+    { "name": "vector::POST-json-dupkey",        "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-multipart-b64",       "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-json-deeply-nested",  "total_successes": 14, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-cbor",                "total_successes": 13, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-yaml",                "total_successes": 13, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-form-as-octet",       "total_successes": 13, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-json-as-plain",       "total_successes": 13, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::POST-json-gz-br",          "total_successes": 13, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::origin",                   "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::accept-language",          "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::range",                    "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "vector::from",                     "total_successes": 12, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding::OverlongUtf8",           "total_successes": 12, "total_attempts": 14, "target_count": 2, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/hex",                     "total_successes": 11, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/compression/gzip",        "total_successes": 10, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} },
+    { "name": "encoding/unicode/overlong-utf8",   "total_successes":  9, "total_attempts": 14, "target_count": 1, "last_success_epoch": 0, "per_class": {} }
+  ],
+  "targets_scanned": 0,
+  "updated_at": 0
+}

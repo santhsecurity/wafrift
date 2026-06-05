@@ -29,19 +29,19 @@
 
 use clap::Args;
 use colored::Colorize;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use wafrift_encoding::compression::{Algorithm, chain};
 
 #[derive(Args, Debug)]
-pub struct CompressArgs {
+pub(crate) struct CompressArgs {
     /// Compression algorithm. May be repeated to chain layers in
     /// RFC 9110 §8.4 order — the FIRST `--algo` is the OUTERMOST
     /// wrapper, the LAST is the innermost (closest to the original
     /// body). `--algo gzip --algo br` produces `gzip(brotli(body))`
     /// with `Content-Encoding: gzip, br`. Supported: `gzip`,
-    /// `deflate`, `br`, `identity` (no-op chain anchor).
+    /// `deflate`, `br` (or `brotli`), `identity` (no-op chain anchor).
     #[arg(long = "algo", value_name = "ALGO", required = true, num_args = 1..)]
     pub algos: Vec<String>,
 
@@ -76,7 +76,7 @@ pub struct CompressArgs {
 /// - `ExitCode::from(1)` — I/O failure (input read, output write),
 ///   compression-chain failure (e.g. chain depth above the safety cap),
 ///   or no input source supplied.
-pub fn run_compress(args: CompressArgs) -> ExitCode {
+pub(crate) fn run_compress(args: CompressArgs) -> ExitCode {
     let algos = match parse_algorithms(&args.algos) {
         Ok(v) => v,
         Err(e) => {
@@ -92,6 +92,22 @@ pub fn run_compress(args: CompressArgs) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    // N15 fix (dogfood R29 cohort): an empty body silently compressed
+    // to a ~20-byte gzip-of-nothing exit-0 success. A pentester
+    // piping the output of a failed upstream command (e.g.
+    // `grep nonexistent file | wafrift compress --stdin`) was
+    // getting a misleadingly-successful compressed body containing
+    // zero attack surface. Refuse empty input.
+    if body.is_empty() {
+        eprintln!(
+            "{} input was empty — refusing to emit a header-only \
+             compressed blob. Did the upstream command fail or produce \
+             zero bytes?",
+            "Input error:".red().bold()
+        );
+        return ExitCode::from(2);
+    }
 
     let original_len = body.len();
     let compressed = match chain(&body, &algos) {
@@ -114,11 +130,25 @@ fn parse_algorithms(raw: &[String]) -> Result<Vec<Algorithm>, String> {
     }
     let mut out = Vec::with_capacity(raw.len());
     for token in raw {
-        match Algorithm::from_token(token) {
+        // CLI-layer convenience alias: `brotli` → `br`. This command's own
+        // help prose ("gzip / deflate / brotli / chain", "Brotli is the
+        // headline gap") names the algorithm in full, so an operator typing
+        // `--algo brotli` is following the docs — but `br` is the only valid
+        // HTTP Content-Encoding TOKEN, so the domain `Algorithm::from_token`
+        // (which also parses real header strings in `decompress`) correctly
+        // rejects `brotli`. We normalise at the CLI boundary instead of
+        // loosening the wire-token parser, mirroring the existing `x-gzip`
+        // tolerance. The emitted `Content-Encoding` is still `br`.
+        let normalised = if token.trim().eq_ignore_ascii_case("brotli") {
+            "br"
+        } else {
+            token.as_str()
+        };
+        match Algorithm::from_token(normalised) {
             Some(a) => out.push(a),
             None => {
                 return Err(format!(
-                    "unknown algorithm {token:?}; supported: gzip, deflate, br, identity"
+                    "unknown algorithm {token:?}; supported: gzip, deflate, br (brotli), identity"
                 ));
             }
         }
@@ -131,7 +161,7 @@ fn parse_algorithms(raw: &[String]) -> Result<Vec<Algorithm>, String> {
 /// under 1 MiB in practice. 16 MiB is a generous cap that catches
 /// both `--input /dev/zero` operator typos AND a malicious upstream
 /// pipeline trying to OOM the CLI via unbounded stdin.
-pub const MAX_COMPRESS_INPUT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_COMPRESS_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
 fn read_input(args: &CompressArgs) -> Result<Vec<u8>, String> {
     if args.stdin {
@@ -143,37 +173,21 @@ fn read_input(args: &CompressArgs) -> Result<Vec<u8>, String> {
     Err("no input source — pass `--input PATH` or `--stdin`".into())
 }
 
-/// Read stdin in chunks, aborting at the cap. Replaces
-/// `read_to_end` which has no upper bound — a hostile upstream in
-/// a shell pipeline could otherwise OOM the CLI.
+/// Read stdin in chunks, aborting at the cap. Delegates to the
+/// canonical bounded-stdin reader in `safe_body` — one OOM guard for
+/// the whole crate — mapping its `ReadError` onto the `String` error
+/// surface this command uses.
 fn read_bounded_stdin(max_bytes: usize) -> Result<Vec<u8>, String> {
-    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
-    let mut chunk = [0u8; 64 * 1024];
-    let mut stdin = std::io::stdin().lock();
-    loop {
-        let n = stdin
-            .read(&mut chunk)
-            .map_err(|e| format!("stdin read: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        if buf.len().saturating_add(n) > max_bytes {
-            return Err(format!(
-                "input exceeded {max_bytes}-byte cap — bounded-stdin defence aborted \
-                 the read. Use `--input PATH` for files larger than this if you really \
-                 need them."
-            ));
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    }
-    Ok(buf)
+    crate::safe_body::read_bounded_stdin_bytes(max_bytes).map_err(|e| e.to_string())
 }
 
 /// Read a file in chunks, aborting at the cap. Defends against
 /// `--input /dev/zero` style operator typos AND symlink-to-large-
-/// file traps.
+/// file traps. Opens here so the `--input`-expects-a-PATH footgun
+/// hint is preserved, then delegates the bounded read loop to the
+/// canonical `safe_body::read_bounded_from` (single OOM guard).
 fn read_bounded_file(path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>, String> {
-    let mut f = std::fs::File::open(path).map_err(|e| {
+    let f = std::fs::File::open(path).map_err(|e| {
         // Operator footgun: many users assume `--input PAYLOAD` is
         // the payload string itself, not a file path.  When the
         // "file" doesn't exist, point them at the correct flag —
@@ -185,24 +199,10 @@ fn read_bounded_file(path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>
             path.display()
         )
     })?;
-    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
-    let mut chunk = [0u8; 64 * 1024];
-    loop {
-        let n = f
-            .read(&mut chunk)
-            .map_err(|e| format!("read {}: {e}", path.display()))?;
-        if n == 0 {
-            break;
-        }
-        if buf.len().saturating_add(n) > max_bytes {
-            return Err(format!(
-                "{} exceeded {max_bytes}-byte cap — bounded-file defence aborted the read",
-                path.display()
-            ));
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    }
-    Ok(buf)
+    // Prepend the path so an overrun / read error still names the file
+    // (the canonical loop's message is medium-agnostic).
+    crate::safe_body::read_bounded_from(f, max_bytes)
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn emit_text(
@@ -470,6 +470,48 @@ mod tests {
         // CLI surface passes it through.
         let parsed = parse_algorithms(&["x-gzip".into()]).expect("x-gzip is gzip");
         assert_eq!(parsed, vec![Algorithm::Gzip]);
+    }
+
+    #[test]
+    fn parse_algorithms_accepts_brotli_full_name_as_cli_alias_for_br() {
+        // DOGFOOD (R2): the `compress` help prose names the algorithm in
+        // full ("gzip / deflate / brotli / chain", "Brotli is the headline
+        // gap"), so an operator following the docs types `--algo brotli` —
+        // but `br` is the only valid HTTP Content-Encoding token, so the
+        // wire-token parser (`Algorithm::from_token`, also used to parse real
+        // header strings in `decompress`) correctly rejects `brotli`. The CLI
+        // layer normalises `brotli` → `br`, case-insensitively and trimmed,
+        // so the help text and the accepted input agree. The emitted
+        // `Content-Encoding` must still be the RFC token `br`, never `brotli`.
+        for spelling in ["brotli", "BROTLI", "Brotli", "  brotli  "] {
+            let parsed = parse_algorithms(&[spelling.to_string()])
+                .unwrap_or_else(|e| panic!("`{spelling}` must alias to br, got err: {e}"));
+            assert_eq!(parsed, vec![Algorithm::Brotli], "spelling {spelling:?}");
+            // The wire token is `br`, not the alias the operator typed.
+            assert_eq!(parsed[0].content_encoding(), "br");
+        }
+    }
+
+    #[test]
+    fn parse_algorithms_brotli_alias_composes_in_a_chain() {
+        // `--algo gzip --algo brotli` must produce the same chain as
+        // `--algo gzip --algo br` — the alias is purely an input convenience.
+        let via_alias = parse_algorithms(&["gzip".into(), "brotli".into()]).expect("alias chain");
+        let via_token = parse_algorithms(&["gzip".into(), "br".into()]).expect("token chain");
+        assert_eq!(via_alias, via_token);
+        assert_eq!(via_alias, vec![Algorithm::Gzip, Algorithm::Brotli]);
+    }
+
+    #[test]
+    fn parse_algorithms_error_set_advertises_the_brotli_alias() {
+        // COHERENCE: the rejection message must name `br (brotli)` so an
+        // operator who typo'd a different algo learns both the wire token
+        // and the accepted full-name alias.
+        let err = parse_algorithms(&["lz4".into()]).expect_err("unknown");
+        assert!(
+            err.contains("br (brotli)"),
+            "must advertise the alias: {err}"
+        );
     }
 
     // ── read_bounded_file boundary conditions ─────────────────

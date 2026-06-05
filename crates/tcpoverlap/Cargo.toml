@@ -1,0 +1,21 @@
+[package]
+name = "wafrift-tcpoverlap"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Genuine TCP sequence-overlap segmentation + target-based reassembly-policy modelling (Ptacek-Newsham / Snort stream5 class). Plans overlapping segments that a WAF and origin reassemble differently."
+readme = "README.md"
+repository.workspace = true
+keywords = ["tcp", "evasion", "ids", "reassembly", "security"]
+categories = ["network-programming"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

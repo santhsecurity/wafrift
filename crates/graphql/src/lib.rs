@@ -341,4 +341,225 @@ mod tests {
         let set: std::collections::BTreeSet<&String> = v.iter().collect();
         assert_eq!(set.len(), v.len(), "all_evasion_payloads contains duplicates");
     }
+
+    // ── TEST_DEPTHS / TEST_BATCH_SIZES constants (anti-rig) ────────────
+
+    /// Anti-rig: pin the canonical depth and batch sweep values so
+    /// silent re-tuning (dropping depth=200 for "it's slow") breaks
+    /// the build instead of silently shrinking coverage.
+    #[test]
+    fn test_depths_contains_extremes() {
+        // Must include the low (5) and high (200) values.
+        assert!(TEST_DEPTHS.contains(&5), "minimum depth probe removed");
+        assert!(TEST_DEPTHS.contains(&200), "maximum depth probe removed — DoS coverage lost");
+        // Anti-rig: exact count. If someone adds or removes depths, this catches it.
+        assert_eq!(TEST_DEPTHS.len(), 6, "TEST_DEPTHS length changed from 6");
+    }
+
+    #[test]
+    fn test_batch_sizes_contains_extremes() {
+        assert!(TEST_BATCH_SIZES.contains(&5), "minimum batch size probe removed");
+        assert!(TEST_BATCH_SIZES.contains(&100), "maximum batch size probe removed");
+        assert_eq!(TEST_BATCH_SIZES.len(), 5, "TEST_BATCH_SIZES length changed from 5");
+    }
+
+    // ── generate_deep_query boundaries ─────────────────────────────────
+
+    #[test]
+    fn generate_deep_query_depth_zero_is_minimal() {
+        let q = generate_deep_query(0);
+        // depth=0: no friend nesting, just the outer user field.
+        assert_eq!(q.matches('{').count(), q.matches('}').count());
+        assert!(q.contains("name"), "name field must appear even at depth 0");
+        // Must not contain the nested friends pattern at all.
+        assert!(!q.contains("friends"), "depth=0 must not nest into friends");
+    }
+
+    #[test]
+    fn generate_deep_query_depth_one_has_exactly_one_friends() {
+        let q = generate_deep_query(1);
+        assert_eq!(q.matches("friends").count(), 1);
+        assert_eq!(q.matches('{').count(), q.matches('}').count());
+    }
+
+    /// Boundary: depth=200 is one of our canonical test depths.
+    /// The query must stay valid and balanced — WAFs that don't depth-
+    /// limit pass it; this test proves we can generate it without OOM.
+    #[test]
+    fn generate_deep_query_depth_200_is_valid_and_balanced() {
+        let q = generate_deep_query(200);
+        assert_eq!(q.matches('{').count(), q.matches('}').count());
+        // At depth 200 the friends chain must appear 200 times.
+        assert_eq!(q.matches("friends").count(), 200);
+    }
+
+    #[test]
+    fn generate_deep_query_larger_depth_produces_longer_string() {
+        let q5 = generate_deep_query(5);
+        let q100 = generate_deep_query(100);
+        assert!(
+            q100.len() > q5.len(),
+            "deeper query must be longer: {} vs {}",
+            q100.len(),
+            q5.len()
+        );
+    }
+
+    // ── generate_fragment_query boundaries ─────────────────────────────
+
+    #[test]
+    fn generate_fragment_query_depth_zero_contains_only_name_field() {
+        let q = generate_fragment_query(0);
+        assert_eq!(q.matches('{').count(), q.matches('}').count());
+        assert!(q.contains("name"));
+    }
+
+    #[test]
+    fn generate_fragment_query_depth_100_balanced() {
+        let q = generate_fragment_query(100);
+        assert_eq!(q.matches('{').count(), q.matches('}').count());
+    }
+
+    // ── generate_batch boundaries ───────────────────────────────────────
+
+    #[test]
+    fn generate_batch_size_zero_returns_empty_vec() {
+        assert!(generate_batch(0).is_empty());
+    }
+
+    #[test]
+    fn generate_batch_size_one_returns_exactly_one_entry() {
+        let b = generate_batch(1);
+        assert_eq!(b.len(), 1);
+        assert!(b[0].get("query").is_some());
+    }
+
+    #[test]
+    fn generate_batch_all_entries_have_unique_aliases() {
+        let b = generate_batch(50);
+        // Each entry's query must contain its own unique alias.
+        for (i, entry) in b.iter().enumerate() {
+            let q = entry["query"].as_str().unwrap();
+            assert!(
+                q.contains(&format!("user{i}:")),
+                "batch entry {i} missing its alias: {q}"
+            );
+        }
+    }
+
+    // ── alias_flood_payload boundaries ──────────────────────────────────
+
+    #[test]
+    fn alias_flood_payload_zero_produces_empty_query_body() {
+        let p = alias_flood_payload(0);
+        let v: serde_json::Value = serde_json::from_str(&p).unwrap();
+        let q = v["query"].as_str().unwrap();
+        // 0 aliases: query is just "query AliasFlood{}"
+        assert!(q.ends_with('}'), "empty alias flood: {q}");
+    }
+
+    #[test]
+    fn alias_flood_payload_one_has_exactly_one_alias() {
+        let p = alias_flood_payload(1);
+        let v: serde_json::Value = serde_json::from_str(&p).unwrap();
+        let q = v["query"].as_str().unwrap();
+        assert!(q.contains("a0:__typename"));
+        assert!(!q.contains("a1:"), "must not have alias a1 when n=1");
+    }
+
+    #[test]
+    fn alias_flood_payload_is_valid_json_at_large_n() {
+        let p = alias_flood_payload(5000);
+        let result: serde_json::Result<serde_json::Value> = serde_json::from_str(&p);
+        assert!(result.is_ok(), "5000-alias payload is not valid JSON");
+    }
+
+    // ── op_name_mismatch_payloads properties ───────────────────────────
+
+    /// Anti-rig: every mismatch payload must NOT include the operationName
+    /// string inside the query body — that's the bypass invariant.
+    #[test]
+    fn op_name_mismatch_every_name_absent_from_query_body() {
+        for (i, p) in op_name_mismatch_payloads().iter().enumerate() {
+            let v: serde_json::Value = serde_json::from_str(p).unwrap();
+            let name = v["operationName"].as_str().unwrap().to_string();
+            let body = v["query"].as_str().unwrap();
+            assert!(
+                !body.contains(&name),
+                "payload {i}: operationName '{name}' leaked into query body '{body}'"
+            );
+        }
+    }
+
+    // ── whitespace split uniqueness ──────────────────────────────────────
+
+    #[test]
+    fn whitespace_split_payloads_are_all_distinct() {
+        let payloads = introspection_whitespace_split_payloads();
+        let set: std::collections::HashSet<&String> = payloads.iter().collect();
+        assert_eq!(set.len(), payloads.len(), "duplicate whitespace variants");
+    }
+
+    /// Anti-rig: the zero-width-space variant (last entry) must contain
+    /// the U+200B codepoint. If someone "normalizes" it away, the bypass
+    /// disappears silently.
+    #[test]
+    fn whitespace_split_contains_zero_width_space_variant() {
+        let payloads = introspection_whitespace_split_payloads();
+        let has_zwsp = payloads
+            .iter()
+            .any(|p| p.contains('\u{200B}'));
+        assert!(has_zwsp, "zero-width-space whitespace variant was removed");
+    }
+
+    // ── FIELD_TYPOS ─────────────────────────────────────────────────────
+
+    #[test]
+    fn field_typos_has_password_typo() {
+        assert!(
+            FIELD_TYPOS.iter().any(|(typo, _real)| *typo == "passwrd"),
+            "password typo removed — schema-leak coverage lost"
+        );
+    }
+
+    #[test]
+    fn field_typos_every_typo_differs_from_real() {
+        for (typo, real) in FIELD_TYPOS {
+            assert_ne!(*typo, *real, "FIELD_TYPOS has identical typo and real: {typo}");
+        }
+    }
+
+    // ── all_evasion_payloads composition (anti-rig) ──────────────────────
+
+    /// Anti-rig: must contain all canonical sweep depths in the battery.
+    #[test]
+    fn all_evasion_payloads_covers_all_test_depths() {
+        let payloads = all_evasion_payloads();
+        for &d in &TEST_DEPTHS {
+            let expected_fragment = "\"friends\"{".to_string();
+            // The deep query at depth d must appear somewhere in the battery.
+            // We can't search for the exact string, but we know depth-d has
+            // exactly d occurrences of `friends` — check via generate_deep_query.
+            let q = generate_deep_query(d);
+            let as_json = serde_json::json!({ "query": q }).to_string();
+            assert!(
+                payloads.contains(&as_json),
+                "depth {d} deep query missing from all_evasion_payloads"
+            );
+            let _ = expected_fragment;
+        }
+    }
+
+    /// Anti-rig: must contain all canonical sweep batch sizes.
+    #[test]
+    fn all_evasion_payloads_covers_all_test_batch_sizes() {
+        let payloads = all_evasion_payloads();
+        for &n in &TEST_BATCH_SIZES {
+            let batch_str = serde_json::to_string(&generate_batch(n)).unwrap_or_default();
+            assert!(
+                payloads.contains(&batch_str),
+                "batch size {n} missing from all_evasion_payloads"
+            );
+        }
+    }
 }

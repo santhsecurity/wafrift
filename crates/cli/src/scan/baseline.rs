@@ -18,9 +18,6 @@
 //! request-classify-print per phase.
 
 use colored::Colorize;
-use wafrift_transport::is_waf_block;
-
-use super::scan_url_with_param;
 
 /// Outcome of the baseline fire. `transport_ok = false` means we
 /// couldn't reach the target at all (DNS / connect / TLS) — every
@@ -29,63 +26,80 @@ use super::scan_url_with_param;
 /// anyway (useful for debugging filter / strategy selection without
 /// a live target).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BaselineOutcome {
+pub(crate) struct BaselineOutcome {
     pub status: u16,
     pub blocked: bool,
     pub transport_ok: bool,
+    /// Response fingerprint of the raw-payload baseline GET (for engagement checks).
+    pub fingerprint: Option<super::waf_engagement::ResponseFingerprint>,
 }
 
 /// Fire the raw payload at the target's `param` and classify the
-/// response.
-pub async fn run(
+/// response (GET query string).
+pub(crate) async fn run(
     http: &reqwest::Client,
     target: &str,
     param: &str,
     payload: &str,
     scan_text: bool,
 ) -> BaselineOutcome {
+    run_with_delivery(
+        http,
+        target,
+        param,
+        payload,
+        scan_text,
+        super::injection_delivery::InjectionDelivery::GetQuery,
+    )
+    .await
+}
+
+/// Fire baseline using the same delivery mode as the variant loop.
+pub(crate) async fn run_with_delivery(
+    http: &reqwest::Client,
+    target: &str,
+    param: &str,
+    payload: &str,
+    scan_text: bool,
+    delivery: super::injection_delivery::InjectionDelivery,
+) -> BaselineOutcome {
     if scan_text {
+        let mode = match delivery {
+            super::injection_delivery::InjectionDelivery::GetQuery => "GET",
+            super::injection_delivery::InjectionDelivery::PostForm => "POST form",
+        };
         println!(
             "\n{}",
-            "[2/7] Testing baseline (raw payload)...".bold().cyan()
+            format!("[2/7] Testing baseline (raw payload, {mode})...")
+                .bold()
+                .cyan()
         );
     }
-    let raw_url = scan_url_with_param(target, param, &urlencoding::encode(payload));
-    let outcome = match http.get(&raw_url).send().await {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            // Bounded read — decompression-bomb defence. A hostile
-            // target serving a gzip bomb would OOM the CLI without
-            // this cap.
-            let body =
-                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
-                    .await
-                    .unwrap_or_default();
-            let blocked = is_waf_block(status, &body);
-            BaselineOutcome {
-                status,
-                blocked,
-                transport_ok: true,
+    let outcome =
+        match super::injection_delivery::fire_raw_payload(http, delivery, target, param, payload)
+            .await
+        {
+            Some((status, body, blocked)) => {
+                let fingerprint = Some(super::waf_engagement::ResponseFingerprint::from_parts(
+                    status, &body,
+                ));
+                BaselineOutcome {
+                    status,
+                    blocked,
+                    transport_ok: true,
+                    fingerprint,
+                }
             }
-        }
-        Err(e) => {
-            // walk_reqwest_error surfaces the deepest cause chain
-            // (NXDOMAIN, connection refused, TLS handshake, etc.).
-            // Pre-fix the operator saw "error sending request" with
-            // no actionable detail — a "fix connectivity" hint with
-            // no idea what was actually wrong.
-            eprintln!(
-                "  {} {}",
-                "✗ Baseline request failed (transport):".red().bold(),
-                crate::helpers::walk_reqwest_error(&e)
-            );
-            BaselineOutcome {
-                status: 0,
-                blocked: false,
-                transport_ok: false,
+            None => {
+                eprintln!("  {}", "✗ Baseline request failed (transport)".red().bold(),);
+                BaselineOutcome {
+                    status: 0,
+                    blocked: false,
+                    transport_ok: false,
+                    fingerprint: None,
+                }
             }
-        }
-    };
+        };
     if scan_text {
         render_text(&outcome);
     }
@@ -122,6 +136,7 @@ fn render_text(outcome: &BaselineOutcome) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::waf_engagement::ResponseFingerprint;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
@@ -163,6 +178,23 @@ mod tests {
         assert!(outcome.transport_ok);
         assert_eq!(outcome.status, 403);
         assert!(outcome.blocked, "ModSecurity body should classify as block");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_with_200_response_captures_fingerprint() {
+        let addr = spawn_mock(
+            "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\nhello world",
+        )
+        .await;
+        let client = reqwest::Client::builder().build().unwrap();
+        let outcome = run(&client, &format!("http://{addr}"), "q", "harmless", false).await;
+        let fp = outcome.fingerprint.expect("200 response must fingerprint");
+        assert_eq!(fp.status, 200);
+        assert_eq!(fp.body_len, 11);
+        assert_eq!(
+            fp.body_digest,
+            ResponseFingerprint::from_parts(200, b"hello world").body_digest
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -274,14 +306,7 @@ mod tests {
         });
         tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
         let client = reqwest::Client::builder().build().unwrap();
-        let _ = run(
-            &client,
-            &format!("http://{addr}"),
-            "q",
-            "<script>",
-            false,
-        )
-        .await;
+        let _ = run(&client, &format!("http://{addr}"), "q", "<script>", false).await;
         let req = received.lock().unwrap().clone();
         // Single-encoded: `<` = %3C, `>` = %3E.
         assert!(
@@ -356,6 +381,7 @@ mod tests {
             status: 0,
             blocked: false,
             transport_ok: false,
+            fingerprint: None,
         };
         // Should not panic.
         render_text(&outcome);

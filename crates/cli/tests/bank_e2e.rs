@@ -13,20 +13,8 @@
 //! 7. `bank list --help` exits 0.
 //! 8. `bank gen-key --help` exits 0.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -75,7 +63,10 @@ fn bank_list_produces_non_empty_output() {
     let (code, stdout, stderr) = wafrift(&["bank", "list"]);
     assert_eq!(code, 0, "bank list must exit 0; stderr: {stderr}");
     // Even with an empty gene bank, the output must describe the bank state.
-    assert!(!stdout.trim().is_empty(), "bank list must produce output: {stderr}");
+    assert!(
+        !stdout.trim().is_empty(),
+        "bank list must produce output: {stderr}"
+    );
 }
 
 // ── `bank gen-key` ────────────────────────────────────────────────────────
@@ -108,11 +99,7 @@ fn bank_gen_key_emits_public_key_hex() {
         .lines()
         .find(|l| l.contains("public_key_hex"))
         .unwrap_or("");
-    let hex_val = hex_line
-        .split('=')
-        .nth(1)
-        .unwrap_or("")
-        .trim();
+    let hex_val = hex_line.split('=').nth(1).unwrap_or("").trim();
     assert_eq!(
         hex_val.len(),
         64,
@@ -166,7 +153,10 @@ fn bank_export_to_stdout_exits_0_and_emits_json_envelope() {
     // The envelope may be empty (no bypasses recorded yet) but must be
     // valid JSON with at least the schema-level structure.
     let (code, stdout, stderr) = wafrift(&["bank", "export", "--output", "-"]);
-    assert_eq!(code, 0, "bank export --output - must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "bank export --output - must exit 0; stderr: {stderr}"
+    );
 
     // The output must be parseable as JSON.
     let _: serde_json::Value =

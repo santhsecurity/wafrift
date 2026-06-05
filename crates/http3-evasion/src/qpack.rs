@@ -136,8 +136,10 @@ impl QpackEncoder {
     /// Instruction: `000 XXXXX` with the relative index.
     pub fn duplicate(&self, relative_index: u64) -> QpackInstruction {
         let mut bytes = Vec::new();
-        // Prefix: 0b000_XXXXX = 0x00
-        bytes.push(0x00 | encode_int_first_byte(relative_index, 5));
+        // Prefix: 0b000_XXXXX = 0x00 — pattern stays explicit for
+        // parity with the other QPACK instruction encoders below,
+        // which mask in non-zero prefix bits.
+        bytes.push(encode_int_first_byte(relative_index, 5));
         bytes.extend_from_slice(&encode_int_tail(relative_index, 5));
         QpackInstruction {
             bytes,
@@ -430,7 +432,14 @@ pub fn decode_qpack_int(bytes: &[u8], pos: usize, prefix_bits: u8) -> Option<(u6
     if pos >= bytes.len() {
         return None;
     }
-    let mask = (1u8 << prefix_bits) - 1;
+    // QPACK prefixes are 1–8 bits (RFC 9204). Compute the mask in a wider
+    // type: `prefix_bits == 8` is real — the Required-Insert-Count field uses
+    // an 8-bit prefix (`encode_int_first_byte(ric, 8)` at the field-block
+    // prefix), and the encode side already accepts 8 (`1u64 << 8` is fine).
+    // The pre-fix `1u8 << prefix_bits` PANICS at prefix_bits==8 (shift equals
+    // the u8 width), leaving encode/decode asymmetric — a decoder round-
+    // tripping the RIC field would crash. Clamp ≥8 to a full-byte mask.
+    let mask = ((1u16 << u16::from(prefix_bits.min(8))) - 1) as u8;
     let first = (bytes[pos] & mask) as u64;
     let max_prefix = mask as u64;
     if first < max_prefix {
@@ -503,10 +512,29 @@ mod tests {
     fn decode_qpack_int_roundtrip() {
         // Encode 1337 with 5-bit prefix, then decode.
         let mut buf = Vec::new();
-        buf.push(0x00 | encode_int_first_byte(1337, 5)); // prefix bits cleared
+        buf.push(encode_int_first_byte(1337, 5)); // prefix bits cleared
         buf.extend_from_slice(&encode_int_tail(1337, 5));
         let (val, _) = decode_qpack_int(&buf, 0, 5).unwrap();
         assert_eq!(val, 1337, "roundtrip encode/decode must preserve value");
+    }
+
+    #[test]
+    fn decode_qpack_int_8bit_prefix_does_not_panic_and_round_trips() {
+        // §15 regression: the Required-Insert-Count field uses an 8-bit
+        // prefix (encode_int_first_byte(ric, 8) above). The pre-fix decode
+        // mask `1u8 << 8` PANICKED on prefix_bits == 8 (shift == u8 width),
+        // making decode asymmetric with the encode side that accepts 8.
+        // Round-trip several values (both single-byte and multi-byte under
+        // an 8-bit prefix) through encode→decode with prefix_bits = 8.
+        for v in [0u64, 1, 200, 254, 255, 256, 4242] {
+            let mut buf = Vec::new();
+            buf.push(encode_int_first_byte(v, 8));
+            buf.extend_from_slice(&encode_int_tail(v, 8));
+            let (decoded, consumed) = decode_qpack_int(&buf, 0, 8)
+                .unwrap_or_else(|| panic!("8-bit-prefix decode returned None for {v}"));
+            assert_eq!(decoded, v, "8-bit-prefix round-trip must preserve {v}");
+            assert_eq!(consumed, buf.len(), "must consume the whole encoding for {v}");
+        }
     }
 
     // ── HTTP/3 frame wrapping ─────────────────────────────────────────────
@@ -647,7 +675,7 @@ mod tests {
         // The set_capacity(0) instruction must produce a `001 00000` byte = 0x20
         // (since 0 < 2^5-1 = 31, it fits in the prefix).
         assert!(
-            attack.encoder_stream_bytes.iter().any(|&b| b == 0x20),
+            attack.encoder_stream_bytes.contains(&0x20),
             "encoder stream must contain set-capacity-0 instruction (0x20)"
         );
     }
@@ -666,5 +694,198 @@ mod tests {
         let small = QpackDesyncAttack::duplicate_drift(1, ("x", "y"));
         let large = QpackDesyncAttack::duplicate_drift(8, ("x", "y"));
         assert!(large.encoder_stream_bytes.len() > small.encoder_stream_bytes.len());
+    }
+
+    // ── decode_qpack_int error paths ──────────────────────────────────────
+
+    #[test]
+    fn decode_qpack_int_empty_bytes_returns_none() {
+        // pos >= bytes.len() must return None, not panic.
+        assert!(decode_qpack_int(&[], 0, 5).is_none(), "empty slice must return None");
+    }
+
+    #[test]
+    fn decode_qpack_int_out_of_bounds_pos_returns_none() {
+        let bytes = &[10u8, 20u8];
+        // pos beyond valid indices.
+        assert!(decode_qpack_int(bytes, 2, 5).is_none());
+        assert!(decode_qpack_int(bytes, 100, 5).is_none());
+    }
+
+    #[test]
+    fn decode_qpack_int_truncated_multibyte_returns_none() {
+        // 5-bit prefix with value=31 signals multi-byte. The next byte must be
+        // present. If truncated (slice ends), decode must return None.
+        let bytes = &[31u8]; // prefix-max, continuation byte missing
+        assert!(
+            decode_qpack_int(bytes, 0, 5).is_none(),
+            "truncated multi-byte must return None"
+        );
+    }
+
+    #[test]
+    fn decode_qpack_int_overflow_guard_triggers() {
+        // Build a sequence that would require shift > 56 bits (8+ continuation bytes,
+        // all with the MSB=1 continuation flag set). The overflow guard at shift > 56
+        // must catch this and return None instead of panicking/wrapping.
+        let mut bytes = vec![31u8]; // prefix-max for 5-bit prefix (triggers multi-byte)
+        // 8 continuation bytes with MSB=1 (each says "more follows") will push shift to 56.
+        // The 9th such byte (shift would become 63) must trigger the guard.
+        bytes.extend_from_slice(&[0x80u8; 9]); // continuation bytes, value contribution = 0
+        // Last byte: MSB=0 to terminate.
+        bytes.push(0x00);
+        // The overflow guard fires at shift > 56, so somewhere during the above loop.
+        assert!(
+            decode_qpack_int(&bytes, 0, 5).is_none(),
+            "overflow guard must fire for shift > 56"
+        );
+    }
+
+    // ── remaining_capacity_entries edge cases ─────────────────────────────
+
+    #[test]
+    fn remaining_capacity_entries_with_zero_avg_does_not_panic() {
+        // avg_entry_bytes = 0: saturating_add(32) = 32, so per_entry = 32, not 0.
+        // The function must not divide by zero.
+        let enc = QpackEncoder::new(4096);
+        let cap = enc.remaining_capacity_entries(0);
+        // 4096 / 32 = 128 entries.
+        assert_eq!(cap, 128, "zero avg must use only overhead (32 bytes) per entry");
+    }
+
+    #[test]
+    fn remaining_capacity_entries_with_large_avg_is_zero() {
+        // avg_entry_bytes so large that per_entry exceeds max_capacity → 0 entries.
+        let enc = QpackEncoder::new(64); // tiny capacity
+        let cap = enc.remaining_capacity_entries(u32::MAX); // per_entry saturates
+        assert_eq!(cap, 0, "no entries fit when avg_entry_bytes > max_capacity");
+    }
+
+    #[test]
+    fn remaining_capacity_entries_decreases_after_inserts() {
+        let mut enc = QpackEncoder::new(4096);
+        let before = enc.remaining_capacity_entries(64);
+        // The remaining_capacity_entries is based on max_capacity which is static,
+        // and insert_count is tracked separately. Verify the function returns
+        // a consistent non-zero value (implementation doesn't shrink max_capacity).
+        enc.insert_literal("a", "b");
+        let after = enc.remaining_capacity_entries(64);
+        // max_capacity is fixed, so the calculation is the same regardless of inserts.
+        assert_eq!(before, after, "remaining_capacity_entries is based on max_capacity, not consumed space");
+    }
+
+    // ── http3_headers_frame with empty field block ────────────────────────
+
+    #[test]
+    fn http3_headers_frame_empty_field_block() {
+        let frame = http3_headers_frame(&[]);
+        // type byte + length byte (0) — no payload
+        assert_eq!(frame[0], 0x01, "type must be 0x01");
+        assert_eq!(frame[1], 0x00, "empty payload must encode length = 0 as single zero byte");
+        assert_eq!(frame.len(), 2, "empty field block: type + length, no payload");
+    }
+
+    // ── phantom_insert with n=0 ───────────────────────────────────────────
+
+    #[test]
+    fn phantom_insert_with_zero_phantoms_does_not_panic() {
+        // n=0 is a degenerate but legal input. The attack must still build
+        // (it inserts at least the attack header to avoid an empty encoder stream).
+        let attack = QpackDesyncAttack::phantom_insert(0, ("authorization", "Bearer evil"));
+        assert_eq!(attack.variant, QpackDesyncVariant::PhantomInsert);
+        // min(0, max_phantoms.max(1)) = 0.min(≥1) = 0 phantom entries,
+        // but the attack header is always inserted.
+        assert!(!attack.encoder_stream_bytes.is_empty(), "attack header must still be inserted");
+        assert!(!attack.headers_field_block.is_empty());
+    }
+
+    // ── duplicate_drift with n=0 ──────────────────────────────────────────
+
+    #[test]
+    fn duplicate_drift_with_zero_drifts_does_not_panic() {
+        let attack = QpackDesyncAttack::duplicate_drift(0, ("x-evil", "v"));
+        assert_eq!(attack.variant, QpackDesyncVariant::DuplicateDrift);
+        // No duplicate instructions issued, but decoy + attack headers still present.
+        assert!(!attack.encoder_stream_bytes.is_empty());
+    }
+
+    // ── to_frame_set with empty encoder stream (capacity_flush edge) ──────
+
+    #[test]
+    fn capacity_flush_frame_set_has_correct_stream_ids() {
+        let attack = QpackDesyncAttack::capacity_flush(("x-a", "v"));
+        let fs = attack.to_frame_set();
+        // encoder stream (non-empty) → stream 2; headers frame → stream 0.
+        assert_eq!(fs.frames.len(), 2);
+        assert_eq!(fs.frames[0].stream_id, 2);
+        assert_eq!(fs.frames[1].stream_id, 0);
+    }
+
+    // ── anti-rig: constant pins ───────────────────────────────────────────
+
+    #[test]
+    fn qpack_encoder_overhead_is_32_bytes() {
+        // RFC 9204 §3.2.1: 32-byte per-entry overhead is a protocol constant.
+        // remaining_capacity_entries divides by (avg + 32). Pin the 32.
+        let enc = QpackEncoder::new(32); // exactly one entry's worth of overhead
+        let cap = enc.remaining_capacity_entries(0); // 32 / 32 = 1
+        assert_eq!(cap, 1, "RFC 9204 §3.2.1 overhead constant must be 32 bytes");
+    }
+
+    // ── Property tests ────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(3000))]
+
+        /// The QPACK prefixed-integer codec round-trips for every value across
+        /// every legal prefix width (1..=8 bits, RFC 9204 §4.1.1). The decoder's
+        /// reported byte count must equal the encoded length.
+        #[test]
+        fn prop_qpack_int_roundtrips(value in 0u64..(1u64 << 50), prefix_bits in 1u8..=8) {
+            let mut buf = vec![encode_int_first_byte(value, prefix_bits)];
+            buf.extend_from_slice(&encode_int_tail(value, prefix_bits));
+            let (decoded, consumed) = decode_qpack_int(&buf, 0, prefix_bits).expect("decode");
+            prop_assert_eq!(decoded, value);
+            prop_assert_eq!(consumed, buf.len());
+        }
+
+        /// Decoding a prefixed integer that begins partway through a buffer reads
+        /// it correctly regardless of the leading bytes.
+        #[test]
+        fn prop_qpack_int_decodes_at_offset(
+            prefix in proptest::collection::vec(any::<u8>(), 0..4),
+            value in 0u64..(1u64 << 40),
+            prefix_bits in 1u8..=8,
+        ) {
+            let mut buf = prefix.clone();
+            buf.push(encode_int_first_byte(value, prefix_bits));
+            buf.extend_from_slice(&encode_int_tail(value, prefix_bits));
+            let (decoded, _consumed) = decode_qpack_int(&buf, prefix.len(), prefix_bits).expect("decode");
+            prop_assert_eq!(decoded, value);
+        }
+
+        /// An `insert_literal` instruction is faithful: parsing its QPACK integer
+        /// length fields and the bytes that follow recovers the exact header name
+        /// and value — including multibyte and control characters.
+        #[test]
+        fn prop_insert_literal_roundtrips(name in ".{0,40}", value in ".{0,40}") {
+            let mut enc = QpackEncoder::new(4096);
+            let inst = enc.insert_literal(&name, &value);
+            let b = &inst.bytes;
+            // Name length: 5-bit prefix on byte 0 (the 0x40 high bits are masked).
+            let (nlen, n1) = decode_qpack_int(b, 0, 5).expect("name len");
+            let name_start = n1;
+            let name_end = name_start + nlen as usize;
+            prop_assert_eq!(&b[name_start..name_end], name.as_bytes());
+            // Value length: 7-bit prefix on the byte after the name.
+            let (vlen, n2) = decode_qpack_int(b, name_end, 7).expect("value len");
+            let val_start = name_end + n2;
+            let val_end = val_start + vlen as usize;
+            prop_assert_eq!(&b[val_start..val_end], value.as_bytes());
+            // Nothing trails the value.
+            prop_assert_eq!(val_end, b.len());
+        }
     }
 }

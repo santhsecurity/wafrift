@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use crate::Cli;
 
 #[derive(Args, Debug)]
-pub struct ManArgs {
+pub(crate) struct ManArgs {
     /// Subcommand to render. Default: render the top-level `wafrift`
     /// page. Pass `all` to emit a concatenated stream covering every
     /// subcommand (one page per `\n.SH` section).
@@ -27,17 +27,56 @@ pub struct ManArgs {
 }
 
 /// Entry point.
-pub fn run_man(args: ManArgs) -> ExitCode {
+pub(crate) fn run_man(args: ManArgs) -> ExitCode {
     let cmd = Cli::command();
+    let parent_version = env!("CARGO_PKG_VERSION");
+    let mut buf: Vec<u8> = Vec::new();
+
+    // Issue-3 fix (dogfood R43 cohort): `--sub all` previously
+    // emitted ONLY the top-level page (one .TH header, 168 lines).
+    // The advertised behaviour is concat every subcommand's page.
+    // Walk get_subcommands() and emit each one's troff after the
+    // top-level header.
+    //
+    // Issue-4 fix (same cohort): per-subcommand pages had an empty
+    // version string in their .TH header (`.TH evade 1 "evade "`).
+    // clap_mangen inherits the bin name from the Command we pass
+    // it; the version on a sub-Command is empty unless we re-stamp
+    // it. Use `.version()` to apply the workspace package version
+    // to every page.
+    let render_one = |buf: &mut Vec<u8>, c: clap::Command| -> Result<(), std::io::Error> {
+        let c = c.version(parent_version);
+        let man = clap_mangen::Man::new(c);
+        man.render(buf)
+    };
+
     let target_cmd = match args.sub.as_deref() {
-        None | Some("wafrift") => cmd,
-        Some("all") => cmd, // future: walk every subcommand and concat
+        None | Some("wafrift") => Some(cmd),
+        Some("all") => {
+            let top = cmd.clone();
+            if let Err(e) = render_one(&mut buf, top) {
+                eprintln!("error: render top-level man page: {e}");
+                return ExitCode::from(1);
+            }
+            for sub in cmd.get_subcommands() {
+                // Troff comment separator between subcommand pages
+                // (`.\"` is troff's comment-to-end-of-line).
+                buf.extend_from_slice(b"\n.\\\" ---- subcommand: ");
+                buf.extend_from_slice(sub.get_name().as_bytes());
+                buf.extend_from_slice(b" ----\n");
+                if let Err(e) = render_one(&mut buf, sub.clone()) {
+                    eprintln!("error: render man page for `{}`: {e}", sub.get_name());
+                    return ExitCode::from(1);
+                }
+            }
+            None
+        }
         Some(name) => match cmd
             .get_subcommands()
             .find(|c| c.get_name() == name)
             .cloned()
         {
-            Some(c) => c,
+            Some(c) => Some(c),
             None => {
                 let cmd = Cli::command();
                 let names: Vec<&str> = cmd.get_subcommands().map(clap::Command::get_name).collect();
@@ -46,9 +85,9 @@ pub fn run_man(args: ManArgs) -> ExitCode {
             }
         },
     };
-    let man = clap_mangen::Man::new(target_cmd);
-    let mut buf: Vec<u8> = Vec::new();
-    if let Err(e) = man.render(&mut buf) {
+    if let Some(c) = target_cmd
+        && let Err(e) = render_one(&mut buf, c)
+    {
         eprintln!("error: render man page: {e}");
         return ExitCode::from(1);
     }

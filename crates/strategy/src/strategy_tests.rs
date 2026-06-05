@@ -336,6 +336,63 @@ mod tests {
         );
     }
 
+    /// B-3 wiring regression: when `plan.context = None` (the default),
+    /// `evade_adaptive` uses the plain encoder, NOT the contextual one
+    /// — preserves pre-wiring behaviour (LAW 2 backwards compat).
+    #[test]
+    fn evade_adaptive_no_context_uses_plain_encoder() {
+        use wafrift_encoding::encoding::Strategy;
+        let req = Request::post("https://example.com", br#"q="abc""#.to_vec())
+            .header("Content-Type", "application/x-www-form-urlencoded");
+        let config = EvasionConfig::default();
+        let plan = EvasionPlan {
+            encoding_strategies: vec![Strategy::CaseAlternation],
+            context: None,
+            ..EvasionPlan::default()
+        };
+        let result = evade_adaptive(&req, &config, &plan, &HostState::default());
+        // Pre-fix and post-fix this call path is identical when context=None.
+        // We assert the result is non-empty and contains the encoding technique.
+        assert!(
+            result
+                .techniques
+                .iter()
+                .any(|t| matches!(t, Technique::PayloadEncoding(_)))
+        );
+        // No JSON-string escaping applied — the raw `"` is still present.
+        let body = result.request.body.as_deref().unwrap_or(&[]);
+        assert!(
+            body.contains(&b'"'),
+            "context=None: plain encoder must NOT JSON-escape the quote"
+        );
+    }
+
+    /// B-3 wiring: when `plan.context = Some(JsonString)`,
+    /// `evade_adaptive` uses the contextual encoder which JSON-escapes
+    /// the encoded output so the resulting bytes are legal inside a
+    /// JSON string. The literal `"` becomes `\"`.
+    #[test]
+    fn evade_adaptive_json_string_context_applies_escaping() {
+        use wafrift_encoding::encoding::Strategy;
+        use wafrift_types::injection_context::InjectionContext;
+        let req = Request::post("https://example.com", br#"q="abc""#.to_vec())
+            .header("Content-Type", "application/json");
+        let config = EvasionConfig::default();
+        let plan = EvasionPlan {
+            encoding_strategies: vec![Strategy::CaseAlternation],
+            context: Some(InjectionContext::JsonString),
+            ..EvasionPlan::default()
+        };
+        let result = evade_adaptive(&req, &config, &plan, &HostState::default());
+        let body = result.request.body.as_deref().unwrap_or(&[]);
+        // The contextual encoder must have escaped the literal quote.
+        let body_str = std::str::from_utf8(body).expect("body is utf8");
+        assert!(
+            body_str.contains("\\\""),
+            "context=JsonString: contextual encoder must JSON-escape `\"` to `\\\"`, got: {body_str:?}"
+        );
+    }
+
     // ============================================
     // Heavy Escalation Tests (31-40)
     // ============================================
@@ -491,6 +548,7 @@ mod tests {
             use_smuggling: true,
             use_h2: true,
             rationale: vec!["test plan".into()],
+            context: None,
         };
         assert_eq!(plan.encoding_strategies.len(), 2);
         assert!(plan.use_grammar);
@@ -546,13 +604,15 @@ mod tests {
         // Use POST with bodies so the encoding techniques actually fire
         // (apply_encoding skips bodyless requests, which would mask the
         // bug).
-        let mut state = HostState::default();
-        state.proven_winners = vec![
-            "encoding:UrlEncode".to_string(),
-            "encoding:DoubleUrlEncode".to_string(),
-            "encoding:Base64Encode".to_string(),
-            "encoding:HexEncode".to_string(),
-        ];
+        let mut state = HostState {
+            proven_winners: vec![
+                "encoding:UrlEncode".to_string(),
+                "encoding:DoubleUrlEncode".to_string(),
+                "encoding:Base64Encode".to_string(),
+                "encoding:HexEncode".to_string(),
+            ],
+            ..Default::default()
+        };
         state.discovery_complete = true;
         let config = EvasionConfig::default();
 
@@ -591,18 +651,17 @@ mod tests {
     #[test]
     fn winner_pick_is_deterministic_per_url() {
         // Same URL -> same winner -> same evasion. Replay safety.
-        let mut state = HostState::default();
-        state.proven_winners = vec![
-            "encoding:UrlEncode".to_string(),
-            "encoding:DoubleUrlEncode".to_string(),
-            "encoding:HexEncode".to_string(),
-        ];
+        let mut state = HostState {
+            proven_winners: vec![
+                "encoding:UrlEncode".to_string(),
+                "encoding:DoubleUrlEncode".to_string(),
+                "encoding:HexEncode".to_string(),
+            ],
+            ..Default::default()
+        };
         state.discovery_complete = true;
         let config = EvasionConfig::default();
-        let req = Request::post(
-            "https://target/api/x",
-            b"q=admin' OR 1=1--".to_vec(),
-        );
+        let req = Request::post("https://target/api/x", b"q=admin' OR 1=1--".to_vec());
         let a = evade(&req, &state, &config);
         let b = evade(&req, &state, &config);
         let a_enc: Vec<&Technique> = a
@@ -655,11 +714,8 @@ mod tests {
     #[test]
     fn is_graphql_request_rejects_plain_form_body() {
         use crate::strategy::is_graphql_request;
-        let req = Request::post(
-            "https://example.com/api",
-            b"q=SELECT+1+FROM+users".to_vec(),
-        )
-        .header("Content-Type", "application/x-www-form-urlencoded");
+        let req = Request::post("https://example.com/api", b"q=SELECT+1+FROM+users".to_vec())
+            .header("Content-Type", "application/x-www-form-urlencoded");
         assert!(
             !is_graphql_request(&req),
             "form-urlencoded body must NOT be detected as GraphQL"
@@ -694,7 +750,10 @@ mod tests {
         let has_mismatch = payloads.iter().any(|p| p.contains("operationName"));
         assert!(has_alias, "alias-flood payloads missing from battery");
         assert!(has_intro, "introspection payloads missing from battery");
-        assert!(has_mismatch, "op-name-mismatch payloads missing from battery");
+        assert!(
+            has_mismatch,
+            "op-name-mismatch payloads missing from battery"
+        );
     }
 
     #[test]
@@ -725,6 +784,58 @@ mod tests {
             payloads.len() >= 10,
             "GraphQL battery must have at least 10 payloads, got {}",
             payloads.len()
+        );
+    }
+
+    // ── is_text_payload panic-safety tests ───────────────────────────────────
+    // Pins the fix that replaced `.expect("body exists")` with `let Some(body)`.
+    // LAW 1: the function must never panic; it must return false for any input
+    // that lacks a body.
+
+    #[test]
+    fn is_text_payload_returns_false_for_bodyless_get() {
+        use crate::strategy::is_text_payload;
+        // GET with no body — is_text_payload must return false, not panic.
+        let req = Request::get("https://example.com/api?q=test");
+        assert!(req.body.is_none(), "precondition: GET has no body");
+        assert!(
+            !is_text_payload(&req),
+            "bodyless request must not be text payload"
+        );
+    }
+
+    #[test]
+    fn is_text_payload_returns_false_for_delete_no_body() {
+        use crate::strategy::is_text_payload;
+        let req = Request::delete("https://example.com/resource/1");
+        assert!(!is_text_payload(&req), "bodyless DELETE must return false");
+    }
+
+    #[test]
+    fn is_text_payload_returns_true_for_valid_utf8_body_no_content_type() {
+        use crate::strategy::is_text_payload;
+        // POST with no Content-Type — falls through to UTF-8 check.
+        let req = Request::post("https://example.com/api", b"hello world".to_vec());
+        assert!(
+            req.headers
+                .iter()
+                .all(|(k, _)| !k.eq_ignore_ascii_case("content-type")),
+            "precondition: no content-type header"
+        );
+        assert!(
+            is_text_payload(&req),
+            "valid UTF-8 body with no CT header must be text payload"
+        );
+    }
+
+    #[test]
+    fn is_text_payload_returns_false_for_binary_body_no_content_type() {
+        use crate::strategy::is_text_payload;
+        // POST with no Content-Type and a non-UTF-8 body.
+        let req = Request::post("https://example.com/api", vec![0xFE, 0xFF, 0x00, 0x01]);
+        assert!(
+            !is_text_payload(&req),
+            "non-UTF-8 body with no CT header must NOT be text payload"
         );
     }
 }

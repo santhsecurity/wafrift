@@ -26,7 +26,7 @@
 //! - No multi-vector phase: the template IS the vector — the
 //!   operator chose POST-body / header / cookie injection by where
 //!   they placed `§§`.
-//! - No equivalence-moat active boundary learning: the moat assumes URL-query shape;
+//! - No equivalence-moat CEGIS: the moat assumes URL-query shape;
 //!   adapting it to arbitrary raw templates is future work.
 //! - No header-obfuscation phase: operator uses `-H` instead.
 //! - No baseline / WAF-detection phase: the operator already knows
@@ -58,7 +58,7 @@ use crate::scan::pentest_client;
 /// the ddmin-reduced form — typically MUCH shorter than the
 /// original, easier to drop into a pentest report.
 #[derive(Debug, Clone)]
-pub struct BypassRecord {
+pub(crate) struct BypassRecord {
     pub idx: usize,
     pub payload: String,
     pub techniques: Vec<String>,
@@ -87,7 +87,7 @@ enum FireOutcome {
 ///   any variant bypassed)
 /// - `ExitCode::from(1)` on HTTP-client setup failure
 /// - `ExitCode::from(2)` on invalid template input (no `§§` marker)
-pub async fn run_scan_raw(
+pub(crate) async fn run_scan_raw(
     template: RawRequest,
     args: ScanArgs,
     cancel: CancellationToken,
@@ -149,6 +149,14 @@ pub async fn run_scan_raw(
         if cancel.is_cancelled() {
             break;
         }
+        // Global fire-budget gate (--max-fires). 0 = unlimited.
+        if args.max_fires != 0 && total_fired >= args.max_fires {
+            eprintln!(
+                "[wafrift scan] --max-fires {} reached; remaining phases skipped",
+                args.max_fires
+            );
+            break;
+        }
         total_fired += 1;
         let mutated = template.with_payload(&v.payload);
         match fire_one(&http, &mutated).await {
@@ -162,7 +170,11 @@ pub async fn run_scan_raw(
                     &mutated.url,
                     &mutated.method,
                     &mutated.headers,
-                    if mutated.body.is_empty() { None } else { Some(&mutated.body) },
+                    if mutated.body.is_empty() {
+                        None
+                    } else {
+                        Some(&mutated.body)
+                    },
                     &v.techniques,
                     v.confidence,
                     &format!("raw-runner bypass (variant {idx})"),
@@ -300,23 +312,29 @@ pub async fn run_scan_raw(
 }
 
 /// Build the reqwest client mirroring `scan::run_scan`'s setup
-/// (timeout, redirects, realistic UA, pentest pivot flags). Session-
+/// (timeout, redirects, browser headers, pentest pivot flags). Session-
 /// init is intentionally skipped in `-r` mode — the operator's
 /// captured request file ALREADY carries any cookies / auth headers
 /// they need; layering a second session would double-set them.
 fn build_http_client(args: &ScanArgs) -> Result<Client, ExitCode> {
-    let ua = crate::config::shared_user_agent();
+    let scan_identity = crate::config::shared_scan_browser_headers(args.stealth_browser.as_deref())
+        .map_err(|e| {
+            eprintln!("  {} {e}", "Config error:".red().bold());
+            ExitCode::from(2)
+        })?;
+    let default_headers = scan_identity.headers;
     let mut builder = wafrift_transport::base_client_builder(
         wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
         args.insecure,
-        Some(&ua),
+        None,
     )
-    .redirect(reqwest::redirect::Policy::limited(5));
+    .default_headers(default_headers.clone())
+    .redirect(crate::helpers::safe_redirect_policy(5));
     builder = pentest_client::apply_pentest_flags_or_print(
         builder,
         args.proxy.as_deref(),
         &args.header,
-        None,
+        Some(&default_headers),
     )?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
@@ -342,7 +360,13 @@ async fn fire_one(http: &Client, raw: &RawRequest) -> Result<FireOutcome, String
     }
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read so a hostile WAF
+    // can't serve a gzip-bomb that expands to GBs. The default 8 MiB cap
+    // is more than enough for WAF block/pass pages. On overrun treat the
+    // body as empty — is_waf_block falls back to status-only heuristics.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .unwrap_or_default();
     if is_waf_block(status, &body) {
         Ok(FireOutcome::Blocked)
     } else {
@@ -501,6 +525,7 @@ mod tests {
             target_positional: None,
             target: None,
             from_discovery: None,
+            corpus: None,
             payload: "x".into(),
             param: "q".into(),
             payload_class: None,
@@ -508,6 +533,7 @@ mod tests {
             session_init: None,
             level: crate::Level::Light,
             encoding_only: true,
+            dry_run: false,
             delay_ms: 0,
             format: "json".into(),
             stealth_browser: None,
@@ -521,21 +547,29 @@ mod tests {
             raw_request: None,
             raw_request_scheme: "http".into(),
             auto_distill: false,
-            auto_distill_max_fires: 200,
+            auto_distill_max_fires: crate::DEFAULT_AUTO_DISTILL_MAX_FIRES,
             concurrency: 0,
             timeout_secs: 0,
             quiet: false,
-            callback_timeout_secs: 5,
-            exploit_cap: 500,
+            callback_timeout_secs: crate::DEFAULT_CALLBACK_TIMEOUT_SECS,
+            exploit_cap: crate::DEFAULT_EXPLOIT_CAP,
             variants_cap: 0,
             egress_socks5: Vec::new(),
             egress_http_proxy: Vec::new(),
             egress_tailscale_nodes: Vec::new(),
-            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
-            egress_challenge_threshold: 3,
-            egress_cooldown_secs: 300,
+            egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+            egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+            egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
             i_have_permission: None,
             graphql: false,
+            scan_timeout_secs: 0,
+            max_fires: crate::DEFAULT_MAX_FIRES,
+            full_scan_unguarded: false,
+            probe_surfaces: false,
+            auto_escalate: true,
+            no_auto_escalate: false,
+            no_probe_surfaces: false,
+            surface_cap: 12,
         };
         let cancel = CancellationToken::new();
         let code = run_scan_raw(template_without_marker(), args, cancel).await;
@@ -552,6 +586,7 @@ mod tests {
             target_positional: None,
             target: None,
             from_discovery: None,
+            corpus: None,
             payload: String::new(),
             param: "q".into(),
             payload_class: None,
@@ -559,6 +594,7 @@ mod tests {
             session_init: None,
             level: crate::Level::Light,
             encoding_only: true,
+            dry_run: false,
             delay_ms: 0,
             format: "json".into(),
             stealth_browser: None,
@@ -572,21 +608,29 @@ mod tests {
             raw_request: None,
             raw_request_scheme: "http".into(),
             auto_distill: false,
-            auto_distill_max_fires: 200,
+            auto_distill_max_fires: crate::DEFAULT_AUTO_DISTILL_MAX_FIRES,
             concurrency: 0,
             timeout_secs: 0,
             quiet: false,
-            callback_timeout_secs: 5,
-            exploit_cap: 500,
+            callback_timeout_secs: crate::DEFAULT_CALLBACK_TIMEOUT_SECS,
+            exploit_cap: crate::DEFAULT_EXPLOIT_CAP,
             variants_cap: 0,
             egress_socks5: Vec::new(),
             egress_http_proxy: Vec::new(),
             egress_tailscale_nodes: Vec::new(),
-            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
-            egress_challenge_threshold: 3,
-            egress_cooldown_secs: 300,
+            egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+            egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+            egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
             i_have_permission: None,
             graphql: false,
+            scan_timeout_secs: 0,
+            max_fires: crate::DEFAULT_MAX_FIRES,
+            full_scan_unguarded: false,
+            probe_surfaces: false,
+            auto_escalate: true,
+            no_auto_escalate: false,
+            no_probe_surfaces: false,
+            surface_cap: 12,
         };
         let cancel = CancellationToken::new();
         let code = run_scan_raw(template_with_marker(), args, cancel).await;
@@ -648,6 +692,7 @@ mod tests {
             target_positional: None,
             target: None,
             from_discovery: None,
+            corpus: None,
             payload: payload.into(),
             param: "q".into(),
             payload_class: None,
@@ -655,6 +700,7 @@ mod tests {
             session_init: None,
             level: crate::Level::Light,
             encoding_only: true,
+            dry_run: false,
             delay_ms: 0,
             format: format.into(),
             stealth_browser: None,
@@ -668,21 +714,29 @@ mod tests {
             raw_request: None,
             raw_request_scheme: "http".into(),
             auto_distill: false,
-            auto_distill_max_fires: 200,
+            auto_distill_max_fires: crate::DEFAULT_AUTO_DISTILL_MAX_FIRES,
             concurrency: 0,
             timeout_secs: 0,
             quiet: false,
-            callback_timeout_secs: 5,
-            exploit_cap: 500,
+            callback_timeout_secs: crate::DEFAULT_CALLBACK_TIMEOUT_SECS,
+            exploit_cap: crate::DEFAULT_EXPLOIT_CAP,
             variants_cap: 0,
             egress_socks5: Vec::new(),
             egress_http_proxy: Vec::new(),
             egress_tailscale_nodes: Vec::new(),
-            egress_tailscale_socks_addr: "127.0.0.1:1055".into(),
-            egress_challenge_threshold: 3,
-            egress_cooldown_secs: 300,
+            egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+            egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+            egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
             i_have_permission: None,
             graphql: false,
+            scan_timeout_secs: 0,
+            max_fires: crate::DEFAULT_MAX_FIRES,
+            full_scan_unguarded: false,
+            probe_surfaces: false,
+            auto_escalate: true,
+            no_auto_escalate: false,
+            no_probe_surfaces: false,
+            surface_cap: 12,
         }
     }
 
@@ -738,6 +792,153 @@ mod tests {
         let args = args_for(addr, "x", "json");
         let cancel = CancellationToken::new();
         cancel.cancel();
+        let code = run_scan_raw(template, args, cancel).await;
+        assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+    }
+
+    /// §12 anti-rig: --max-fires 5 must cap total_fired ≤ 5 across ALL phases.
+    ///
+    /// The dogfood scenario:
+    ///   `scan <target> --variants-cap 1 --exploit-cap 0 --max-fires 5`
+    /// previously fired 85 requests because differential, multi-vector,
+    /// header-obf, and CEGIS-moat had no shared ceiling. This test pins
+    /// that with max_fires=5 the scan JSON reports total_requests_fired ≤ 5.
+    ///
+    /// Implementation note: the raw_runner path runs `run_scan_raw` which
+    /// calls the full `scan::run_scan` pipeline internally; the JSON output
+    /// is written to a tmp file, read back, and parsed. We override the
+    /// output path by injecting it via ScanArgs::output so the orchestrator
+    /// streams the JSON there; then we parse `total_requests_fired` from it.
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn max_fires_5_caps_total_fired_across_all_phases() {
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Spin up a permissive mock: every request returns 200 so the
+        // scan doesn't abort-rate-limit and every phase can run (but
+        // the budget halts them before they can).
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let counter_c = counter.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let counter_cc = counter_c.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    counter_cc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\
+                              Connection: close\r\n\r\nok",
+                        )
+                        .await;
+                    let _ = sock.shutdown().await;
+                });
+            }
+        });
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
+
+        let tmp = crate::helpers::secure_tmp_path("test-max-fires", "json");
+        let template = RawRequest {
+            method: "GET".into(),
+            url: format!("http://{}/?q=\u{00A7}\u{00A7}", addr), // §§ markers
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        // Build args with max_fires=5 and json output to tmp so we can parse it.
+        let args = ScanArgs {
+            target_positional: None,
+            target: None,
+            from_discovery: None,
+            corpus: None,
+            payload: "' OR 1=1--".into(),
+            param: "q".into(),
+            payload_class: None,
+            callback_url: None,
+            session_init: None,
+            level: crate::Level::Light,
+            encoding_only: false,
+            dry_run: false,
+            delay_ms: 0,
+            format: "json".into(),
+            stealth_browser: None,
+            insecure: false,
+            report_layers: false,
+            only: Vec::new(),
+            exclude: Vec::new(),
+            output: Some(tmp.clone()),
+            proxy: None,
+            header: Vec::new(),
+            raw_request: None,
+            raw_request_scheme: "http".into(),
+            auto_distill: false,
+            auto_distill_max_fires: crate::DEFAULT_AUTO_DISTILL_MAX_FIRES,
+            concurrency: 0,
+            timeout_secs: 0,
+            quiet: true,
+            callback_timeout_secs: crate::DEFAULT_CALLBACK_TIMEOUT_SECS,
+            exploit_cap: 500, // default, but max_fires overrides
+            variants_cap: 1,  // dogfood scenario
+            egress_socks5: Vec::new(),
+            egress_http_proxy: Vec::new(),
+            egress_tailscale_nodes: Vec::new(),
+            egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.into(),
+            egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+            egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
+            i_have_permission: None,
+            graphql: false,
+            scan_timeout_secs: 0,
+            max_fires: 5, // THE cap under test
+            full_scan_unguarded: false,
+            probe_surfaces: false,
+            auto_escalate: true,
+            no_auto_escalate: false,
+            no_probe_surfaces: false,
+            surface_cap: 12,
+        };
+        let cancel = CancellationToken::new();
+        let code = run_scan_raw(template, args, cancel).await;
+        // The scan must exit cleanly (0 or 5=rate-limited), never panic.
+        let exit_num = format!("{code:?}");
+        let ok = exit_num == format!("{:?}", ExitCode::SUCCESS)
+            || exit_num == format!("{:?}", ExitCode::from(5));
+        assert!(ok, "scan exited unexpectedly: {exit_num}");
+
+        // Parse the JSON output and assert total_fired ≤ max_fires.
+        // raw_runner uses "total_fired"; main scan uses "total_requests_fired".
+        let json_str = std::fs::read_to_string(&tmp).unwrap_or_default();
+        let _ = std::fs::remove_file(&tmp);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
+        let total_fired = parsed["total_fired"].as_u64().unwrap_or(u64::MAX);
+        assert!(
+            total_fired <= 5,
+            "max_fires=5 must cap total_fired ≤ 5, got {total_fired} (json: {parsed})"
+        );
+    }
+
+    /// §12 backward-compat: max_fires=0 (unlimited) must NOT change behaviour
+    /// for a small scan relative to the DEFAULT_MAX_FIRES path.
+    /// We just verify the scan completes cleanly and returns SUCCESS.
+    #[tokio::test]
+    async fn max_fires_zero_unlimited_does_not_abort_small_scan() {
+        let addr = spawn_mock_waf().await;
+        let template = RawRequest {
+            method: "GET".into(),
+            url: format!("http://{}/?q=\u{00A7}\u{00A7}", addr), // §§
+            headers: Vec::new(),
+            body: Vec::new(),
+        };
+        let mut args = args_for(addr, "SAFEPAYLOAD", "json");
+        args.max_fires = 0; // 0 = unlimited
+        args.variants_cap = 3; // keep it fast
+        let cancel = CancellationToken::new();
         let code = run_scan_raw(template, args, cancel).await;
         assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
     }

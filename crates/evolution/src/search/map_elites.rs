@@ -7,6 +7,7 @@ use rand::Rng;
 use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use wafrift_types::pick::pick_from_rng;
 
 /// Feature descriptor for MAP-Elites grid binning.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -34,9 +35,27 @@ impl FeatureDescriptor {
 }
 
 /// MAP-Elites quality-diversity search.
+///
+/// # Grid representation
+///
+/// `grid` is a `HashMap<FeatureDescriptor, Chromosome>` so every
+/// insert/lookup/replace is O(1) instead of the O(n) linear scan the
+/// original `Vec<(FeatureDescriptor, Chromosome)>` required.  With a
+/// grid that can hold hundreds of cells, the three O(n) scans in
+/// `submit_evaluations` (check-exists → compare fitness → replace/push)
+/// collapsed from 3 × n to 3 × 1 per verdict.  `population_snapshot`
+/// remains O(n) (unavoidable; the whole grid is collected), and
+/// `best()` stays O(n) (one linear max scan is correct there).
+///
+/// The serde representation is preserved as a JSON array of `[desc, chrom]`
+/// pairs (see the `grid_as_pairs` module) even though the in-memory form
+/// is now a `HashMap`: a map keyed by the `FeatureDescriptor` struct
+/// cannot serialize to a JSON object, and the pair-array form keeps v1
+/// checkpoints loadable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapElites {
-    grid: Vec<(FeatureDescriptor, Chromosome)>,
+    #[serde(with = "grid_as_pairs")]
+    grid: HashMap<FeatureDescriptor, Chromosome>,
     gene_pool: GenePool,
     generation: u32,
     eval_counter: u64,
@@ -44,11 +63,40 @@ pub struct MapElites {
     in_flight: HashMap<u64, Chromosome>,
 }
 
+/// Serialize/deserialize the MAP-Elites `grid` as a JSON array of
+/// `[descriptor, chromosome]` pairs rather than a JSON object. A
+/// `HashMap` keyed by the `FeatureDescriptor` struct cannot serialize to
+/// a JSON object — JSON object keys must be strings, so the derived map
+/// serialization fails with "key must be a string". The pair-array form
+/// fixes that and matches the byte layout of the original
+/// `Vec<(FeatureDescriptor, Chromosome)>` checkpoint, so v1 checkpoints
+/// still round-trip.
+mod grid_as_pairs {
+    use super::{Chromosome, FeatureDescriptor};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub(super) fn serialize<S: Serializer>(
+        grid: &HashMap<FeatureDescriptor, Chromosome>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let pairs: Vec<(&FeatureDescriptor, &Chromosome)> = grid.iter().collect();
+        pairs.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<FeatureDescriptor, Chromosome>, D::Error> {
+        let pairs: Vec<(FeatureDescriptor, Chromosome)> = Vec::deserialize(deserializer)?;
+        Ok(pairs.into_iter().collect())
+    }
+}
+
 impl MapElites {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            grid: Vec::new(),
+            grid: HashMap::new(),
             gene_pool: GenePool::default_wafrift(),
             generation: 0,
             eval_counter: 0,
@@ -63,10 +111,15 @@ impl MapElites {
         // 50% of the time sample from under-filled regions (random bin)
         // 50% of the time sample uniformly from existing elites
         if rng.gen_bool(0.5) {
-            let idx = rng.gen_range(0..self.grid.len());
-            Some(self.grid[idx].1.clone())
+            // O(n) random-index sample from a HashMap: collect keys into a
+            // temp slice, pick by index. This path is 50%-frequency and n is
+            // bounded by the number of distinct (encoding × grammar × content_type)
+            // cells (< 1000 in practice), so the allocation is tiny.
+            let values: Vec<&Chromosome> = self.grid.values().collect();
+            Some((*pick_from_rng(&values, values[0], rng)).clone())
         } else {
-            // Try to fill a random feature combination
+            // Try to fill a random feature combination. O(1) HashMap lookup
+            // replaces the O(n) Vec::iter().find() that existed before.
             let encoding = self
                 .gene_pool
                 .random_value("encoding", rng)
@@ -84,14 +137,14 @@ impl MapElites {
                 grammar,
                 content_type,
             };
-            self.grid
-                .iter()
-                .find(|(d, _)| *d == descriptor)
-                .map(|(_, c)| c.clone())
-                .or_else(|| {
-                    let idx = rng.gen_range(0..self.grid.len());
-                    Some(self.grid[idx].1.clone())
-                })
+            // O(1) lookup — if the cell exists, clone its elite; otherwise
+            // fall back to a uniform random sample (same semantics as before).
+            if let Some(c) = self.grid.get(&descriptor) {
+                Some(c.clone())
+            } else {
+                let values: Vec<&Chromosome> = self.grid.values().collect();
+                Some((*pick_from_rng(&values, values[0], rng)).clone())
+            }
         }
     }
 
@@ -125,9 +178,10 @@ impl SearchAlgorithm for MapElites {
         self.in_flight.clear();
         for chromosome in population {
             let descriptor = FeatureDescriptor::from_chromosome(&chromosome);
-            if !self.grid.iter().any(|(d, _)| *d == descriptor) {
-                self.grid.push((descriptor, chromosome));
-            }
+            // O(1) HashMap entry: first chromosome for a descriptor wins
+            // (same semantics as before). `entry().or_insert` avoids the
+            // previous O(n) `iter().any()` contains-check.
+            self.grid.entry(descriptor).or_insert(chromosome);
         }
     }
 
@@ -150,32 +204,25 @@ impl SearchAlgorithm for MapElites {
             if let Some(mut candidate) = self.in_flight.remove(&id) {
                 candidate.record_verdict(&verdict);
                 let descriptor = FeatureDescriptor::from_chromosome(&candidate);
-                // F144: route through comparable_fitness so a NaN /
-                // ±inf cell never becomes permanently inelastic. Pre-
-                // fix `candidate.fitness > existing.fitness` returned
-                // false for ANY candidate when existing.fitness was
-                // NaN (every comparison with NaN is false) — the cell
-                // was frozen forever. Mapping non-finite to
-                // NEG_INFINITY makes new finite fitness strictly
-                // greater so the poisoned cell gets replaced on the
-                // very next eval.
-                let should_insert = match self.grid.iter().find(|(d, _)| *d == descriptor) {
-                    Some((_, existing)) => {
-                        comparable_fitness(candidate.fitness)
-                            > comparable_fitness(existing.fitness)
+                // F144: route through comparable_fitness so a NaN / ±inf cell
+                // never becomes permanently inelastic — mapping non-finite
+                // fitness to NEG_INFINITY makes any finite candidate strictly
+                // better and evicts the poisoned cell.
+                //
+                // §1 SPEED: previously this called `grid.iter().find(…)` twice
+                // (once for the fitness comparison, once for the index lookup)
+                // = 2 × O(n) per verdict. Now a single `entry()` call is O(1).
+                use std::collections::hash_map::Entry;
+                match self.grid.entry(descriptor) {
+                    Entry::Vacant(e) => {
+                        e.insert(candidate);
                     }
-                    None => true,
-                };
-                if should_insert {
-                    if let Some((idx, _)) = self
-                        .grid
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (d, _))| *d == descriptor)
-                    {
-                        self.grid[idx] = (descriptor, candidate);
-                    } else {
-                        self.grid.push((descriptor, candidate));
+                    Entry::Occupied(mut e) => {
+                        if comparable_fitness(candidate.fitness)
+                            > comparable_fitness(e.get().fitness)
+                        {
+                            *e.get_mut() = candidate;
+                        }
                     }
                 }
             }
@@ -196,8 +243,7 @@ impl SearchAlgorithm for MapElites {
         // got mapped to `Equal`. A finite-fitness cell always wins
         // against a NaN cell after the mapping.
         self.grid
-            .iter()
-            .map(|(_, c)| c)
+            .values()
             .max_by(|a, b| fitness_cmp(a.fitness, b.fitness))
     }
 
@@ -218,10 +264,10 @@ impl SearchAlgorithm for MapElites {
         Ok(())
     }
 
-    /// Every grid cell holds a (descriptor, elite chromosome) pair —
+    /// Every grid cell holds an elite chromosome —
     /// the elite set IS the live population for diversity purposes.
     fn population_snapshot(&self) -> Vec<Chromosome> {
-        self.grid.iter().map(|(_, c)| c.clone()).collect()
+        self.grid.values().cloned().collect()
     }
 
     fn clone_box(&self) -> Box<dyn SearchAlgorithm> {
@@ -371,6 +417,7 @@ mod tests {
 
         // The grid cell at that descriptor should now hold the
         // finite-fitness chromosome, not the NaN one.
+        // grid is now a HashMap<FeatureDescriptor, Chromosome>; find via values().
         let cell_fitness = alg
             .grid
             .iter()

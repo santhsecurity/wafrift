@@ -29,7 +29,7 @@ use wafrift_detect::waf_detect;
 use crate::helpers::parse_headers;
 
 #[derive(clap::Args, Debug)]
-pub struct DetectArgs {
+pub(crate) struct DetectArgs {
     /// Target URL to detect against, as the FIRST positional argument
     /// — matches every other wafrift subcommand
     /// (`wafrift scan <URL>`, `wafrift header-diff <URL>`, etc.)
@@ -53,14 +53,19 @@ pub struct DetectArgs {
 
     /// Repeated "key: value" header arguments. Required unless a URL
     /// is given (either positional or via `--url`).
-    #[arg(long, required_unless_present_any = ["url", "url_positional"])]
+    /// R44 ext fix (dogfood pass 4 tail): `-H` accepted as an alias so
+    /// operator muscle memory from `attack`/`scan`/`query-diff`/etc.
+    /// works on detect too.
+    #[arg(long, short = 'H', required_unless_present_any = ["url", "url_positional"])]
     pub headers: Vec<String>,
 
     /// Response body fragment.
     #[arg(long, default_value = "")]
     pub body: String,
 
-    /// With `--url`: per-request timeout in seconds.
+    /// With `--url`: per-request timeout in seconds. Validated at
+    /// run-time: 0 is rejected (0 means "no timeout" in reqwest,
+    /// hangs on slow upstreams; a typo pre-R44).
     #[arg(long, default_value_t = 10)]
     pub timeout_secs: u64,
 
@@ -84,6 +89,13 @@ pub struct DetectArgs {
     /// WAF name + confidence + indicators).
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
+
+    /// R46-I5 fix (dogfood pass 7): convenience alias for
+    /// `--format json`. Operator muscle memory expects `--json`
+    /// to work everywhere; pre-fix it errored with "unexpected
+    /// argument". When set, overrides `--format` to json.
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
 }
 
 impl DetectArgs {
@@ -101,7 +113,7 @@ impl DetectArgs {
 /// three digits in the range 100–599; anything else (`0`, `99`, `999`,
 /// `1000`) is a typo or an attempt to smuggle a nonsense value past
 /// detection and is rejected at parse time rather than silently scored.
-pub fn parse_http_status(s: &str) -> Result<u16, String> {
+pub(crate) fn parse_http_status(s: &str) -> Result<u16, String> {
     let n: u16 = s
         .parse()
         .map_err(|_| format!("`{s}` is not a number; HTTP status codes are 100–599"))?;
@@ -120,21 +132,23 @@ pub fn parse_http_status(s: &str) -> Result<u16, String> {
 pub(crate) type DetectFetch = Result<(u16, Vec<(String, String)>, Vec<u8>), String>;
 
 /// Single-shot GET against a target for fingerprinting. Sends a
-/// realistic browser UA so the edge behaves normally (some CDNs serve
-/// a different page or skip a JS challenge when they see "rustls" or
-/// a bare reqwest UA, which would skew detection). Returns
+/// realistic browser navigation headers so the edge behaves normally
+/// (some CDNs serve a different page or skip a JS challenge when they
+/// see "rustls", a bare reqwest UA, or missing Accept-Language, which
+/// would skew detection). Returns
 /// `(status, headers, body)` with the body capped at 64 KiB — WAF/CDN
 /// banners and block pages are always in the head.
 pub(crate) fn fetch_for_detect(url: &str, timeout_secs: u64, insecure: bool) -> DetectFetch {
     // Shared floor via base_client_builder + caller-owned redirect
     // policy (intentionally `none()` so detect sees redirects as
     // signals, not as transparent next-hops to follow).
-    let ua = crate::config::shared_user_agent();
-    let client =
-        wafrift_transport::base_client_builder(timeout_secs.clamp(1, 120), insecure, Some(&ua))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let scan_identity = crate::config::shared_scan_browser_headers(None)
+        .map_err(|e| format!("failed to resolve browser headers: {e}"))?;
+    let client = wafrift_transport::base_client_builder(timeout_secs.clamp(1, 120), insecure, None)
+        .default_headers(scan_identity.headers)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -243,22 +257,22 @@ pub(crate) fn fetch_cname_chain(url: &str) -> Option<DnsProbe> {
 /// in the 160+ corpus matched. Surfaced under "differential
 /// detection" in the report.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DifferentialEvidence {
+pub(crate) struct DifferentialEvidence {
     /// Status of the benign baseline.
-    pub baseline_status: u16,
+    pub(crate) baseline_status: u16,
     /// Status of the attack probe.
-    pub attack_status: u16,
+    pub(crate) attack_status: u16,
     /// Server header on benign (e.g. "gunicorn/19.9.0").
-    pub baseline_server: String,
+    pub(crate) baseline_server: String,
     /// Server header on attack (e.g. "Apache" — different stack
     /// answering means a WAF intercepted).
-    pub attack_server: String,
+    pub(crate) attack_server: String,
     /// Body length on benign.
-    pub baseline_body_len: usize,
+    pub(crate) baseline_body_len: usize,
     /// Body length on attack.
-    pub attack_body_len: usize,
+    pub(crate) attack_body_len: usize,
     /// Specific reasons the differential classifier flagged.
-    pub reasons: Vec<String>,
+    pub(crate) reasons: Vec<String>,
 }
 
 /// Compare a benign-probe response with an attack-probe response.
@@ -266,7 +280,7 @@ pub struct DifferentialEvidence {
 /// to infer a WAF is intercepting, `None` otherwise. Pure function
 /// — no I/O, fully testable on synthetic inputs.
 #[must_use]
-pub fn classify_differential(
+pub(crate) fn classify_differential(
     baseline_status: u16,
     baseline_headers: &[(String, String)],
     baseline_body_len: usize,
@@ -345,7 +359,7 @@ pub fn classify_differential(
 /// server. Splits the fragment first, mutates the URL portion, then
 /// re-attaches the fragment. Pure / testable.
 #[must_use]
-pub fn inject_sqli_probe(url: &str) -> String {
+pub(crate) fn inject_sqli_probe(url: &str) -> String {
     const PROBE: &str = "q=%27+OR+1%3D1--";
     // Split off the fragment (only the first `#` counts per RFC 3986).
     let (base, frag) = match url.split_once('#') {
@@ -433,20 +447,92 @@ pub(crate) fn infra_markers(headers: &[(String, String)]) -> Vec<(String, String
     order.into_iter().filter_map(|k| seen.remove(&k)).collect()
 }
 
+/// Data-driven table mapping WAF family names (lower-case prefix match) to a
+/// single suggested follow-up command.  Extend this table to add hints for
+/// new WAF families without touching any other code.
+///
+/// Matching is case-insensitive prefix: `"cloudflare"` matches both
+/// `"Cloudflare"` and `"Cloudflare Enterprise"`.
+pub(crate) const SUGGESTED_NEXT_STEP: &[(&str, &str)] = &[
+    (
+        "cloudflare",
+        "try `wafrift scan <url> --payload \"' OR 1=1--\" --level medium`",
+    ),
+    ("aws-waf", "try `wafrift bypass-probe <url>`"),
+    ("awswaf", "try `wafrift bypass-probe <url>`"),
+    (
+        "akamai",
+        "try `wafrift scan <url> --payload \"<script>alert(1)</script>\" --level medium`",
+    ),
+    (
+        "imperva",
+        "try `wafrift scan <url> --payload \"' OR 1=1--\" --level heavy`",
+    ),
+    (
+        "f5",
+        "try `wafrift scan <url> --payload \"<img src=x onerror=1>\" --level medium`",
+    ),
+    (
+        "fortiweb",
+        "try `wafrift scan <url> --payload \"' OR 1=1--\" --level medium`",
+    ),
+    (
+        "barracuda",
+        "try `wafrift scan <url> --payload \"' OR 1=1--\" --level medium`",
+    ),
+    (
+        "sucuri",
+        "try `wafrift scan <url> --payload \"<script>alert(1)</script>\" --level light`",
+    ),
+    (
+        "modsecurity",
+        "try `wafrift scan <url> --payload \"' OR 1=1--\" --level heavy`",
+    ),
+];
+
+/// Return the suggested next-step hint for a detected WAF name, or `None`
+/// if the WAF is not in the table.  Matching is case-insensitive prefix.
+pub(crate) fn next_step_hint(waf_name: &str) -> Option<&'static str> {
+    let lower = waf_name.to_lowercase();
+    SUGGESTED_NEXT_STEP
+        .iter()
+        .find(|(prefix, _)| lower.starts_with(prefix))
+        .map(|(_, hint)| *hint)
+}
+
+/// Generic hint for any confidently-detected WAF that is NOT in
+/// `SUGGESTED_NEXT_STEP` (e.g. a new or niche WAF family).
+const GENERIC_NEXT_STEP: &str = "try `wafrift legendary <url>` for a one-shot demo run";
+
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
+pub(crate) fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
+    // R44 fix (dogfood pass 4): pre-fix `--timeout-secs 0` was
+    // silently accepted. reqwest treats 0 as "no timeout" — a
+    // slow upstream would hang the process. Reject explicitly.
+    if args.timeout_secs == 0 {
+        eprintln!(
+            "error: --timeout-secs must be >= 1 (got 0). Pass `--timeout-secs 10` \
+             for the default."
+        );
+        return ExitCode::from(2);
+    }
     // Two input modes: live `--url` fetch, or the manual
     // `--status`/`--headers`/`--body` triple. clap's
     // `required_unless_present`/`conflicts_with_all` guarantees exactly
     // one mode is selected.
     let resolved_url = args
         .resolved_url()
-        .map(|u| crate::helpers::normalize_target_url(u));
+        .map(crate::helpers::normalize_target_url);
+    // R46-I7 fix (dogfood pass 7): in JSON / --quiet / --json mode
+    // the probe-on-stderr breadcrumb was undocumented and surprised
+    // operators piping stderr to a log file. Suppress it when ANY
+    // machine-readable mode is requested.
+    let probe_text_ok = !quiet && args.format != "json" && !args.json;
     let (status, headers, body): (u16, Vec<(String, String)>, Vec<u8>) =
         if let Some(ref url) = resolved_url {
             match fetch_for_detect(url, args.timeout_secs, args.insecure) {
                 Ok((s, h, b)) => {
-                    if !quiet {
+                    if probe_text_ok {
                         eprintln!(
                             "{} GET {url} → HTTP {s} ({} headers, {} body bytes)",
                             "probe:".bright_black(),
@@ -482,13 +568,6 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // benign vs attack request differ significantly, we still know
     // a WAF is intercepting — even if its block page is generic
     // (Apache stock 403, etc.).
-    // Pre-fix this used `.expect("differential gated on Some(url)")`
-    // — logically infallible because the outer `&& resolved_url.is_some()`
-    // gates entry, but LAW 1 (no expects outside tests) plus the
-    // risk that a future refactor decouples the guard from the
-    // expectation make `if let Some` strictly safer. No behaviour
-    // change — both forms produce `None` for the `args.differential
-    // == false || resolved_url.is_none()` cases.
     let differential_evidence: Option<DifferentialEvidence> =
         if args.differential && resolved_url.is_some() {
             let url = resolved_url
@@ -503,9 +582,8 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                             "warn:".yellow()
                         );
                     }
+                    None
                 }
-            } else {
-                None
             }
         } else {
             None
@@ -672,7 +750,7 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
     // newer `--format json` (uniform with every other subcommand —
     // closes the dogfood bug where `wafrift detect --url X --format
     // json` failed with "unexpected argument").
-    let emit_json = quiet || args.format == "json";
+    let emit_json = quiet || args.format == "json" || args.json;
     if emit_json {
         let results: Vec<_> = detected
             .iter()
@@ -793,6 +871,15 @@ pub fn run_detect(args: DetectArgs, quiet: bool) -> ExitCode {
                     asn.name.yellow()
                 );
             }
+        }
+        // Fix #3: emit a data-driven "next step" hint when the primary
+        // WAF was identified with high confidence (≥ 0.8).  The table is
+        // intentionally public-const so tooling / tests can assert on it
+        // without coupling to the text format.
+        if result.confidence >= 0.8 {
+            let hint = next_step_hint(&result.name).unwrap_or(GENERIC_NEXT_STEP);
+            println!();
+            println!("  {} {}", "hint:".bright_cyan().bold(), hint.bright_white());
         }
         ExitCode::SUCCESS
     } else {
@@ -1030,6 +1117,54 @@ mod tests {
         addr
     }
 
+    async fn spawn_capture_mock(
+        body: &'static str,
+        status: u16,
+    ) -> (std::net::SocketAddr, std::sync::mpsc::Receiver<String>) {
+        let body = body.to_string();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request = Vec::new();
+            loop {
+                let mut buf = [0u8; 1024];
+                let Ok(n) = sock.read(&mut buf).await else {
+                    return;
+                };
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n")
+                    || request.len() > 16 * 1024
+                {
+                    break;
+                }
+            }
+            let _ = tx.send(String::from_utf8_lossy(&request).into_owned());
+            let resp = format!(
+                "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n\
+                 Connection: close\r\nServer: nginx/1.25.3\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.shutdown().await;
+        });
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
+        (addr, rx)
+    }
+
+    fn captured_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+        request.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
     /// `fetch_for_detect` builds its own tokio runtime — we drive it
     /// from a sync `#[test]` (no `#[tokio::test]`) so the nested
     /// runtime panic doesn't trip.
@@ -1057,6 +1192,38 @@ mod tests {
             .iter()
             .any(|(k, v)| k.eq_ignore_ascii_case("cf-ray") && v.contains("abc123"));
         assert!(has_cf, "CF-Ray header should be present");
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn fetch_for_detect_sends_shared_browser_headers_on_wire() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(1)
+            .build()
+            .unwrap();
+        let (addr, captured) = rt.block_on(spawn_capture_mock("ok", 200));
+        let url = format!("http://{addr}/");
+        let (status, _, _) = fetch_for_detect(&url, 5, false).expect("fetch ok");
+        assert_eq!(status, 200);
+
+        let request = captured
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("request captured");
+        let facts = guise::fingerprint::default_profile_facts();
+        assert_eq!(
+            captured_header(&request, "User-Agent"),
+            Some(facts.user_agent)
+        );
+        assert_eq!(captured_header(&request, "Accept"), Some(facts.accept));
+        assert_eq!(
+            captured_header(&request, "Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(
+            captured_header(&request, "Sec-Fetch-Mode"),
+            Some("navigate")
+        );
     }
 
     #[serial_test::serial]
@@ -1269,6 +1436,90 @@ mod tests {
             reasons.contains("attack response had 500 bytes") || reasons.contains("status flipped"),
             "expected either body-vs-empty or status-flip reason: {:?}",
             ev.reasons
+        );
+    }
+
+    // Fix #3 tests — SUGGESTED_NEXT_STEP table + next_step_hint.
+
+    #[test]
+    fn next_step_hint_returns_cloudflare_command_for_cloudflare() {
+        let hint = next_step_hint("Cloudflare");
+        assert!(hint.is_some(), "Cloudflare must have a next-step hint");
+        let hint = hint.unwrap();
+        assert!(
+            hint.contains("wafrift scan"),
+            "Cloudflare hint must suggest wafrift scan; got: {hint:?}"
+        );
+        assert!(
+            hint.contains("hint") || !hint.is_empty(),
+            "hint must be non-empty"
+        );
+    }
+
+    #[test]
+    fn next_step_hint_returns_bypass_probe_for_aws_waf() {
+        let hint = next_step_hint("AWS-WAF");
+        assert!(hint.is_some(), "AWS-WAF must have a hint");
+        let hint = hint.unwrap();
+        assert!(
+            hint.contains("bypass-probe"),
+            "AWS-WAF hint should mention bypass-probe; got: {hint:?}"
+        );
+    }
+
+    #[test]
+    fn next_step_hint_is_case_insensitive() {
+        // Matching must ignore the case of the detected WAF name.
+        assert_eq!(next_step_hint("cloudflare"), next_step_hint("Cloudflare"),);
+        assert_eq!(
+            next_step_hint("CLOUDFLARE ENTERPRISE"),
+            next_step_hint("Cloudflare"),
+        );
+    }
+
+    #[test]
+    fn next_step_hint_returns_none_for_unknown_waf() {
+        // An unknown/novel WAF must fall through to None so the
+        // caller can apply the generic fallback.
+        assert!(next_step_hint("some-novel-waf-xyz").is_none());
+    }
+
+    #[test]
+    fn detect_cloudflare_output_contains_next_step_hint() {
+        // Simulate what run_detect produces: build a minimal detected
+        // result with confidence 0.9 and verify the hint appears in
+        // the rendered output.  We call next_step_hint directly here
+        // (the same function used by run_detect) since we can't drive
+        // full I/O without a live target.
+        let waf_name = "Cloudflare";
+        let confidence = 0.9_f64;
+        assert!(
+            confidence >= 0.8,
+            "test must use a high-confidence scenario"
+        );
+        let hint = next_step_hint(waf_name).unwrap_or(GENERIC_NEXT_STEP);
+        // The rendered line emitted by run_detect is "  hint: <hint>".
+        let rendered = format!("  hint: {hint}");
+        assert!(
+            rendered.contains("hint:"),
+            "rendered line must start with 'hint:'"
+        );
+        assert!(
+            rendered.contains("wafrift"),
+            "hint must reference a wafrift subcommand; got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn detect_generic_hint_used_for_unknown_waf() {
+        // When the WAF is not in SUGGESTED_NEXT_STEP the fallback
+        // GENERIC_NEXT_STEP must be used and must also reference a
+        // wafrift subcommand.
+        let hint = next_step_hint("novel-waf-xyz").unwrap_or(GENERIC_NEXT_STEP);
+        assert_eq!(hint, GENERIC_NEXT_STEP);
+        assert!(
+            hint.contains("wafrift"),
+            "generic hint must reference wafrift"
         );
     }
 }

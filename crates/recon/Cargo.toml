@@ -12,6 +12,7 @@ description = "Origin discovery and recon (CT logs, historical DNS, active HTTP/
 [dependencies]
 tokio.workspace = true
 reqwest.workspace = true
+guise.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -20,6 +21,7 @@ tracing.workspace = true
 # Needed by discovery::param_miner::read_bounded_len's bytes_stream loop.
 futures-util.workspace = true
 wafrift-types = { workspace = true }
+ctlog = { workspace = true }
 toml = { workspace = true }
 # Needed by discovery::param_miner::probe_one — percent-encode wordlist
 # entries so `&`/`=`/`#`/whitespace in a candidate never split into

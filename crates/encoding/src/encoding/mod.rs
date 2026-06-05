@@ -81,5 +81,6 @@ pub mod url;
 mod tests;
 
 // Re-export everything for backwards compatibility (LAW 2).
+pub use crate::error::EncodeError;
 pub use layered::{aggressiveness, encode_layered, layered_combinations};
 pub use strategy::{Strategy, all_strategies, encode};

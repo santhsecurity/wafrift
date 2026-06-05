@@ -53,7 +53,7 @@ const QUOTE_FREE_TAUTOLOGIES: &[&str] = &[
 /// then emit each `QUOTE_FREE_TAUTOLOGIES` form in that shape.
 #[must_use]
 pub fn mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(max_mutations);
     if payload.is_empty() || max_mutations == 0 {
         return out;
     }

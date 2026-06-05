@@ -1,8 +1,9 @@
 //! End-to-end test for `wafrift query-diff`.
 
-use std::process::Command;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 async fn spawn_query_aware_mock() -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -32,37 +33,9 @@ async fn spawn_query_aware_mock() -> std::net::SocketAddr {
             });
         }
     });
-    {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
-    }
+    // R66 pass-21 §7 DEDUP: shared poll-until-ready helper.
+    common::wait_for_server(addr);
     addr
-}
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
 }
 
 #[test]
@@ -132,11 +105,28 @@ fn query_diff_help_documents_param_flag() {
 }
 
 #[test]
-fn query_diff_appears_in_main_help_listing() {
+// query-diff consolidated under `wafrift diff query` (2026-05). LAW 2: flat
+// alias must keep working forever.
+fn query_diff_is_grouped_under_diff_with_working_alias() {
+    // 1. The unified `diff` command is discoverable in top-level help.
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("query-diff"),
-        "query-diff must appear in top-level help"
+        stdout.contains("\n  diff"),
+        "`diff` must appear as a top-level command in --help: {stdout}"
+    );
+
+    // 2. Canonical new path exits 0.
+    let (code2, _stdout2, stderr2) = wafrift(&["diff", "query", "--help"]);
+    assert_eq!(
+        code2, 0,
+        "`wafrift diff query --help` must exit 0 — stderr:\n{stderr2}"
+    );
+
+    // 3. Deprecated flat alias still runs (LAW 2 backwards-compat).
+    let (code3, _stdout3, stderr3) = wafrift(&["query-diff", "--help"]);
+    assert_eq!(
+        code3, 0,
+        "`wafrift query-diff --help` must still exit 0 — stderr:\n{stderr3}"
     );
 }

@@ -5,7 +5,12 @@
 # rebuild, and the engine picks it up.
 #
 # When adding a marker, prefer specificity: "access denied" is fine,
-# "denied" alone matches too many benign 4xx pages.
+# "denied" alone matches too many benign 4xx pages. Short vendor
+# abbreviations are unsafe as bare substrings — "f5" matched "press F5
+# to refresh" and any hex containing f5, so the F5 vendor is matched via
+# "big-ip" + the ASM block signature "the requested url was rejected"
+# instead. (Note: "waf" is a borderline 3-char token — it can match
+# "waffle"/"wafer"; kept for now as those rarely appear in scan targets.)
 
 patterns = [
     "access denied",
@@ -21,7 +26,7 @@ patterns = [
     "owasp",
     "imperva",
     "big-ip",
-    "f5",
+    "the requested url was rejected",
     "rule violation",
     "request rejected",
     "unauthorized request",

@@ -66,7 +66,7 @@ impl QuicCryptoFragment {
         // Add PADDING frames (type 0x00) if requested.
         if self.pad_to_mtu && buf.len() < self.mtu {
             let pad_bytes = self.mtu - buf.len();
-            buf.extend(std::iter::repeat(0x00u8).take(pad_bytes));
+            buf.extend(std::iter::repeat_n(0x00u8, pad_bytes));
         }
         buf
     }
@@ -145,6 +145,12 @@ impl MtuFragmentationAttack {
             let end = (offset + sz).min(tls_data.len());
             let chunk = tls_data[offset..end].to_vec();
             let chunk_len = chunk.len();
+            // A zero-size split (e.g. `boundary == 0`, where `boundary.min(len)`
+            // is 0) must NOT emit an empty CRYPTO fragment: it is malformed wire
+            // data and would duplicate the next fragment's offset. Skip it.
+            if chunk_len == 0 {
+                continue;
+            }
             fragments.push(QuicCryptoFragment {
                 offset: offset as u64,
                 data: chunk,
@@ -183,7 +189,7 @@ impl MtuFragmentationAttack {
     /// maximum-size UDP datagrams with minimal CRYPTO content.
     pub fn mtu_padded(tls_data: &[u8], n_fragments: usize, mtu: usize) -> Self {
         let n = n_fragments.max(1);
-        let chunk_size = (tls_data.len() + n - 1) / n;
+        let chunk_size = tls_data.len().div_ceil(n);
         let fragments: Vec<QuicCryptoFragment> = tls_data
             .chunks(chunk_size.max(1))
             .enumerate()
@@ -447,7 +453,7 @@ mod tests {
         // Offsets should be decreasing (since we reversed).
         for i in 1..offsets.len() {
             assert!(
-                offsets[i - 1] > offsets[i] || offsets[i - 1] == offsets[i],
+                offsets[i - 1] >= offsets[i],
                 "reverse-order fragments must have decreasing offsets"
             );
         }
@@ -503,5 +509,187 @@ mod tests {
         let attack = MtuFragmentationAttack::byte_per_packet(b"abc");
         let fs = attack.to_frame_set();
         assert_eq!(fs.frames.len(), 3);
+    }
+
+    // ── Adversarial / boundary unit cases ─────────────────────────────────
+
+    #[test]
+    fn empty_input_produces_no_fragments_and_never_panics() {
+        assert!(MtuFragmentationAttack::byte_per_packet(b"").fragments.is_empty());
+        assert!(MtuFragmentationAttack::off_by_one(b"", 8).fragments.is_empty());
+        assert!(MtuFragmentationAttack::mtu_padded(b"", 4, 200).fragments.is_empty());
+        assert!(MtuFragmentationAttack::reverse_order(b"", 4).fragments.is_empty());
+    }
+
+    #[test]
+    fn off_by_one_boundary_zero_is_clamped_not_a_zero_size_loop() {
+        // boundary 0 ⇒ split_sizes start at max(1) — must still cover all data
+        // and never emit a zero-length fragment that loops forever.
+        let data = b"abcdefghij";
+        let attack = MtuFragmentationAttack::off_by_one(data, 0);
+        let re: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        assert_eq!(re, data);
+        assert!(attack.fragments.iter().all(|f| !f.data.is_empty()));
+    }
+
+    #[test]
+    fn off_by_one_boundary_larger_than_data_still_covers_everything() {
+        let data = b"short";
+        let attack = MtuFragmentationAttack::off_by_one(data, 9999);
+        let re: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        assert_eq!(re, data);
+    }
+
+    #[test]
+    fn mtu_padded_with_mtu_smaller_than_header_does_not_truncate_data() {
+        // mtu below the frame header+data size: padding is skipped (buf already
+        // exceeds mtu) but the DATA must never be lost — only padding is optional.
+        let data = b"this payload is much larger than the tiny mtu";
+        let attack = MtuFragmentationAttack::mtu_padded(data, 1, 4);
+        let frame = attack.fragments[0].to_crypto_frame_bytes();
+        let (off, data_back) = parse_crypto_frame(&frame).expect("frame parses");
+        assert_eq!(off, 0);
+        assert_eq!(data_back, data, "data survives even when mtu < frame size");
+    }
+
+    #[test]
+    fn mtu_padded_zero_fragments_is_clamped_to_one() {
+        let attack = MtuFragmentationAttack::mtu_padded(b"abc", 0, 50);
+        assert!(!attack.fragments.is_empty(), "n_fragments 0 must clamp to ≥1");
+    }
+
+    // ── Property tests (proptest) ─────────────────────────────────────────
+    //
+    // These cover the wire-format and reassembly invariants across thousands of
+    // arbitrary inputs — the coverage unit cases can't reach. proptest is a
+    // workspace dev-dependency already declared by this crate.
+
+    use crate::quic_cid::quic_varint_decode;
+    use proptest::prelude::*;
+
+    /// Parse a CRYPTO frame back to `(offset, data)` using the crate's own
+    /// varint decoder — a differential check that the encoder is faithful and
+    /// that padding never corrupts the recovered data.
+    fn parse_crypto_frame(bytes: &[u8]) -> Option<(u64, Vec<u8>)> {
+        if bytes.first() != Some(&0x06) {
+            return None;
+        }
+        // `quic_varint_decode` returns (value, bytes_consumed) — advance the
+        // absolute cursor by the consumed count, not by the count itself.
+        let (offset, off_n) = quic_varint_decode(bytes, 1)?;
+        let len_pos = 1 + off_n;
+        let (len, len_n) = quic_varint_decode(bytes, len_pos)?;
+        let data_pos = len_pos + len_n;
+        let data = bytes.get(data_pos..data_pos + len as usize)?.to_vec();
+        Some((offset, data))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2000))]
+
+        /// byte-per-packet: one fragment per byte, sequential offsets, faithful
+        /// per-frame encode, and exact reassembly.
+        #[test]
+        fn prop_byte_per_packet_roundtrips(data in proptest::collection::vec(any::<u8>(), 0..512)) {
+            let attack = MtuFragmentationAttack::byte_per_packet(&data);
+            prop_assert_eq!(attack.fragments.len(), data.len());
+            let mut re = Vec::new();
+            for (i, frag) in attack.fragments.iter().enumerate() {
+                prop_assert_eq!(frag.offset, i as u64);
+                prop_assert_eq!(frag.data.len(), 1);
+                let (off, d) = parse_crypto_frame(&frag.to_crypto_frame_bytes()).unwrap();
+                prop_assert_eq!(off, i as u64);
+                prop_assert_eq!(&d, &frag.data);
+                re.extend_from_slice(&frag.data);
+            }
+            prop_assert_eq!(re, data);
+        }
+
+        /// off-by-one: cumulative non-overlapping offsets covering all data, and
+        /// exact reassembly, for any boundary.
+        #[test]
+        fn prop_off_by_one_roundtrips(
+            data in proptest::collection::vec(any::<u8>(), 0..512),
+            boundary in 0usize..2048,
+        ) {
+            let attack = MtuFragmentationAttack::off_by_one(&data, boundary);
+            let mut expect_off = 0u64;
+            for frag in &attack.fragments {
+                prop_assert_eq!(frag.offset, expect_off);
+                prop_assert!(!frag.data.is_empty(), "no zero-length fragment");
+                expect_off += frag.data.len() as u64;
+            }
+            let re: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+            prop_assert_eq!(re, data);
+        }
+
+        /// mtu-padded: exact reassembly, and every encoded frame is exactly
+        /// max(header+data, mtu) bytes — padding fills up to mtu, never truncates.
+        #[test]
+        fn prop_mtu_padded_roundtrips_and_sizes(
+            data in proptest::collection::vec(any::<u8>(), 0..512),
+            n in 1usize..16,
+            mtu in 1usize..2048,
+        ) {
+            let attack = MtuFragmentationAttack::mtu_padded(&data, n, mtu);
+            let mut re = Vec::new();
+            for frag in &attack.fragments {
+                let frame = frag.to_crypto_frame_bytes();
+                let (_off, d) = parse_crypto_frame(&frame).unwrap();
+                let header = 1 + crate::quic_cid::quic_varint(frag.offset).len()
+                    + crate::quic_cid::quic_varint(frag.data.len() as u64).len();
+                prop_assert_eq!(frame.len(), (header + frag.data.len()).max(mtu));
+                re.extend_from_slice(&d);
+            }
+            prop_assert_eq!(re, data);
+        }
+
+        /// reverse-order: stored last-first, but sorting by offset recovers the
+        /// exact input.
+        #[test]
+        fn prop_reverse_order_roundtrips_when_sorted(
+            data in proptest::collection::vec(any::<u8>(), 0..512),
+            chunk in 1usize..256,
+        ) {
+            let attack = MtuFragmentationAttack::reverse_order(&data, chunk);
+            // Stored offsets are non-increasing (reversed).
+            for w in attack.fragments.windows(2) {
+                prop_assert!(w[0].offset >= w[1].offset);
+            }
+            let mut frags = attack.fragments.clone();
+            frags.sort_by_key(|f| f.offset);
+            let re: Vec<u8> = frags.iter().flat_map(|f| f.data.iter().copied()).collect();
+            prop_assert_eq!(re, data);
+        }
+
+        /// The CRYPTO frame encoder is faithful for any offset and data: parsing
+        /// it back yields exactly what went in.
+        #[test]
+        fn prop_crypto_frame_is_faithful(
+            // QUIC varints encode 0..2^62-1 (RFC 9000 §16); offsets are byte
+            // positions in a TLS record and never approach that ceiling, but the
+            // domain bound documents the encoder's valid range.
+            offset in 0u64..(1u64 << 62),
+            data in proptest::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let frag = QuicCryptoFragment { offset, data: data.clone(), pad_to_mtu: false, mtu: 1500 };
+            let (off, d) = parse_crypto_frame(&frag.to_crypto_frame_bytes()).unwrap();
+            prop_assert_eq!(off, offset);
+            prop_assert_eq!(d, data);
+        }
+
+        /// duplicate-fragment never panics for any input pair, always emits two
+        /// offset-0 fragments, and the duplicate is truncated to the legit length.
+        #[test]
+        fn prop_duplicate_fragment_invariants(
+            legit in proptest::collection::vec(any::<u8>(), 0..256),
+            evil in proptest::collection::vec(any::<u8>(), 0..256),
+        ) {
+            let attack = MtuFragmentationAttack::duplicate_fragment(&legit, &evil);
+            prop_assert_eq!(attack.fragments.len(), 2);
+            prop_assert_eq!(attack.fragments[0].offset, 0);
+            prop_assert_eq!(attack.fragments[1].offset, 0);
+            prop_assert_eq!(attack.fragments[1].data.len(), legit.len().min(evil.len()));
+        }
     }
 }

@@ -25,6 +25,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+mod common;
+
 /// Spin up the synthetic ModSec-emulator on a random loopback port.
 /// Returns the bound address + a request counter. Caller owns the
 /// counter so tests can assert "the scan fired N requests".
@@ -83,21 +85,7 @@ async fn spawn_mock_modsec() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
         }
     });
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     (addr, counter)
 }
@@ -572,6 +560,282 @@ async fn mock_modsec_uncompressed_sqli_body_is_blocked() {
         403,
         "uncompressed SQLi body MUST be blocked by the mock"
     );
+}
+
+/// End-to-end `wafrift harvest`: a corpus bypass is re-verified against
+/// the live mock and turned into a review-ready report carrying the
+/// payload + live 200 proof. Pins the whole harvest pipeline (load →
+/// dedupe → re-verify across delivery shapes → write report) through the
+/// real binary, not just the unit-level helpers.
+#[tokio::test(flavor = "current_thread")]
+async fn harvest_writes_verified_report_for_corpus_bypass() {
+    use std::process::Command;
+
+    // `1 OR 1=1 --` is oracle-valid SQL. Against the mock it is BLOCKED in
+    // the form (` or 1=1`) and query (`or%201`) delivery shapes but PASSES
+    // as text/plain (the content-type-lying bypass — the raw scan only
+    // catches <script/${jndi}//etc/passwd). harvest must try the shapes,
+    // find raw_body works, re-verify it live, and write the report.
+    let (addr, _counter) = spawn_mock_modsec().await;
+    let base_url = format!("http://{addr}");
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wafrift-harvest-e2e-{}-{stamp}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let corpus_path = dir.join("corpus.json");
+    let out_dir = dir.join("reports");
+
+    {
+        let mut corpus = wafrift_evolution::rule_corpus::RuleBypassCorpus::new("e2e");
+        corpus.record_bypass(
+            "cf:?:?",
+            "1 OR 1=1 --",
+            wafrift_evolution::coverage_feedback::PayloadClass::new("sql"),
+            vec![],
+            0,
+        );
+        corpus.save_atomic(&corpus_path).unwrap();
+    }
+
+    // Run the real binary on the blocking pool so the current-thread
+    // runtime stays free to drive the in-process mock.
+    let out = {
+        let base_url = base_url.clone();
+        let corpus_path = corpus_path.clone();
+        let out_dir = out_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            Command::new(env!("CARGO_BIN_EXE_wafrift"))
+                .args([
+                    "harvest",
+                    "--base-url",
+                    &base_url,
+                    "--corpus",
+                    corpus_path.to_str().unwrap(),
+                    "--out",
+                    out_dir.to_str().unwrap(),
+                    "--i-have-permission",
+                    "e2e-harvest",
+                    "--delay-ms",
+                    "0",
+                ])
+                .output()
+                .expect("run wafrift harvest")
+        })
+        .await
+        .unwrap()
+    };
+
+    assert!(
+        out.status.success(),
+        "harvest must exit 0; status={:?}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let reports: Vec<_> = std::fs::read_dir(&out_dir)
+        .expect("report dir must exist")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .collect();
+    assert_eq!(
+        reports.len(),
+        1,
+        "expected exactly one re-verified report, got {}",
+        reports.len()
+    );
+
+    let content = std::fs::read_to_string(reports[0].path()).unwrap();
+    assert!(
+        content.contains("1 OR 1=1 --"),
+        "report must contain the exact payload"
+    );
+    assert!(
+        content.contains("HTTP 200"),
+        "report must carry the live 200 proof"
+    );
+    assert!(
+        content.contains("\"verified\":true"),
+        "report header must mark it verified"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Run the real `wafrift harvest` binary, writing reports to `out_dir`.
+/// Runs on the blocking pool so the current-thread runtime stays free to
+/// drive the in-process mock. Uses the canonical `--output` flag (the
+/// `harvest_writes_verified_report_for_corpus_bypass` test above keeps
+/// exercising the `--out` alias, so both spellings stay covered).
+async fn run_harvest_bin(
+    base_url: &str,
+    corpus_path: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> std::process::Output {
+    use std::process::Command;
+    let base_url = base_url.to_string();
+    let corpus_path = corpus_path.to_path_buf();
+    let out_dir = out_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_wafrift"))
+            .args([
+                "harvest",
+                "--base-url",
+                &base_url,
+                "--corpus",
+                corpus_path.to_str().unwrap(),
+                "--output",
+                out_dir.to_str().unwrap(),
+                "--i-have-permission",
+                "e2e-harvest",
+                "--delay-ms",
+                "0",
+            ])
+            .output()
+            .expect("run wafrift harvest")
+    })
+    .await
+    .unwrap()
+}
+
+fn count_md_reports(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// #290 value proof: when the corpus records the delivery shape, harvest
+/// re-fires that EXACT shape (faithful re-fire) instead of guessing the
+/// standard shapes. Here the recorded shape is a request HEADER —
+/// `build_request_for_delivery` routes it to `/headers` with the payload
+/// in `X-Forwarded-Host`. With the shape recorded, the report's
+/// reproduction is that exact header request; without it, harvest falls
+/// back to the standard shapes and a report (if any) is NEVER a faithful
+/// re-fire. This is the difference between a recorded number and a
+/// reproducible, submittable bounty report.
+#[tokio::test(flavor = "current_thread")]
+async fn harvest_faithful_delivery_re_fires_the_recorded_shape() {
+    use wafrift_evolution::coverage_feedback::PayloadClass;
+    use wafrift_evolution::rule_corpus::RuleBypassCorpus;
+
+    let (addr, _c) = spawn_mock_modsec().await;
+    let base_url = format!("http://{addr}");
+    // SQL payload the mock passes via the header channel (it does not
+    // inspect arbitrary request headers, only path + body). Kept free of
+    // the marker substrings the assertions below key on.
+    let payload = "1 OR 1=1 --";
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "wafrift-harvest-faithful-{}-{stamp}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // (A) corpus WITH the recorded HeaderValue delivery → harvest re-fires
+    //     the EXACT recorded shape: a verified report whose reproduction is
+    //     the header request, marked as a faithful re-fire.
+    let corpus_a = dir.join("corpus_a.json");
+    let out_a = dir.join("reports_a");
+    {
+        let mut c = RuleBypassCorpus::new("e2e");
+        c.record_bypass("cf:?:?", payload, PayloadClass::new("sql"), vec![], 0);
+        assert!(
+            c.set_delivery(
+                "cf:?:?",
+                payload,
+                r#"{"HeaderValue":{"name":"X-Forwarded-Host"}}"#.to_string()
+            ),
+            "set_delivery must find the just-recorded bypass"
+        );
+        c.save_atomic(&corpus_a).unwrap();
+    }
+    let out = run_harvest_bin(&base_url, &corpus_a, &out_a).await;
+    assert!(
+        out.status.success(),
+        "harvest A must exit 0\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        count_md_reports(&out_a),
+        1,
+        "faithful header-delivery re-fire must reproduce and write one report"
+    );
+    let report_a = first_report(&out_a);
+    assert!(
+        report_a.contains("faithful re-fire"),
+        "report must show the bypass was reproduced via the recorded shape: {report_a}"
+    );
+    assert!(
+        report_a.contains("/headers"),
+        "the reproduction must be the recorded HEADER request (routed to /headers), \
+         not a /post or /get fallback: {report_a}"
+    );
+    assert!(
+        report_a.contains("\"verified\":true"),
+        "report must be marked verified"
+    );
+    assert!(
+        report_a.contains(payload),
+        "report must carry the exact payload"
+    );
+
+    // (B) SAME bypass, NO recorded delivery → harvest can only guess the
+    //     standard shapes. Whatever it reports, it is NEVER a faithful
+    //     re-fire of the recorded shape (there was none) and never the
+    //     header channel — proving the recorded shape is what unlocks the
+    //     faithful path.
+    let corpus_b = dir.join("corpus_b.json");
+    let out_b = dir.join("reports_b");
+    {
+        let mut c = RuleBypassCorpus::new("e2e");
+        c.record_bypass("cf:?:?", payload, PayloadClass::new("sql"), vec![], 0);
+        c.save_atomic(&corpus_b).unwrap();
+    }
+    let out = run_harvest_bin(&base_url, &corpus_b, &out_b).await;
+    assert!(out.status.success(), "harvest B must exit 0");
+    for entry in std::fs::read_dir(&out_b)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        if entry.path().extension().is_some_and(|x| x == "md") {
+            let content = std::fs::read_to_string(entry.path()).unwrap();
+            assert!(
+                !content.contains("faithful re-fire"),
+                "without a recorded delivery there is nothing to re-fire faithfully: {content}"
+            );
+            assert!(
+                !content.contains("/headers"),
+                "the blind fallback never reaches the header channel: {content}"
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Read the single `.md` report in `dir`. Panics if there isn't exactly one.
+fn first_report(dir: &std::path::Path) -> String {
+    let mut md: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .collect();
+    assert_eq!(md.len(), 1, "expected exactly one report in {dir:?}");
+    std::fs::read_to_string(md.remove(0).path()).unwrap()
 }
 
 #[tokio::test(flavor = "current_thread")]

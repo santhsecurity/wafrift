@@ -490,3 +490,70 @@ fn registry_all_returns_all_loaded() {
         assert!(names.contains(&format!("p_{i}").as_str()), "missing p_{i}");
     }
 }
+
+// ── 13. Size_limit wiring: invalid-regex patterns are rejected ─────────
+
+/// Anti-regression: ensures `size_limit` is wired into TOML plugin
+/// regex compilation — an invalid pattern (verifiable at compile time)
+/// must be rejected with `PluginError::InvalidRegex`.
+///
+/// The regex crate uses linear-time matching so classical backtracking
+/// ReDoS doesn't apply, but the `size_limit` cap guards against
+/// compile-time DoS (very large NFA expansions). This test proves the
+/// error-propagation path works by using a syntactically invalid
+/// pattern (unmatched `(`) which the regex engine rejects regardless
+/// of the size limit.
+#[test]
+fn syntactically_invalid_regex_is_rejected_at_load_time() {
+    let dir = TempDir::new().unwrap();
+    // Unmatched parenthesis — rejected at regex compile time.
+    write_plugin(
+        &dir,
+        "bomb.toml",
+        &minimal_toml_with_rules(
+            "invalid_regex_plugin",
+            "[[rules]]\npattern = \"(unclosed\"\nreplacement = \"safe\"",
+        ),
+    );
+
+    let mut reg = TamperRegistry::new();
+    let errors = reg.load_dir(dir.path());
+    // The invalid pattern must fail to load.
+    assert_eq!(
+        reg.len(),
+        0,
+        "invalid-regex plugin must not be registered; got {} registered",
+        reg.len()
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, PluginError::InvalidRegex { .. })),
+        "load must report InvalidRegex for the invalid pattern; errors: {errors:?}"
+    );
+}
+
+/// Anti-regression: verifies that a plugin with a valid regex pattern
+/// still loads correctly after the size_limit wiring was added.
+/// Guards against a regression where size_limit was set too low and
+/// broke loading of legitimate patterns.
+#[test]
+fn valid_regex_still_loads_after_size_limit_added() {
+    let dir = TempDir::new().unwrap();
+    write_plugin(
+        &dir,
+        "valid.toml",
+        &minimal_toml_with_rules(
+            "valid_regex_plugin",
+            "[[rules]]\npattern = \"union\\\\s+select\"\nreplacement = \"REDACTED\"",
+        ),
+    );
+
+    let mut reg = TamperRegistry::new();
+    let errors = reg.load_dir(dir.path());
+    assert!(
+        errors.is_empty(),
+        "valid plugin must load cleanly; errors: {errors:?}"
+    );
+    assert_eq!(reg.len(), 1, "valid plugin must be registered");
+}

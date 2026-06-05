@@ -1,0 +1,78 @@
+# Tier-B filter-probe battery for `wafrift fingerprint --characterize-filter`.
+#
+# Each [[probe]] is a dangerous attack token paired with a BENIGN TWIN of the
+# SAME byte length whose internal LETTERS are altered so no rule-keyword
+# substring survives, while every NON-letter byte (punctuation / digits /
+# space) is preserved exactly. The differential (token blocked, twin passed)
+# isolates whether the WAF policies the keyword itself — not its shape.
+#
+# This file is DATA, not code: drop in additional [[probe]] rows to extend
+# coverage, or ship your own and pass it with `--filter-battery <PATH>`.
+# The loader fails closed if a twin changes length or a non-letter byte, so a
+# malformed probe can never silently weaken the differential.
+#
+#   class ∈ { xss, sqli, lfi_rfi, rce, protocol, scanner }
+
+# ── XSS: tags, event handlers, schemes ───────────────────────────────────────
+[[probe]]
+token = "<script>"
+benign_twin = "<scrupt>"
+class = "xss"
+
+[[probe]]
+token = "<svg onload="
+benign_twin = "<svq onloxd="
+class = "xss"
+
+[[probe]]
+token = "<img src=x onerror="
+benign_twin = "<imq src=x onerrxr="
+class = "xss"
+
+[[probe]]
+token = "javascript:"
+benign_twin = "javascrupt:"
+class = "xss"
+
+[[probe]]
+token = "onfocus="
+benign_twin = "onfocxs="
+class = "xss"
+
+# ── SQLi: keywords ───────────────────────────────────────────────────────────
+[[probe]]
+token = "union select"
+benign_twin = "uniom selecx"
+class = "sqli"
+
+[[probe]]
+token = "or 1=1--"
+benign_twin = "xr 1=1--"
+class = "sqli"
+
+[[probe]]
+token = "sleep(5)"
+benign_twin = "sleeq(5)"
+class = "sqli"
+
+# ── LFI/RFI: path + wrapper tokens ───────────────────────────────────────────
+[[probe]]
+token = "/etc/passwd"
+benign_twin = "/etc/passwx"
+class = "lfi_rfi"
+
+[[probe]]
+token = "php://filter"
+benign_twin = "phx://filter"
+class = "lfi_rfi"
+
+# ── RCE: shell / eval tokens ─────────────────────────────────────────────────
+[[probe]]
+token = "system("
+benign_twin = "systxm("
+class = "rce"
+
+[[probe]]
+token = ";bash -i"
+benign_twin = ";baxh -i"
+class = "rce"

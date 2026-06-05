@@ -12,8 +12,33 @@
 
 use wafrift_encoding::encoding::Strategy;
 
+/// Translate the legacy `encoding::UrlEncode` form (which is what
+/// evade output emitted pre-Round-29-cohort) into the canonical
+/// `encoding/url/single` selector. Operators copy-pasting from
+/// output into `--only` historically hit "unknown selector"
+/// errors. Both forms now work; output emits only canonical.
+fn legacy_translate(selectors: Vec<String>) -> Vec<String> {
+    selectors
+        .into_iter()
+        .map(|s| {
+            if let Some(name) = s.strip_prefix("encoding::") {
+                // Map the Strategy debug name back to its canonical
+                // hierarchical path by walking the same table.
+                for &strat in wafrift_encoding::encoding::all_strategies() {
+                    if format!("{strat:?}") == name {
+                        return strategy_path(strat).to_string();
+                    }
+                }
+                s
+            } else {
+                s
+            }
+        })
+        .collect()
+}
+
 /// Canonical hierarchical path for an encoding strategy.
-pub fn strategy_path(strategy: Strategy) -> &'static str {
+pub(crate) fn strategy_path(strategy: Strategy) -> &'static str {
     match strategy {
         Strategy::CaseAlternation => "encoding/case/alternating",
         Strategy::RandomCase => "encoding/case/random",
@@ -53,7 +78,9 @@ pub fn strategy_path(strategy: Strategy) -> &'static str {
         // Invisible / zero-width Unicode evasion family.
         Strategy::TagCharEncode => "encoding/invisible/tag-char",
         Strategy::VariationSelectorPad => "encoding/invisible/variation-selector",
-        Strategy::VariationSelectorSupplementaryPad => "encoding/invisible/variation-selector-supplementary",
+        Strategy::VariationSelectorSupplementaryPad => {
+            "encoding/invisible/variation-selector-supplementary"
+        }
         Strategy::LigatureEncode => "encoding/invisible/ligature",
         Strategy::CircledLetterEncode => "encoding/invisible/circled-letter",
         Strategy::ParenthesizedLetterEncode => "encoding/invisible/parenthesized-letter",
@@ -76,7 +103,7 @@ const KNOWN_FAMILIES: &[&str] = &["encoding", "grammar", "tamper"];
 
 /// Parsed filter built from comma-separated `--only` / `--exclude` lists.
 #[derive(Debug, Default, Clone)]
-pub struct TechniqueFilter {
+pub(crate) struct TechniqueFilter {
     only: Vec<String>,
     exclude: Vec<String>,
 }
@@ -86,8 +113,49 @@ impl TechniqueFilter {
     /// Returns `Err` listing any selectors that don't match a known family
     /// or leaf — fail-fast rather than silently drop.
     pub fn parse(only: &[String], exclude: &[String]) -> Result<Self, String> {
-        let only = split_csv(only);
-        let exclude = split_csv(exclude);
+        // Issue-9 fix (dogfood R29 cohort): the legacy `encoding::Foo`
+        // form was emitted in evade output ahead of the canonical
+        // `encoding/url/single` selector that `--only` accepts.
+        // Operators copy-pasting from output to `--only` hit
+        // "unknown selector" errors. Translate the legacy form here
+        // so both spellings work; output now emits the canonical
+        // form (see helpers.rs change in the same round).
+        let only_raw = legacy_translate(split_csv(only));
+        let exclude_raw = legacy_translate(split_csv(exclude));
+        // R45-I1 fix (dogfood pass 5): warn on duplicates inside
+        // either list. Pre-fix `--only encoding/url/single,encoding/url/single`
+        // silently dedup'd, leaving the operator unable to tell their
+        // fat-fingered list was reduced.
+        let warn_dups = |label: &str, list: &[String]| {
+            let mut seen = std::collections::HashSet::new();
+            let dups: Vec<_> = list
+                .iter()
+                .filter(|s| !seen.insert(s.as_str()))
+                .cloned()
+                .collect();
+            if !dups.is_empty() {
+                eprintln!(
+                    "warn: --{label} list contained duplicate selector(s) — deduplicated: {}",
+                    dups.join(", ")
+                );
+            }
+        };
+        warn_dups("only", &only_raw);
+        warn_dups("exclude", &exclude_raw);
+        let only: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            only_raw
+                .into_iter()
+                .filter(|s| seen.insert(s.clone()))
+                .collect()
+        };
+        let exclude: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            exclude_raw
+                .into_iter()
+                .filter(|s| seen.insert(s.clone()))
+                .collect()
+        };
         let known = all_known_paths();
         let bad: Vec<_> = only
             .iter()
@@ -240,7 +308,7 @@ fn is_known(selector: &str, known: &[&'static str]) -> bool {
 }
 
 /// Render the technique tree as plain text for `wafrift techniques list`.
-pub fn render_tree() -> String {
+pub(crate) fn render_tree() -> String {
     let mut out = String::new();
     out.push_str("grammar                        (grammar-aware payload mutations)\n");
     out.push_str("encoding\n");
@@ -267,6 +335,17 @@ pub fn render_tree() -> String {
     for p in tamper_paths {
         out.push_str("  ");
         out.push_str(&p);
+        out.push('\n');
+    }
+    // Issue-6 fix (dogfood R43 cohort): the HTTP/3 evasion family
+    // was reachable only via `--format json` listing — text-mode
+    // operators had no idea these techniques existed and couldn't
+    // discover them via `--only`. The text section now mirrors
+    // every variant the engine exposes.
+    out.push_str("\nhttp3                          (HTTP/3 + QUIC evasion techniques)\n");
+    for tech in wafrift_http3_evasion::EvasionTechnique::all() {
+        out.push_str("  ");
+        out.push_str(tech.description());
         out.push('\n');
     }
     out

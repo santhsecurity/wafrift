@@ -4,9 +4,11 @@
 //! probe. h2-diff should exit 0 with per-probe `h2_error` populated
 //! — informational, not a build failure.
 
-use std::process::Command;
-
+use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 async fn spawn_h1_mock() -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -30,40 +32,24 @@ async fn spawn_h1_mock() -> std::net::SocketAddr {
             });
         }
     });
-    {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
-    }
+    // R56 pass-21 §12 TESTING: do NOT call wait_for_server() here — it
+    // calls std::thread::sleep inside an async context, which blocks the
+    // tokio runtime thread and causes a race / signal-kill flake. The
+    // caller must call wait_for_server() after block_on returns (outside
+    // the async boundary).
     addr
 }
 
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
-
+// §12 TESTING: `#[serial]` because this test spawns the wafrift binary
+// as a subprocess that does its own multi-threaded H2 probing. When N
+// integration-test binaries fork wafrift concurrently the kernel
+// OOM-killer (or a cgroup memory limit) signal-kills the heaviest
+// subprocess at random; the symptom is exit-code -1 with empty stderr,
+// and the bug looks like a wafrift crash when in fact wafrift never
+// got the chance to run. Serializing the spawn site eliminates the
+// contention without papering over the OOM via retry.
 #[test]
+#[serial]
 fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -71,6 +57,10 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
         .build()
         .unwrap();
     let addr = rt.block_on(spawn_h1_mock());
+    // R56 pass-21 §12 flake-fix: wait_for_server must run OUTSIDE
+    // block_on so its std::thread::sleep doesn't block the tokio
+    // runtime thread (which caused SIGKILL / exit -1 intermittently).
+    common::wait_for_server(addr);
     let (code, stdout, stderr) = wafrift(&[
         "h2-diff",
         &format!("http://{addr}/"),
@@ -106,6 +96,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
 }
 
 #[test]
+#[serial]
 fn h2_diff_against_unreachable_target_exits_inconclusive() {
     let (code, _stdout, _stderr) = wafrift(&[
         "h2-diff",
@@ -136,11 +127,28 @@ fn h2_diff_help_documents_options() {
 }
 
 #[test]
-fn h2_diff_appears_in_main_help_listing() {
+// h2-diff consolidated under `wafrift diff h2` (2026-05). LAW 2: flat
+// alias must keep working forever.
+fn h2_diff_is_grouped_under_diff_with_working_alias() {
+    // 1. The unified `diff` command is discoverable in top-level help.
     let (code, stdout, _) = wafrift(&["--help"]);
     assert_eq!(code, 0);
     assert!(
-        stdout.contains("h2-diff"),
-        "h2-diff must appear in top-level help"
+        stdout.contains("\n  diff"),
+        "`diff` must appear as a top-level command in --help: {stdout}"
+    );
+
+    // 2. Canonical new path exits 0.
+    let (code2, _stdout2, stderr2) = wafrift(&["diff", "h2", "--help"]);
+    assert_eq!(
+        code2, 0,
+        "`wafrift diff h2 --help` must exit 0 — stderr:\n{stderr2}"
+    );
+
+    // 3. Deprecated flat alias still runs (LAW 2 backwards-compat).
+    let (code3, _stdout3, stderr3) = wafrift(&["h2-diff", "--help"]);
+    assert_eq!(
+        code3, 0,
+        "`wafrift h2-diff --help` must still exit 0 — stderr:\n{stderr3}"
     );
 }

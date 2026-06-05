@@ -88,7 +88,7 @@ pub fn analyze_calibration(status: u16, body: &[u8]) -> CalibrationResult {
         return CalibrationResult::Uncertain;
     }
 
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(4096)]).to_ascii_lowercase();
+    let body_str = String::from_utf8_lossy(&body[..body.len().min(crate::BLOCK_SCAN_BODY_WINDOW)]).to_ascii_lowercase();
     let waf_indicators = [
         "blocked",
         "firewall",
@@ -169,5 +169,41 @@ mod tests {
     #[test]
     fn calibration_payloads_not_empty() {
         assert!(!CALIBRATION_PAYLOADS.is_empty());
+    }
+
+    /// R65 pass-21 §12 testing-gap: pre-fix the test suite only pinned
+    /// 403 from the documented `403 | 406 | 429 | 503` block-code arm.
+    /// A refactor that accidentally narrowed the match (e.g. dropped
+    /// 429 in a "tidy" pass) would silently regress every rate-limited
+    /// target into the `Uncertain` arm — wafrift would stop applying
+    /// evasion against the very WAFs that throttle the hardest. This
+    /// test pins every code in the arm individually.
+    #[test]
+    fn analyze_406_429_503_each_return_waf_present() {
+        for status in [406u16, 429, 503] {
+            assert_eq!(
+                analyze_calibration(status, b""),
+                CalibrationResult::WafPresent,
+                "status {status} must be WafPresent — block-code contract violation"
+            );
+        }
+    }
+
+    /// Anti-rig boundary pair: 425 (one below 429) and 430 (one above
+    /// 429) must NOT be WafPresent — confirms the match is the exact
+    /// documented set, not a range. Catches a future refactor that
+    /// switches to `(403..=503).contains(&status)`.
+    #[test]
+    fn analyze_status_off_by_one_around_429_is_not_waf() {
+        assert_ne!(
+            analyze_calibration(425, b""),
+            CalibrationResult::WafPresent,
+            "425 must not trigger WafPresent — boundary anti-rig"
+        );
+        assert_ne!(
+            analyze_calibration(430, b""),
+            CalibrationResult::WafPresent,
+            "430 must not trigger WafPresent — boundary anti-rig"
+        );
     }
 }

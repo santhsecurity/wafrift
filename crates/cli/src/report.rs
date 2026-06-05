@@ -10,18 +10,18 @@
 //! shot — no manual transcription.
 
 use clap::Args;
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use wafrift_types::glob_match;
 
 use crate::helpers::shell_single_quote;
 use crate::raw_request::RawRequest;
 
 #[derive(Args, Debug)]
-pub struct ReportArgs {
+pub(crate) struct ReportArgs {
     /// Path to the proxy gene bank JSON. Repeatable: pass `--proxy-bank a.json
     /// --proxy-bank b.json` to merge multiple banks (engagement teams running
     /// several wafrift-proxies). Hosts are unioned; per-host `proven_winners` /
@@ -175,26 +175,161 @@ struct PersistedGeneBank {
     hosts: HashMap<String, PersistedHostState>,
 }
 
-pub fn run_report(args: ReportArgs, quiet: bool) -> ExitCode {
-    let path = match resolve_path(args.proxy_bank.clone()) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("error: {msg}. Fix: pass --proxy-bank with a valid path, or ensure ~/.wafrift/gene-bank.json exists.");
-            return ExitCode::from(1);
+/// Union two banks: `dst` is mutated in place with the host union from `src`.
+/// Per host: `proven_winners` and blocklisted are union-merged (preserving
+/// dst's order, then appending unseen entries from src). The first non-null
+/// `waf_name` wins. Schema becomes max(dst, src).
+fn merge_banks(dst: &mut PersistedGeneBank, src: PersistedGeneBank) {
+    dst.schema = dst.schema.max(src.schema);
+    for (host, src_state) in src.hosts {
+        let entry = dst.hosts.entry(host).or_default();
+        for w in src_state.proven_winners {
+            if !entry.proven_winners.contains(&w) {
+                entry.proven_winners.push(w);
+            }
         }
-    };
-    let raw = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: read {}: {e}. Fix: verify the file path and permissions.", path.display());
-            return ExitCode::from(1);
+        for b in src_state.blocklisted {
+            if !entry.blocklisted.contains(&b) {
+                entry.blocklisted.push(b);
+            }
         }
-    };
-    let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("error: parse gene bank at {}: {e}. Fix: verify the file contains valid JSON.", path.display());
-            return ExitCode::from(1);
+        if entry.waf_name.is_none() {
+            entry.waf_name = src_state.waf_name;
+        }
+        // Bypass findings are uniqued on (variant, payload) — same
+        // bypass surfaced by two scan runs against the same host
+        // shouldn't double in the report. Order preserves dst-first
+        // so the most-recently-ingested run wins display position
+        // for new findings.
+        for f in src_state.bypass_findings {
+            let already = entry
+                .bypass_findings
+                .iter()
+                .any(|e| e.variant == f.variant && e.payload == f.payload);
+            if !already {
+                entry.bypass_findings.push(f);
+            }
+        }
+    }
+}
+
+/// Reduce a target URL to a bare host (the gene-bank/report key).
+fn host_from_target(target: &str) -> String {
+    // Delegate to the shared transport extractor — it handles
+    // IPv6 brackets correctly. Pre-fix the local naive
+    // rsplit_once(':') split `[::1]` on the LAST `:` of the
+    // address itself, yielding `[:` instead of `[::1]`. Report
+    // aggregation against an IPv6-target scan was effectively
+    // broken (host-keyed buckets used the mangled string).
+    wafrift_transport::host_from_url(target).unwrap_or_else(|| "unknown-host".to_string())
+}
+
+/// Parse a `wafrift scan --format json` blob into the same host-keyed
+/// model the proxy gene bank uses, so both sources flow through the
+/// identical render path. Accepts the bare `scan` object or the
+/// `--report-layers` wrapper that nests it under `"scan"`.
+fn ingest_scan_json(raw: &str, src: &str) -> Result<PersistedGeneBank, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("parse scan JSON from {src}: {e}"))?;
+    let scan = v.get("scan").filter(|s| s.is_object()).unwrap_or(&v);
+
+    let target = scan
+        .get("target")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!("{src}: not a wafrift scan JSON (no `target` field) — did you pipe `scan --format json`?")
+        })?;
+    let host = host_from_target(target);
+
+    let mut techniques: Vec<String> = Vec::new();
+    let mut bypass_findings: Vec<BypassFinding> = Vec::new();
+    if let Some(arr) = scan
+        .get("bypass_variants")
+        .and_then(serde_json::Value::as_array)
+    {
+        for bv in arr {
+            if let Some(ts) = bv.get("techniques").and_then(serde_json::Value::as_array) {
+                for t in ts {
+                    if let Some(s) = t.as_str()
+                        && !techniques.iter().any(|x| x == s)
+                    {
+                        techniques.push(s.to_string());
+                    }
+                }
+            }
+            // Preserve the concrete bypass payload + repro_curl —
+            // the previous cut threw these away and the rendered
+            // report only carried the technique class, which made
+            // the pentest deliverable answer "what bypassed?" with
+            // "url+case_swap" instead of the actual exploit string.
+            if let Ok(finding) = serde_json::from_value::<BypassFinding>(bv.clone()) {
+                bypass_findings.push(finding);
+            }
+        }
+    }
+
+    let waf_name = scan
+        .get("waf")
+        .and_then(serde_json::Value::as_str)
+        .filter(|w| !w.is_empty() && !w.eq_ignore_ascii_case("none"))
+        .map(str::to_string);
+
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        host,
+        PersistedHostState {
+            proven_winners: techniques,
+            blocklisted: Vec::new(),
+            waf_name,
+            bypass_findings,
+        },
+    );
+    Ok(PersistedGeneBank { schema: 1, hosts })
+}
+
+pub(crate) fn run_report(args: ReportArgs) -> ExitCode {
+    let has_scan_src = !args.scan_json.is_empty() || args.scan_stdin;
+    let mut merged = PersistedGeneBank::default();
+
+    // ── scan JSON sources ──
+    if args.scan_stdin {
+        // Bounded read: an unbounded stdin().read_to_string() would OOM
+        // on `wafrift report --scan-stdin < /dev/zero`. Scan JSON files
+        // are compact (kilobytes); 64 MiB is the same cap used for gene
+        // banks and comfortably covers any legitimate scan output.
+        let raw = match crate::safe_body::read_bounded_text_stdin(
+            crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                return crate::helpers::input_error(format!("read scan JSON from stdin: {e}"));
+            }
+        };
+        match ingest_scan_json(&raw, "stdin") {
+            Ok(b) => merge_banks(&mut merged, b),
+            Err(e) => {
+                return crate::helpers::input_error(e);
+            }
+        }
+    }
+    for path in &args.scan_json {
+        // Bounded read: operator-supplied paths may resolve to /dev/zero
+        // or a hostile symlink pointing at a multi-GB file. 64 MiB cap
+        // matches the gene-bank cap and fits any legitimate scan output.
+        let raw = match crate::safe_body::read_bounded_text_file(
+            path,
+            crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                return crate::helpers::input_error(format!("read {}: {e}", path.display()));
+            }
+        };
+        match ingest_scan_json(&raw, &path.display().to_string()) {
+            Ok(b) => merge_banks(&mut merged, b),
+            Err(e) => {
+                return crate::helpers::input_error(e);
+            }
         }
     }
 
@@ -208,40 +343,47 @@ pub fn run_report(args: ReportArgs, quiet: bool) -> ExitCode {
         let paths = match resolve_paths(&args.proxy_bank) {
             Ok(p) => p,
             Err(msg) => {
-                eprintln!("error: {msg}");
-                return ExitCode::from(1);
+                return crate::helpers::input_error(msg);
             }
         };
         for path in &paths {
-            let raw = match fs::read_to_string(path) {
-                Ok(s) => s,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    if has_scan_src {
-                        // Scan data already loaded; a missing default
-                        // bank is not an error in that mode.
-                        continue;
-                    }
-                    eprintln!(
-                        "error: gene bank not found: {}\n\n\
-                         hint: the gene bank is created automatically by wafrift-proxy.\n\
-                         Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
-                         through it, then re-run `wafrift report`.\n\
-                         Or pass `--scan-json <file>` / `--scan-stdin` to report from\n\
-                         `wafrift scan --format json` output instead.",
-                        path.display()
-                    );
-                    return ExitCode::from(1);
+            // Check for NotFound before the bounded read so we can
+            // present the practitioner-facing hint message. A metadata()
+            // call does not open the file, so there is no TOCTOU-with-OOM
+            // risk: the subsequent bounded open will fail cleanly if the
+            // path changes between these two calls.
+            if !path.exists() {
+                if has_scan_src {
+                    // Scan data already loaded; a missing default
+                    // bank is not an error in that mode.
+                    continue;
                 }
+                return crate::helpers::input_error(format!(
+                    "gene bank not found: {}\n\n\
+                     hint: the gene bank is created automatically by wafrift-proxy.\n\
+                     Run `wafrift-proxy --listen 127.0.0.1:8080 --mitm` and browse\n\
+                     through it, then re-run `wafrift report`.\n\
+                     Or pass `--scan-json <file>` / `--scan-stdin` to report from\n\
+                     `wafrift scan --format json` output instead.",
+                    path.display()
+                ));
+            }
+            // Bounded read: operator-supplied bank paths may resolve to
+            // /dev/zero or a hostile symlink. The 64 MiB cap is the same
+            // used by proxy gene_bank_io (MAX_GENE_BANK_BYTES) and seed.rs.
+            let raw = match crate::safe_body::read_bounded_text_file(
+                path,
+                crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
+            ) {
+                Ok(s) => s,
                 Err(e) => {
-                    eprintln!("error: read {}: {e}", path.display());
-                    return ExitCode::from(1);
+                    return crate::helpers::input_error(format!("read {}: {e}", path.display()));
                 }
             };
             let bank: PersistedGeneBank = match serde_json::from_str(&raw) {
                 Ok(b) => b,
                 Err(e) => {
-                    eprintln!("error: parse {}: {e}", path.display());
-                    return ExitCode::from(1);
+                    return crate::helpers::input_error(format!("parse {}: {e}", path.display()));
                 }
             };
             merge_banks(&mut merged, bank);
@@ -260,23 +402,16 @@ pub fn run_report(args: ReportArgs, quiet: bool) -> ExitCode {
         .collect();
     hosts.sort_by(|a, b| a.0.cmp(b.0));
 
-    if quiet {
-        let summary: Vec<_> = hosts
-            .iter()
-            .map(|(name, hs)| {
-                json!({
-                    "host": name,
-                    "waf": hs.waf_name,
-                    "proven_winners": hs.proven_winners,
-                    "blocklisted": hs.blocklisted,
-                })
-            })
-            .collect();
-        println!("{}", json!({ "schema_version": 1, "hosts": summary }));
-        return ExitCode::SUCCESS;
-    }
-
-    let md = render_markdown(&bank, &hosts, &args);
+    let body = match args.format.as_str() {
+        "json" => match render_json(&bank, &hosts, &args) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: serialize json: {e}");
+                return ExitCode::from(1);
+            }
+        },
+        _ => render_markdown(&bank, &hosts, &args),
+    };
 
     match args.output.as_ref() {
         Some(p) => match fs::write(p, &body) {
@@ -364,7 +499,22 @@ fn render_markdown(
     ));
 
     if hosts.is_empty() {
-        out.push_str("_No bypasses recorded yet — run wafrift-proxy in front of a target so it can learn._\n");
+        // N14 fix (dogfood R29 cohort): the natural workflow
+        // `wafrift scan ... | wafrift report` produces nothing
+        // useful unless `--scan-stdin` was passed. The empty-report
+        // message now explicitly names that flag so the operator
+        // does not assume the gene bank is broken.
+        out.push_str(
+            "_No bypasses recorded yet._\n\n\
+             Tip: this report only reads the gene bank by default. \
+             To include results from a `wafrift scan` run, pipe its \
+             JSON output via `--scan-stdin` or pass it explicitly:\n\n\
+             ```\n\
+             wafrift scan <URL> --payload '<x>' --format json \\\n  \
+               | wafrift report --scan-stdin\n\
+             ```\n\n\
+             Or `wafrift report --scan-json scan.json`.\n",
+        );
         return out;
     }
 
@@ -386,7 +536,7 @@ fn render_markdown(
     for (name, hs) in hosts {
         out.push_str(&format!("### `{name}`\n\n"));
         if let Some(waf) = &hs.waf_name {
-            out.push_str(&format!("**Identified WAF:** {}\n\n", md_escape(waf)));
+            out.push_str(&format!("**Identified WAF:** {waf}\n\n"));
         }
         out.push_str(&format!(
             "**Bypass count:** {} proven technique(s)\n\n",
@@ -395,14 +545,14 @@ fn render_markdown(
 
         out.push_str("**Working techniques:**\n\n");
         for t in &hs.proven_winners {
-            out.push_str(&format!("- `{}`\n", md_escape(t)));
+            out.push_str(&format!("- `{t}`\n"));
         }
         out.push('\n');
 
         if !hs.blocklisted.is_empty() {
             out.push_str("**Techniques the WAF reliably blocks** (do not use):\n\n");
             for t in &hs.blocklisted {
-                out.push_str(&format!("- `{}`\n", md_escape(t)));
+                out.push_str(&format!("- `{t}`\n"));
             }
             out.push('\n');
         }
@@ -432,7 +582,7 @@ fn render_markdown(
                     } else {
                         f.techniques
                             .iter()
-                            .map(|t| format!("`{}`", md_escape(t)))
+                            .map(|t| format!("`{t}`"))
                             .collect::<Vec<_>>()
                             .join(" → ")
                     }
@@ -490,25 +640,10 @@ fn render_markdown(
 }
 
 fn host_matches(pattern: &str, host: &str) -> bool {
-    // Tiny ASCII glob grammar — `*` matches any run, `?` matches one
-    // byte, case-insensitive literal otherwise. Same semantics as the
-    // proxy's `--only-host` matcher; intentionally duplicated rather
-    // than depending on the proxy crate from the CLI.
+    // Delegates to the canonical O(|p|·|s|) iterative glob matcher in
+    // wafrift-types, shared with the proxy scope filter. The old local
+    // recursive impl was O(|host|^k) — a ReDoS risk in the hot path.
     glob_match(pattern, host)
-}
-
-fn glob_match(pattern: &str, s: &str) -> bool {
-    glob_recurse(pattern.as_bytes(), s.as_bytes())
-}
-
-fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
-    match (p.first(), s.first()) {
-        (None, None) => true,
-        (Some(b'*'), _) => glob_recurse(&p[1..], s) || (!s.is_empty() && glob_recurse(p, &s[1..])),
-        (Some(b'?'), Some(_)) => glob_recurse(&p[1..], &s[1..]),
-        (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) => glob_recurse(&p[1..], &s[1..]),
-        _ => false,
-    }
 }
 
 /// Build the `curl -i …` reproducer for a finding. Mirrors the
@@ -522,24 +657,6 @@ fn glob_recurse(p: &[u8], s: &[u8]) -> bool {
 /// Why a helper instead of inline format! magic: routes through the
 /// SAME `RawRequest`/`to_curl` path the scan engine uses to surface
 /// reproducers, so a fix to one curl-shape rule applies everywhere.
-/// Escape a user-controlled string for safe embedding in a markdown document.
-///
-/// Strips backticks (which would break code fences) and escapes angle
-/// brackets (which GitHub / Notion render as HTML). Both are injection
-/// vectors: a technique name containing triple-backticks closes the fence;
-/// a name containing `<script>` executes in HTML-mode markdown renderers.
-fn md_escape(s: &str) -> String {
-    s.chars()
-        .filter(|c| *c != '`')
-        .map(|c| match c {
-            '<' => "&lt;".to_string(),
-            '>' => "&gt;".to_string(),
-            '&' => "&amp;".to_string(),
-            c => c.to_string(),
-        })
-        .collect()
-}
-
 fn curl_reproducer(target: &str, param: &str, payload: &str) -> String {
     let url = match reqwest::Url::parse(target) {
         Ok(mut url) => {
@@ -657,35 +774,6 @@ mod tests {
     // implementation is now `helpers::shell_single_quote` and the
     // round-trip-through-bash test moved with it. Single source of
     // truth — one fix, every caller benefits.
-
-    #[test]
-    fn shell_escape_roundtrips_through_bash() {
-        // Every printable ASCII character plus some Unicode.
-        let inputs = [
-            "hello world",
-            "it's working",
-            "'\''",
-            "foo;bar|baz",
-            "$(danger)",
-            "`backtick`",
-            "emoji: 🚀",
-        ];
-        for raw in &inputs {
-            let escaped = shell_escape(raw);
-            let script = format!("echo '{}'", escaped);
-            let output = std::process::Command::new("bash")
-                .arg("-c")
-                .arg(&script)
-                .output()
-                .expect("bash must be available");
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert_eq!(
-                stdout.trim_end(),
-                *raw,
-                "shell_escape round-trip failed for {raw:?}: script={script:?}"
-            );
-        }
-    }
 
     #[test]
     fn host_matches_glob_pattern() {
@@ -1363,5 +1451,74 @@ mod tests {
         assert_eq!(bf.len(), 2);
         assert_eq!(bf[0]["payload"], "%27%20OR%201%3D1--");
         assert_eq!(bf[1]["payload"], "/**/UNION/**/SELECT");
+    }
+
+    // ── OOM / bounded-read boundary tests ────────────────────────────────────
+
+    /// Anti-rig: scan_json bounded read must reject a file at (cap + 1) bytes
+    /// and accept one at exactly cap bytes. Pins the OOM defence added in the
+    /// audit pass that replaced unbounded fs::read_to_string.
+    ///
+    /// We use a small synthetic cap (4 KiB) so the test doesn't allocate
+    /// GENE_BANK_FILE_MAX_BYTES (64 MiB) of RAM. The boundary predicate
+    /// is identical regardless of cap value.
+    #[test]
+    fn scan_json_bounded_read_cap_boundary() {
+        use std::io::Write;
+        let cap: usize = 4 * 1024; // 4 KiB synthetic cap for test speed
+
+        let dir = std::env::temp_dir();
+        let at_cap_path = dir.join("wafrift_test_at_cap.bin");
+        let over_cap_path = dir.join("wafrift_test_over_cap.bin");
+
+        // File at exactly the cap — must succeed.
+        {
+            let mut f = std::fs::File::create(&at_cap_path).expect("create at-cap");
+            f.write_all(&vec![b' '; cap]).expect("write at-cap");
+        }
+        let result_at = crate::safe_body::read_bounded_text_file(&at_cap_path, cap);
+        let _ = std::fs::remove_file(&at_cap_path);
+        assert!(
+            result_at.is_ok(),
+            "file exactly at cap must be accepted, got: {result_at:?}"
+        );
+
+        // File one byte over the cap — must be rejected (Overrun).
+        {
+            let mut f = std::fs::File::create(&over_cap_path).expect("create over-cap");
+            f.write_all(&vec![b' '; cap + 1]).expect("write over-cap");
+        }
+        let result_over = crate::safe_body::read_bounded_text_file(&over_cap_path, cap);
+        let _ = std::fs::remove_file(&over_cap_path);
+        assert!(
+            matches!(
+                result_over,
+                Err(crate::safe_body::ReadError::Overrun { .. })
+            ),
+            "file one byte past cap must be Overrun, got: {result_over:?}"
+        );
+    }
+
+    /// proxy_bank path that does not exist → graceful error, not panic.
+    #[test]
+    fn proxy_bank_missing_file_exits_cleanly() {
+        let missing = std::env::temp_dir().join("wafrift_test_no_such_bank.json");
+        // Ensure it really does not exist.
+        let _ = std::fs::remove_file(&missing);
+        assert!(
+            !missing.exists(),
+            "precondition: file must not exist for this test"
+        );
+        // The production path does `if !path.exists() { … }` before the
+        // bounded read. Verify read_bounded_text_file returns a Transport
+        // error so our exists()-before-open ordering is correct.
+        let result = crate::safe_body::read_bounded_text_file(
+            &missing,
+            crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
+        );
+        assert!(
+            matches!(result, Err(crate::safe_body::ReadError::Transport(_))),
+            "missing file must be Transport error, got: {result:?}"
+        );
     }
 }

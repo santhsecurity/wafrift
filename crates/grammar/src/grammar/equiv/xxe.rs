@@ -214,7 +214,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_exfils(payload, payload) {
         return out;
@@ -236,10 +236,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         if rng.chance(3, 5)
             && let Some(n) = rw_rename_entity(&s, &mut rng)
         {
@@ -304,14 +304,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 40,
-            verify: true,
-            vary_delivery: true,
-            param: "xml".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 40, "xml")
     }
 
     const ATK: &str = r#"<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><r>&xxe;</r>"#;

@@ -30,6 +30,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
+use wafrift_transport::egress_pool::EgressPool;
 use wafrift_types::Request;
 use wafrift_wafmodel::{
     Alphabet, BoundedExhaustiveEq, FnOracle, LearnReport, Outcome, WafModelError, WafOracle,
@@ -38,7 +39,7 @@ use wafrift_wafmodel::{
 
 /// Arguments for `wafrift model-evade`.
 #[derive(Args, Debug)]
-pub struct ModelEvadeArgs {
+pub(crate) struct ModelEvadeArgs {
     /// Target URL — the WAF-protected endpoint to decompile and bypass.
     /// Membership queries are sent as GET requests with the candidate
     /// payload in the `--param` query parameter.
@@ -54,10 +55,13 @@ pub struct ModelEvadeArgs {
     #[arg(long, default_value = "sqli", value_parser = ["sqli", "xss", "all"])]
     pub class: String,
 
-    /// Maximum number of live membership queries to spend on the L*
-    /// learning phase. Each query = one HTTP request to the target.
-    /// Larger budgets produce more precise models; smaller budgets
-    /// produce coarser approximations (still useful — the miner works
+    /// Per-phase cap on live membership queries (each query = one HTTP
+    /// request to the target). It bounds BOTH the L* membership phase AND
+    /// each equivalence round's query count, so the total live requests are
+    /// roughly `budget × (1 + equivalence_rounds)` — typically 1–3 rounds,
+    /// i.e. budget back-of-envelope ×2–4. Budget against a target's rate cap
+    /// accordingly. Larger budgets produce more precise models; smaller
+    /// budgets produce coarser approximations (still useful — the miner works
     /// with whatever boundary is learned). Budget-exhaustion is not an
     /// error: the command reports whatever bypasses the partial model
     /// yields and exits 0.
@@ -106,7 +110,6 @@ pub struct ModelEvadeArgs {
     pub format: String,
 
     // ─── Egress rotation ─────────────────────────────────────────────────────
-
     /// SOCKS5 proxy URL for egress rotation (repeatable).
     #[arg(long = "socks5", value_name = "URL", num_args = 0..)]
     pub egress_socks5: Vec<String>,
@@ -120,15 +123,15 @@ pub struct ModelEvadeArgs {
     pub egress_tailscale_nodes: Vec<String>,
 
     /// Tailscale SOCKS listener address. Default: `127.0.0.1:1055`.
-    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = "127.0.0.1:1055")]
+    #[arg(long = "tailscale-socks-addr", value_name = "ADDR", default_value = crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR)]
     pub egress_tailscale_socks_addr: String,
 
     /// Consecutive challenges before cooling an egress entry. Default: 3.
-    #[arg(long = "egress-challenge-threshold", default_value_t = 3u32)]
+    #[arg(long = "egress-challenge-threshold", default_value_t = wafrift_types::DEFAULT_EGRESS_CHALLENGE_THRESHOLD)]
     pub egress_challenge_threshold: u32,
 
     /// Seconds a cooled egress entry stays out of rotation. Default: 300.
-    #[arg(long = "egress-cooldown-secs", default_value_t = 300u64)]
+    #[arg(long = "egress-cooldown-secs", default_value_t = wafrift_types::DEFAULT_EGRESS_COOLDOWN_SECS)]
     pub egress_cooldown_secs: u64,
 }
 
@@ -191,10 +194,8 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
             // Missing before: v, g, m, d (needed by <svg, <img, onload=).
             Alphabet::new(
                 vec![
-                    b'<', b'>', b'/', b'"', b'\'', b' ', b'=', b'(', b')',
-                    b's', b'c', b'r', b'i', b'p', b't', b'o', b'n', b'l',
-                    b'a', b'e',
-                    b'v', b'g', b'm', b'd',
+                    b'<', b'>', b'/', b'"', b'\'', b' ', b'=', b'(', b')', b's', b'c', b'r', b'i',
+                    b'p', b't', b'o', b'n', b'l', b'a', b'e', b'v', b'g', b'm', b'd',
                 ],
                 b'A',
             ),
@@ -213,8 +214,7 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
             let (xss_alpha, xss_needles) = class_config("xss");
             sqli_needles.extend(xss_needles);
             // Merge alphabets: combine distinguished bytes from both classes.
-            let mut combined: Vec<u8> =
-                sqli_alpha.raw_symbols()[..sqli_alpha.catch_all()].to_vec();
+            let mut combined: Vec<u8> = sqli_alpha.raw_symbols()[..sqli_alpha.catch_all()].to_vec();
             for &b in &xss_alpha.raw_symbols()[..xss_alpha.catch_all()] {
                 if !combined.contains(&b) {
                     combined.push(b);
@@ -230,28 +230,81 @@ pub(crate) fn class_config(class: &str) -> (Alphabet, Vec<&'static [u8]>) {
 /// Build a WAF oracle backed by async reqwest, run via the provided tokio
 /// runtime handle.
 ///
-/// The oracle sends `GET <target>?<param>=<payload>` for each membership
-/// query. `2xx` status → `Pass`; anything else → `Block`.
+/// The oracle sends `GET <target>?<param>=<payload>` for each membership query
+/// and classifies the response with [`wafrift_liveoracle::verdict`]: a 2xx without a
+/// block-page signature is `Pass`; a block status OR a 2xx block page is
+/// `Block`; a rate-limit / gateway transient (`429`/`502`/`503`/`504`) is
+/// retried with backoff and, if persistent, surfaced as an inconclusive error
+/// rather than a false `Block`.
 ///
 /// The oracle is `FnOracle<impl FnMut(...) -> Result<Outcome>>` — it
 /// implements `WafOracle` exactly as the trait requires.
-fn build_http_oracle(
+///
+/// When `egress_pool` is `Some`, the next available egress entry for the
+/// target host is applied to the reqwest client — identical to the pattern
+/// used by `bench-waf` (R52 pass-14 I1). Pre-fix, the pool was parsed and
+/// stored in `ModelEvadeArgs` but never applied here, so every
+/// `--socks5 / --http-proxy / --tailscale-exit-node` flag was silently
+/// discarded and all oracle queries routed direct.
+pub(crate) fn build_http_oracle(
     rt: Arc<tokio::runtime::Runtime>,
     target_url: String,
     param: String,
     insecure: bool,
+    egress_pool: Option<Arc<EgressPool>>,
+    block_signatures: Option<Vec<String>>,
 ) -> Result<impl WafOracle, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(insecure)
-        .timeout(std::time::Duration::from_secs(10))
-        .user_agent("wafrift/model-evade (authorized security research)")
-        .redirect(reqwest::redirect::Policy::none())
+    // Resolve the host for egress selection before consuming target_url.
+    let target_host = reqwest::Url::parse(&target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
+
+    // Use the canonical transport builder so insecure / timeout / UA are
+    // consistent with every other wafrift HTTP client.
+    let mut client_builder = wafrift_transport::base_client_builder(
+        10, // 10 s oracle timeout — reasonable for membership queries
+        insecure,
+        Some("wafrift/model-evade (authorized security research)"),
+    )
+    .redirect(reqwest::redirect::Policy::none());
+
+    // Apply egress entry when a pool is supplied (--socks5 / --http-proxy /
+    // --tailscale-exit-node). On pool-cooled error we fall back to direct to
+    // avoid killing the entire L* session on a transient egress hiccup.
+    if let Some(ref pool) = egress_pool {
+        match pool.next_for(&target_host) {
+            Ok(entry) => client_builder = entry.apply_to_builder(client_builder),
+            Err(e) => {
+                eprintln!(
+                    "{} egress pool error for model-evade oracle (routing direct): {e}",
+                    "warn:".yellow()
+                );
+            }
+        }
+    }
+
+    let client = client_builder
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
     let client = Arc::new(client);
     let target_url = Arc::new(target_url);
     let param = Arc::new(param);
+    // Tier-B block-page signatures, loaded once: a 2xx body carrying one of
+    // these is a block served with a success status (not a pass). A
+    // `--block-signatures` file overrides the embedded default.
+    let block_signatures =
+        Arc::new(block_signatures.unwrap_or_else(wafrift_liveoracle::verdict::default_block_signatures));
+
+    // Self-calibration: learn THIS target's block signal from controls so the
+    // oracle works even against a WAF whose block shape no signature lists. If
+    // the target does not distinguish a benign control from the malicious ones,
+    // calibration declines (None) and we fall back to the static classifier.
+    let calibration = Arc::new(calibrate_target(&rt, &client, &target_url, &param));
+    if let Some(c) = calibration.as_ref() {
+        eprintln!("{} oracle self-calibration — {}", "info:".cyan(), c.describe());
+    }
 
     Ok(FnOracle::new(move |req: &Request| {
         // Extract payload bytes from the wafrift Request body (the learner
@@ -267,21 +320,104 @@ fn build_http_oracle(
             urlencoding::encode(&payload)
         );
 
-        let client2 = client.clone();
-        let probe_url_clone = probe_url.clone();
-        let resp = rt
-            .block_on(async move { client2.get(&probe_url_clone).send().await })
-            .map_err(|e| WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}")))?;
+        // Each membership query is one live probe; the retry loop may re-send.
+        let probe = || send_live_probe(&rt, &client, &probe_url, false);
 
-        // 2xx = WAF let it through (Pass). Everything else = Block.
-        // 429 (rate-limit) is Block — the payload was rejected.
-        let outcome = if resp.status().is_success() {
-            Outcome::Pass
-        } else {
-            Outcome::Block
+        // Compose the verdict: a rate-limit / gateway transient first (a
+        // deferral, never a block), then the LEARNED per-target discriminator,
+        // then the static signature/status classifier as the always-available
+        // fallback — so an unknown WAF is handled by calibration and a known
+        // one by signatures, with neither able to fabricate a verdict.
+        let classify = |r: &wafrift_liveoracle::verdict::ProbeResponse| {
+            use wafrift_liveoracle::verdict::LiveVerdict;
+            if matches!(r.status, 429 | 502 | 503 | 504) {
+                return LiveVerdict::Transient;
+            }
+            if let Some(cal) = calibration.as_ref() {
+                if let Some(v) = cal.classify(r.status, &r.body) {
+                    return v;
+                }
+            }
+            wafrift_liveoracle::verdict::classify_live_response(r.status, &r.body, &block_signatures)
         };
-        Ok(outcome)
+
+        wafrift_liveoracle::verdict::classify_with_retry(
+            probe,
+            classify,
+            wafrift_liveoracle::verdict::MAX_TRANSIENT_RETRIES,
+            |d| std::thread::sleep(d),
+        )
     }))
+}
+
+/// Send one live probe and capture status, `Retry-After`, and a bounded body.
+/// The body is read for any 2xx (block-page detection) and, when
+/// `read_body_all_statuses` is set (calibration), for every status so block and
+/// allow baselines can be compared by content.
+fn send_live_probe(
+    rt: &Arc<tokio::runtime::Runtime>,
+    client: &Arc<reqwest::Client>,
+    probe_url: &str,
+    read_body_all_statuses: bool,
+) -> std::result::Result<wafrift_liveoracle::verdict::ProbeResponse, WafModelError> {
+    let client = client.clone();
+    let probe_url = probe_url.to_string();
+    rt.block_on(async move {
+        let resp = client
+            .get(&probe_url)
+            .send()
+            .await
+            .map_err(|e| WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}")))?;
+        let status = resp.status().as_u16();
+        let retry_after_secs = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.trim().parse::<u64>().ok());
+        let body = if read_body_all_statuses || (200..300).contains(&status) {
+            crate::safe_body::read_bounded(resp, wafrift_liveoracle::verdict::BLOCK_SCAN_BYTES)
+                .await
+                .map_err(|e| WafModelError::Oracle(format!("reading response body: {e}")))?
+        } else {
+            Vec::new()
+        };
+        Ok(wafrift_liveoracle::verdict::ProbeResponse { status, retry_after_secs, body })
+    })
+}
+
+/// Run the calibration phase: probe a benign control and the malicious controls,
+/// then derive a per-target discriminator. `None` when the target cannot be
+/// calibrated (no WAF, or it blocks even the benign control) — the caller then
+/// relies on the static classifier.
+fn calibrate_target(
+    rt: &Arc<tokio::runtime::Runtime>,
+    client: &Arc<reqwest::Client>,
+    target_url: &Arc<String>,
+    param: &Arc<String>,
+) -> Option<wafrift_liveoracle::calibration::Calibration> {
+    let probe = |value: &str| -> Option<wafrift_liveoracle::calibration::Baseline> {
+        let url = format!(
+            "{}?{}={}",
+            target_url.as_str(),
+            param.as_str(),
+            urlencoding::encode(value)
+        );
+        let r = send_live_probe(rt, client, &url, true).ok()?;
+        Some(wafrift_liveoracle::calibration::Baseline {
+            status: r.status,
+            body: r.body,
+            control: value.as_bytes().to_vec(),
+        })
+    };
+    let benign = probe(wafrift_liveoracle::calibration::benign_control())?;
+    let malicious: Vec<_> = wafrift_liveoracle::calibration::malicious_controls()
+        .iter()
+        .filter_map(|m| probe(m))
+        .collect();
+    if malicious.is_empty() {
+        return None;
+    }
+    wafrift_liveoracle::calibration::calibrate(benign, malicious)
 }
 
 // ── Permission gate ────────────────────────────────────────────────────────
@@ -398,7 +534,7 @@ fn accept_all_sfa() -> wafrift_wafmodel::Sfa {
 // ── Main entry point ───────────────────────────────────────────────────────
 
 /// Run `wafrift model-evade`.
-pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
+pub(crate) fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     args.target_url = crate::helpers::normalize_target_url(&args.target_url);
     // ── Step 0: permission gate ──────────────────────────────────────
     if let Err(msg) = check_permission(&args.target_url, &args.i_have_permission) {
@@ -434,9 +570,67 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     // ── Step 1: build alphabet + attack grammar ──────────────────────
     let (alpha, needles) = class_config(&args.class);
 
+    // ── Step 1b: build egress pool (--socks5 / --http-proxy / --tailscale) ─
+    // R52-style wiring (CLAUDE.md §9 WIRING): pre-fix these args were parsed,
+    // stored, and silently discarded — every oracle query routed direct.
+    let want_egress = !args.egress_socks5.is_empty()
+        || !args.egress_http_proxy.is_empty()
+        || !args.egress_tailscale_nodes.is_empty();
+    let egress_pool: Option<Arc<EgressPool>> = if want_egress {
+        let mut pool_builder = EgressPool::builder();
+        if !args.egress_socks5.is_empty() {
+            pool_builder = match pool_builder.socks5_str(args.egress_socks5.clone()) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("{} --socks5: {e}", "error:".red().bold());
+                    return ExitCode::from(2);
+                }
+            };
+        }
+        if !args.egress_http_proxy.is_empty() {
+            pool_builder = match pool_builder.http_proxy_str(args.egress_http_proxy.clone()) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("{} --http-proxy: {e}", "error:".red().bold());
+                    return ExitCode::from(2);
+                }
+            };
+        }
+        if !args.egress_tailscale_nodes.is_empty() {
+            let socks_addr = if args.egress_tailscale_socks_addr.is_empty() {
+                None
+            } else {
+                Some(args.egress_tailscale_socks_addr.clone())
+            };
+            pool_builder =
+                pool_builder.tailscale_nodes(args.egress_tailscale_nodes.clone(), socks_addr);
+        }
+        match pool_builder.build() {
+            Ok(p) => Some(Arc::new(p)),
+            Err(e) => {
+                eprintln!("{} egress pool: {e}", "error:".red().bold());
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
+
     // ── Step 2: learn the WAF's decision boundary ────────────────────
     if !json_mode {
-        println!("{}", "Phase 1: Learning WAF decision boundary (L*)...".bold());
+        println!(
+            "{}",
+            "Phase 1: Learning WAF decision boundary (L*)...".bold()
+        );
+        if egress_pool.is_some() {
+            println!(
+                "  {} egress rotation ON ({} SOCKS5 + {} HTTP proxy + {} Tailscale)",
+                "note:".bold().cyan(),
+                args.egress_socks5.len(),
+                args.egress_http_proxy.len(),
+                args.egress_tailscale_nodes.len(),
+            );
+        }
     }
     let t_learn_start = Instant::now();
 
@@ -446,6 +640,8 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
         args.target_url.clone(),
         args.param.clone(),
         args.insecure,
+        egress_pool.clone(),
+        None, // model-evade uses the embedded default block-page signatures
     ) {
         Ok(o) => o,
         Err(e) => {
@@ -471,10 +667,21 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
     // max_queries caps the EQ oracle's HTTP round-trips per equivalence
     // round. With a 22-symbol sqli alphabet the BFS frontier reaches
     // 22⁵ ≈ 5 M entries at depth 5, capped to 1 M by FRONTIER_CAP —
-    // still 1 M HTTP calls per EQ round without this gate. 500 queries
-    // is more than enough to find a counterexample for any sub-6-state
-    // boundary learned from a budget-50 membership pass.
-    let mut eq = BoundedExhaustiveEq { max_len: 6, max_queries: Some(500) };
+    // still 1 M HTTP calls per EQ round without this gate.
+    //
+    // §13 dogfood round-2 DEFECT 3: tie this cap to `--budget` instead of a
+    // hardcoded 500. EQ-round queries are ALSO live requests to the target;
+    // with the old fixed 500, `--budget 50` still fired ~500+ live requests
+    // (≈10× the stated budget), risking a rate-limit ban on a bounty target.
+    // Tracking the budget keeps total live spend scaling with the operator's
+    // choice (default 500 → eq cap 500, unchanged). A smaller cap merely
+    // yields a coarser model (the EQ search is documented best-effort, never
+    // an error). Total live requests ≈ budget (membership) + budget × eq
+    // rounds — the flag doc spells this out so rate-budgeting is honest.
+    let mut eq = BoundedExhaustiveEq {
+        max_len: 6,
+        max_queries: Some(args.budget),
+    };
     let learn_result: LearnReport =
         match l_star_budgeted(&mut oracle, &build_req, &alpha, &mut eq, args.budget) {
             Ok(r) => {
@@ -518,7 +725,10 @@ pub fn run_model_evade(mut args: ModelEvadeArgs) -> ExitCode {
 
     // ── Step 3: mine bypasses offline ────────────────────────────────
     if !json_mode {
-        println!("{}", "\nPhase 2: Mining bypass candidates (offline)...".bold());
+        println!(
+            "{}",
+            "\nPhase 2: Mining bypass candidates (offline)...".bold()
+        );
     }
     let t_mine_start = Instant::now();
     let grammar = attack_grammar(&alpha, &needles);
@@ -905,7 +1115,10 @@ mod tests {
         assert!(sfa.accepts(b""), "accept-all must accept empty");
         assert!(sfa.accepts(b"union select"), "accept-all must accept sql");
         assert!(sfa.accepts(b"<script>"), "accept-all must accept xss");
-        assert!(sfa.accepts(b"\x00\xff\x7f"), "accept-all must accept binary");
+        assert!(
+            sfa.accepts(b"\x00\xff\x7f"),
+            "accept-all must accept binary"
+        );
     }
 
     // ── oracle integration: FnOracle wrapping ──────────────────────
@@ -960,7 +1173,10 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
+        let mut eq = BoundedExhaustiveEq {
+            max_len: 5,
+            max_queries: None,
+        };
         let report = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 2000).unwrap();
         // Learned model must pass the empty body (benign).
         assert!(report.sfa.accepts(b""), "empty body must pass");
@@ -986,7 +1202,10 @@ mod tests {
             Request::post("https://h/p", bytes.to_vec())
                 .header("Content-Type", "application/x-www-form-urlencoded")
         };
-        let mut eq = BoundedExhaustiveEq { max_len: 5, max_queries: None };
+        let mut eq = BoundedExhaustiveEq {
+            max_len: 5,
+            max_queries: None,
+        };
         // Budget of 1 is too small — must return BudgetExhausted.
         let result = l_star_budgeted(&mut waf, &build, &alpha, &mut eq, 1);
         assert!(

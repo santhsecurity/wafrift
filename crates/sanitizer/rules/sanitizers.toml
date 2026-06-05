@@ -1,0 +1,37 @@
+# Tier-B signatures for client-side HTML sanitizer detection.
+#
+# Each `[[sanitizer]]` entry identifies a known sanitizer library by `markers`
+# (substrings that appear in its shipped/recovered source) and names the config
+# KEYS whose array literals carry the tag allow/deny lists. The extractor reads
+# those arrays out of the recovered source to build the sanitizer's allow/deny
+# model. Extend coverage by adding entries here — never by hardcoding library
+# names in code.
+
+[[sanitizer]]
+kind = "dompurify"
+markers = ["DOMPurify", "dompurify", "removeAllAddedHooks"]
+allowed_tags_keys = ["ALLOWED_TAGS"]
+forbid_tags_keys = ["FORBID_TAGS"]
+forbid_attr_keys = ["FORBID_ATTR"]
+
+[[sanitizer]]
+kind = "sanitize_html"
+markers = ["sanitize-html", "sanitizeHtml", "allowedTags"]
+allowed_tags_keys = ["allowedTags"]
+forbid_tags_keys = []
+forbid_attr_keys = []
+
+[[sanitizer]]
+kind = "js_xss"
+# The `js-xss` library (npm `xss`): `new FilterXSS({ whiteList: {...} })`.
+markers = ["js-xss", "FilterXSS", "whiteList"]
+allowed_tags_keys = ["whiteList"]
+forbid_tags_keys = []
+forbid_attr_keys = []
+
+[[sanitizer]]
+kind = "google_caja"
+markers = ["html_sanitize", "caja"]
+allowed_tags_keys = []
+forbid_tags_keys = []
+forbid_attr_keys = []

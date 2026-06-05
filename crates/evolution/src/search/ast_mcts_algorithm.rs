@@ -204,24 +204,24 @@ impl AstMctsAlgorithm {
         // Deduplicate generated payloads; prefer best_payload candidates first.
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Always include the MCTS-best payload if it produced one.
-        if let Some(ref r) = result {
-            if !r.best_payload.is_empty() && seen.insert(r.best_payload.clone()) {
-                self.eval_counter = self.eval_counter.saturating_add(1);
-                let mut c = self.best.clone();
-                let payload = r.best_payload.clone();
-                set_gene(&mut c, "ast_mcts_payload", &payload);
-                c.lineage = Lineage::mutation(
-                    &self.best,
-                    vec![crate::lineage::MutationOp {
-                        gene_name: "ast_mcts_payload".into(),
-                        from: self.best_payload.clone(),
-                        to: payload.clone(),
-                        operator: "ast_mcts:best_payload".into(),
-                    }],
-                    self.generation,
-                );
-                self.pending.push((self.eval_counter, c));
-            }
+        if let Some(ref r) = result
+            && !r.best_payload.is_empty() && seen.insert(r.best_payload.clone())
+        {
+            self.eval_counter = self.eval_counter.saturating_add(1);
+            let mut c = self.best.clone();
+            let payload = r.best_payload.clone();
+            set_gene(&mut c, "ast_mcts_payload", &payload);
+            c.lineage = Lineage::mutation(
+                &self.best,
+                vec![crate::lineage::MutationOp {
+                    gene_name: "ast_mcts_payload".into(),
+                    from: self.best_payload.clone(),
+                    to: payload.clone(),
+                    operator: "ast_mcts:best_payload".into(),
+                }],
+                self.generation,
+            );
+            self.pending.push((self.eval_counter, c));
         }
 
         // Then include other generated candidates up to n.
@@ -394,7 +394,7 @@ mod tests {
     use rand::SeedableRng;
 
     fn make_rng() -> StdRng {
-        StdRng::seed_from_u64(0xC0FFEE_BABE)
+        StdRng::seed_from_u64(0x00C0_FFEE_BABE)
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         }
 
         // The rule_stats entry for rule 0 must now hold a finite total.
-        for (_rule, (visits, total)) in &alg.rule_stats {
+        for (visits, total) in alg.rule_stats.values() {
             assert!(
                 total.is_finite() || *visits == 0,
                 "rule_stats total must be finite after NaN reset, got {total}"
@@ -625,7 +625,7 @@ mod tests {
             alg.submit_evaluations(vec![(c.id, OracleVerdict::from_bool(false))]);
         }
 
-        for (_rule, (visits, total)) in &alg.rule_stats {
+        for (visits, total) in alg.rule_stats.values() {
             assert!(
                 total.is_finite() || *visits == 0,
                 "rule_stats total must be finite after Inf reset, got {total}"

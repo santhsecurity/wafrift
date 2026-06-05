@@ -4,6 +4,7 @@ use base64::{Engine as _, engine::general_purpose};
 use std::io::Write as _;
 
 use crate::error::EncodeError;
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
 
 /// Result of chunked transfer-encoding split.
 ///
@@ -139,10 +140,10 @@ pub fn parameter_pollute(payload: impl AsRef<[u8]>) -> Result<String, EncodeErro
         // regression-pinned and makes a successful bypass impossible to
         // reproduce (the rest of the evasion pipeline, e.g. the equiv
         // generator, is deterministic-seeded for exactly this reason).
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut h: u64 = FNV_OFFSET_64;
         for &b in payload {
             h ^= u64::from(b);
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            h = h.wrapping_mul(FNV_PRIME_64);
         }
         let decoy: String = (0..8)
             .map(|i| (b'a' + (((h >> (i * 8)) as u8) % 26)) as char)
@@ -166,75 +167,12 @@ pub fn hex_encode(payload: impl AsRef<[u8]>) -> String {
     hex::encode(payload)
 }
 
-/// Encode a single Unicode scalar value to UTF-16 BE bytes.
-fn char_to_utf16be(c: char) -> Vec<u8> {
-    let mut buf = [0u16; 2];
-    let enc = c.encode_utf16(&mut buf);
-    let mut out = Vec::with_capacity(enc.len() * 2);
-    for u in enc {
-        out.push((*u >> 8) as u8);
-        out.push((*u & 0xFF) as u8);
-    }
-    out
-}
-
-/// Modified Base64 for UTF-7 (RFC 2152) — standard alphabet without padding.
-fn modified_base64(bytes: &[u8]) -> String {
-    let mut b64 = general_purpose::STANDARD.encode(bytes);
-    b64.retain(|c| c != '=');
-    b64
-}
-
-/// RFC 2152 direct characters.
-fn is_utf7_direct(ch: char) -> bool {
-    matches!(
-        ch,
-        'A'..='Z'
-            | 'a'..='z'
-            | '0'..='9'
-            | '\''
-            | '('
-            | ')'
-            | ','
-            | '-'
-            | '.'
-            | '/'
-            | ':'
-            | '?'
-    )
-}
-
-/// UTF-7 encoding per RFC 2152.
-///
-/// **Context**: `iis`, `legacy-dotnet` — only safe where the target actually
-/// decodes UTF-7.
-pub fn utf7_encode(payload: &str) -> String {
-    let mut out = String::new();
-    let mut shift_buf: Vec<u8> = Vec::new();
-
-    fn flush_shift(out: &mut String, buf: &mut Vec<u8>) {
-        if !buf.is_empty() {
-            out.push('+');
-            out.push_str(&modified_base64(buf));
-            out.push('-');
-            buf.clear();
-        }
-    }
-
-    for ch in payload.chars() {
-        if ch == '+' {
-            flush_shift(&mut out, &mut shift_buf);
-            out.push_str("+-");
-        } else if is_utf7_direct(ch) {
-            flush_shift(&mut out, &mut shift_buf);
-            out.push(ch);
-        } else {
-            shift_buf.extend_from_slice(&char_to_utf16be(ch));
-        }
-    }
-    flush_shift(&mut out, &mut shift_buf);
-    out
-}
+// UTF-7 (RFC 2152) codec moved to `wafrift_types::utf7` so `wafrift-grammar`
+// can reuse it for the `charset=utf-7` delivery shape WITHOUT depending on
+// this crate's heavy native deps (brotli/flate2). Re-exported here so every
+// existing `structural::utf7_encode` / `Strategy::Utf7Encode` caller and the
+// crate's public API are unchanged.
+pub use wafrift_types::utf7::{utf7_decode, utf7_encode};
 
 /// Gzip compression.
 ///

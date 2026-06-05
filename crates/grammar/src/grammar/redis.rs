@@ -57,7 +57,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // URL-encoded variants
     results.push(payload.replace(' ', "%20"));
 
-    results
+    super::variant_util::finalize(results, payload)
 }
 
 #[cfg(test)]

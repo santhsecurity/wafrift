@@ -240,14 +240,15 @@ fn has_xss_signals(payload: &str) -> bool {
 
 use crate::grammar::equiv::Rng;
 use crate::grammar::equiv::xss::still_executes_xss;
+use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64};
 
 /// Deterministic per-payload seed (FNV-1a) — identical input ⇒
 /// identical variant stream (reproducible, regression-pinnable).
 fn payload_seed(p: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut h: u64 = FNV_OFFSET_64;
     for b in p.bytes() {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        h = h.wrapping_mul(FNV_PRIME_64);
     }
     h
 }

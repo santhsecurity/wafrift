@@ -5,6 +5,7 @@
 //! state is tracked so the proxy learns what works and escalates when
 //! blocks are detected.
 
+mod finding_class;
 mod findings;
 mod gene_bank_io;
 mod request_helpers;
@@ -40,11 +41,12 @@ use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
     BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
 };
-use wafrift_strategy::gene_bank::GeneBank;
 use wafrift_strategy::strategy::{evade, evade_smart};
-use wafrift_strategy::{EvasionConfig, HostState};
+use wafrift_strategy::HostState;
 use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
-use wafrift_types::EvasionResult;
+// §8 ARCHITECTURE: one import path for EvasionConfig — canonical home is
+// wafrift_types, not the forwarding re-export in wafrift_strategy.
+use wafrift_types::{EvasionConfig, EvasionResult};
 
 /// Maximum request body buffered per message (plain HTTP + MITM plaintext).
 const MAX_PROXY_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -314,6 +316,30 @@ struct Args {
     #[arg(long = "mutate-url", default_value_t = false)]
     mutate_url: bool,
 
+    /// Apply a path-prefix mutation to every upstream URL's path.
+    /// Variants:
+    ///
+    ///   `double-slash`     `/admin` → `//admin`
+    ///                      Bypasses Coraza < 3.3.3 (CVE-2025-29914)
+    ///                      and any WAF whose prefix-match ACL uses a
+    ///                      Go-style `url.Parse()` that treats `//x`
+    ///                      as host-relative.
+    ///
+    ///   `triple-slash`     `/admin` → `///admin`
+    ///                      WAFs that fold `//` but not `///`.
+    ///
+    ///   `slash-dot`        `/admin` → `/./admin`
+    ///                      RFC 3986 §5.2.4 dot-segment normalisation.
+    ///
+    ///   `slash-dot-slash`  `/admin` → `/.//admin`
+    ///                      Combines both forms.
+    ///
+    /// Off by default — path-shape changes break upstream routing on
+    /// some targets. Opt in only against authorised WAF research
+    /// targets. Pass 21 R62.
+    #[arg(long = "mutate-path-prefix", value_name = "VARIANT", value_parser = clap::builder::PossibleValuesParser::new(["double-slash", "triple-slash", "slash-dot", "slash-dot-slash"]))]
+    mutate_path_prefix: Option<String>,
+
     /// Install the captchaforge headless-browser solver into the
     /// challenge store so Cloudflare / Turnstile / hCaptcha responses
     /// are auto-solved instead of waiting for an operator prompt.
@@ -357,6 +383,17 @@ static BODY_PADDING_BYTES: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 static MUTATE_URL_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Process-wide path-prefix mutation strategy. `None` (= 0xFF in the
+/// AtomicU8 sentinel) means disabled — the upstream path is forwarded
+/// unchanged. Pass 21 R62 — CVE-2025-29914 Coraza double-slash and the
+/// three related path-prefix variants.
+static MUTATE_PATH_PREFIX: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(MUTATE_PATH_PREFIX_DISABLED);
+/// Sentinel value for "no path-prefix mutation configured" stored in
+/// `MUTATE_PATH_PREFIX`. Chosen as 0xFF so the encoded variant indices
+/// (0..=3) cannot collide.
+const MUTATE_PATH_PREFIX_DISABLED: u8 = 0xFF;
+
 /// Process-wide managed-challenge cookie store. Captures `cf_clearance`
 /// / `_abck` / `aws-waf-token` on the response side and replays on
 /// the request side until expiry (default 30min, see
@@ -371,70 +408,6 @@ static CHALLENGE_STORE: std::sync::OnceLock<wafrift_transport::challenge::Challe
 
 fn challenge_store() -> &'static wafrift_transport::challenge::ChallengeStore {
     CHALLENGE_STORE.get_or_init(wafrift_transport::challenge::ChallengeStore::new)
-}
-
-/// Attempt to clear a detected managed challenge automatically via
-/// the captchaforge bridge. Returns `true` when a clearance cookie
-/// was captured and recorded; `false` when the bridge is absent or
-/// the solve attempt failed (caller falls back to the operator
-/// prompt).
-///
-/// The wire keeps the bridge feature-gated: builds compiled without
-/// `--features captchaforge` get the constant-false fallback and pay
-/// nothing.  Builds compiled WITH the feature still no-op when the
-/// operator hasn't passed `--captchaforge` (governed by
-/// `is_installed()` on the bridge OnceLock).
-async fn try_auto_solve_challenge(
-    _store: &wafrift_transport::challenge::ChallengeStore,
-    _host: &str,
-    _body: &[u8],
-    _target_url: &str,
-    _kind: wafrift_transport::challenge::ChallengeKind,
-) -> bool {
-    #[cfg(feature = "captchaforge")]
-    {
-        if !wafrift_captchaforge_bridge::is_installed() {
-            return false;
-        }
-        let cfg = wafrift_captchaforge_bridge::current_config().await;
-        // Best-effort: lossy UTF-8 of the body is fine — challenge
-        // pages are HTML which is always at least mostly valid utf-8.
-        let body_str = String::from_utf8_lossy(_body);
-        match wafrift_captchaforge_bridge::solve_and_record(
-            _store,
-            _host,
-            &body_str,
-            _target_url,
-            &cfg,
-        )
-        .await
-        {
-            Ok(Some(outcome)) => {
-                info!(
-                    host = %_host,
-                    kind = %outcome.kind.label(),
-                    elapsed_ms = outcome.elapsed_ms,
-                    "captchaforge auto-solved managed challenge"
-                );
-                true
-            }
-            Ok(None) => {
-                info!(
-                    host = %_host,
-                    "captchaforge bridge ran but did not yield a clearance cookie"
-                );
-                false
-            }
-            Err(e) => {
-                warn!(host = %_host, error = %e, "captchaforge solve failed");
-                false
-            }
-        }
-    }
-    #[cfg(not(feature = "captchaforge"))]
-    {
-        false
-    }
 }
 
 /// Process-wide TUI event channel. `Some` when `--tui` is set; the
@@ -519,123 +492,22 @@ impl ProxyState {
         self.total_scanned
     }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-struct PersistedGeneBank {
-    /// Format version so future schema changes can be detected.
-    schema: u32,
-    hosts: HashMap<String, PersistedHostState>,
-}
-
-fn default_gene_bank_path(supplied: &str) -> Option<std::path::PathBuf> {
-    if supplied.is_empty() {
-        // Default: $XDG_CONFIG_HOME/wafrift/gene-bank.json (or platform equivalent).
-        // If config_dir cannot be determined, disable persistence.
-        dirs::config_dir().map(|d| d.join("wafrift").join("gene-bank.json"))
-    } else if supplied == "off" || supplied == "-" {
-        None
-    } else {
-        Some(std::path::PathBuf::from(supplied))
+    /// Accessor for the live-findings renderer in `crate::findings`.
+    #[inline]
+    pub(crate) fn total_blocks(&self) -> u32 {
+        self.total_blocks
     }
 }
 
-fn load_gene_bank(path: &std::path::Path) -> PersistedGeneBank {
-    match std::fs::read_to_string(path) {
-        Ok(s) => {
-            if s.trim().is_empty() {
-                info!(path = %path.display(), "gene bank file is empty; starting fresh");
-                return PersistedGeneBank::default();
-            }
-            match serde_json::from_str::<PersistedGeneBank>(&s) {
-                Ok(bank) => {
-                    if bank.schema > 1 {
-                        warn!(
-                            path = %path.display(),
-                            schema = bank.schema,
-                            "gene bank has newer schema than expected (1); data may be incomplete"
-                        );
-                    }
-                    bank
-                }
-                Err(e) => {
-                    warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "gene bank malformed (invalid JSON); starting fresh. Fix: inspect the file and fix the JSON syntax, or delete it to start over."
-                    );
-                    PersistedGeneBank::default()
-                }
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            info!(path = %path.display(), "gene bank not found; starting fresh");
-            PersistedGeneBank::default()
-        }
-        Err(e) => {
-            warn!(
-                path = %path.display(),
-                error = %e,
-                "gene bank unreadable; starting fresh. Fix: check file permissions."
-            );
-            PersistedGeneBank::default()
-        }
-    }
-}
-
-fn save_gene_bank(state: &ProxyState, path: &std::path::Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let mut bank = PersistedGeneBank {
-        schema: 1,
-        hosts: HashMap::new(),
-    };
-    for (host, hs) in &state.hosts {
-        if hs.proven_winners.is_empty() && hs.blocklisted.is_empty() {
-            continue; // skip empty hosts to keep the file small
-        }
-        bank.hosts.insert(
-            host.clone(),
-            PersistedHostState {
-                proven_winners: hs.proven_winners.clone(),
-                blocklisted: hs.blocklisted.clone(),
-                waf_name: hs.waf_name.clone(),
-            },
-        );
-    }
-    let json = serde_json::to_string_pretty(&bank)?;
-    // Atomic, durable write via tempfile + fsync + rename + parent fsync.
-    // Without the fsyncs a system crash between write and rename can leave
-    // the renamed file zero-length or partially flushed.
-    let tmp = path.with_extension("json.tmp");
-    {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(json.as_bytes())?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-fn restore_gene_bank(state: &mut ProxyState, bank: PersistedGeneBank) -> usize {
-    let mut restored = 0usize;
-    for (host, persisted) in bank.hosts {
-        let hs = state.hosts.entry(host).or_default();
-        if !persisted.proven_winners.is_empty() {
-            hs.proven_winners = persisted.proven_winners;
-            hs.discovery_complete = true;
-            restored += 1;
-        }
-        if !persisted.blocklisted.is_empty() {
-            hs.blocklisted = persisted.blocklisted;
-        }
-        if persisted.waf_name.is_some() {
-            hs.waf_name = persisted.waf_name;
-            hs.waf_confirmed = true;
-        }
-    }
-    restored
-}
+// Gene-bank persistence (PersistedHostState, PersistedGeneBank,
+// default_gene_bank_path, load_gene_bank, save_gene_bank,
+// restore_gene_bank) lives in `crate::gene_bank_io`. Re-export the
+// fn names callers use locally so the move doesn't touch every
+// call site in this binary.
+use crate::gene_bank_io::{
+    default_gene_bank_path, load as load_gene_bank, restore as restore_gene_bank,
+    save as save_gene_bank,
+};
 
 use wafrift_proxy::extract_host_from_header;
 
@@ -749,7 +621,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(msg) = validate_args(&args) {
         eprintln!("{msg}");
         error!("{msg}");
-        return Err(msg.into());
+        std::process::exit(1);
     }
 
     if let Some(dir) = &args.write_mitm_ca_dir {
@@ -777,7 +649,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  (no $HOME / dirs::config_dir on this OS). Pass --mitm-ca-dir \
                  explicitly or unset --mitm."
             );
-            return Err("cannot determine home directory for MITM CA storage".into());
+            std::process::exit(1);
         };
         info!(
             "No --mitm-ca-dir specified; using default: {}",
@@ -818,15 +690,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let addr: SocketAddr = args.listen.parse().map_err(|e| {
+    let addr: SocketAddr = args.listen.parse().unwrap_or_else(|e| {
         error!("--listen must be a valid socket address (e.g. 127.0.0.1:8080, [::1]:8080), got '{}': {}", args.listen, e);
-        format!("invalid --listen address: {e}")
-    })?;
+        std::process::exit(1);
+    });
 
-    let listener = TcpListener::bind(addr).await.map_err(|e| {
+    let listener = TcpListener::bind(addr).await.unwrap_or_else(|e| {
         error!("Failed to bind to {addr}: {e}");
-        format!("failed to bind to {addr}: {e}")
-    })?;
+        std::process::exit(1);
+    });
     info!("Listening on http://{}", addr);
     let expose_wafrift_status = addr.ip().is_loopback();
     if !expose_wafrift_status {
@@ -847,7 +719,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                  If you really want this (lab-only), bind to a loopback address and front-end with your own ACL'd reverse proxy.",
                 addr
             );
-            return Err(format!("--mitm refused on non-loopback address {addr}").into());
+            std::process::exit(1);
         }
     }
 
@@ -927,7 +799,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(p) => p,
             Err(e) => {
                 error!("--tls-impersonate: {}", e);
-                return Err(format!("--tls-impersonate: {e}").into());
+                std::process::exit(2);
             }
         };
         let client = match StealthClient::with_timeout(
@@ -941,7 +813,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     profile.name(),
                     e
                 );
-                return Err(format!("--tls-impersonate {}: {e}", profile.name()).into());
+                std::process::exit(2);
             }
         };
         if STEALTH_CLIENT.set(client).is_err() {
@@ -969,7 +841,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(p) => p,
                 Err(e) => {
                     error!("--tls-impersonate-rotate: {}", e);
-                    return Err(format!("--tls-impersonate-rotate: {e}").into());
+                    std::process::exit(2);
                 }
             };
             let c = match StealthClient::with_timeout(
@@ -983,7 +855,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         profile.name(),
                         e
                     );
-                    return Err(format!("--tls-impersonate-rotate {}: {e}", profile.name()).into());
+                    std::process::exit(2);
                 }
             };
             clients.push(c);
@@ -991,7 +863,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if clients.is_empty() {
             error!("--tls-impersonate-rotate: empty profile list after trimming");
-            return Err("--tls-impersonate-rotate: empty profile list".into());
+            std::process::exit(2);
         }
         let pool = StealthPool {
             clients,
@@ -1010,11 +882,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // atomic so there's no per-request lock contention on the hot
     // path. Off by default; opt-in via --mutate-url.
     if args.mutate_url {
-        MUTATE_URL_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Release pairs with the request-time Acquire load — the same pattern
+        // as MUTATE_PATH_PREFIX / INTERCEPT_MODE: a startup-set config flag must
+        // be visible on the very next request without a memory-barrier surprise
+        // (matters on AArch64; harmless on x86-TSO).
+        MUTATE_URL_ENABLED.store(true, std::sync::atomic::Ordering::Release);
         warn!(
             "--mutate-url: every upstream URL's query parameter values will be aggressively \
              percent-encoded. This changes routing semantics (cache keys, log entries) — \
              ensure the upstream is robust to encoded query bytes."
+        );
+    }
+
+    // R62 pass-21: path-prefix mutation. CVE-2025-29914 (Coraza
+    // double-slash) and three related variants. Off by default;
+    // opt-in via --mutate-path-prefix=<variant>.
+    if let Some(ref variant) = args.mutate_path_prefix {
+        let idx = match variant.as_str() {
+            "double-slash" => 0,
+            "triple-slash" => 1,
+            "slash-dot" => 2,
+            "slash-dot-slash" => 3,
+            other => {
+                error!("--mutate-path-prefix: unknown variant {other:?}");
+                std::process::exit(2);
+            }
+        };
+        // Release pairs with the request-time Acquire load — same
+        // pattern as the intercept-mode atomic (R60). Operators
+        // expect a config change to be visible on the very next
+        // request without a memory-barrier surprise.
+        MUTATE_PATH_PREFIX.store(idx, std::sync::atomic::Ordering::Release);
+        warn!(
+            "--mutate-path-prefix={variant}: every upstream URL's path will be reshaped \
+             before forwarding (e.g. /admin → //admin for double-slash). Use only against \
+             AUTHORISED targets — this is a path-ACL bypass."
         );
     }
 
@@ -1048,9 +950,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Body padding — applied per request, controlled by an atomic so
     // there's no per-request lock contention on the hot path.
     if args.body_padding_bytes > 0 {
+        // Release pairs with the request-time Acquire load (same config-atomic
+        // pattern as MUTATE_PATH_PREFIX / MUTATE_URL_ENABLED / INTERCEPT_MODE).
         BODY_PADDING_BYTES.store(
             args.body_padding_bytes,
-            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Release,
         );
         if args.body_padding_bytes < wafrift_evolution::body_padding::MIN_USEFUL_PAD {
             warn!(
@@ -1105,10 +1009,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Connection re-use disabled: every upstream forward opens a fresh TCP connection (new source port per request)"
         );
     }
-    let global_client = client_builder.build().map_err(|e| {
+    let global_client = client_builder.build().unwrap_or_else(|e| {
         error!("reqwest client build failed: {e}");
-        format!("reqwest client build failed: {e}")
-    })?;
+        std::process::exit(1);
+    });
     let limits = Arc::new(ProxyLimits {
         max_upstream_response_bytes: args.max_upstream_response_bytes,
         max_evade_retries: args.max_evade_retries,
@@ -1150,7 +1054,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(l) => Some(Arc::new(l)),
             Err(e) => {
                 error!(dir = %dir.display(), error = %e, "failed to open log directory");
-                return Err(format!("failed to open log directory {}: {e}", dir.display()).into());
+                std::process::exit(1);
             }
         }
     } else {
@@ -1167,9 +1071,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              every HTTPS connection wafrift makes"
         );
     }
-
-    let mut bg_tasks = tokio::task::JoinSet::new();
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
     // ── Persistent gene bank ────────────────────────────────────────
     let gene_bank_path = default_gene_bank_path(&args.gene_bank_path);
@@ -1206,7 +1107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let flush_path = path.clone();
             let flush_state = shared_state.clone();
             let interval = args.gene_bank_flush_interval_secs;
-            bg_tasks.spawn(async move {
+            tokio::spawn(async move {
                 let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval));
                 tick.tick().await; // skip the immediate first tick
                 loop {
@@ -1256,9 +1157,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Graceful shutdown: SIGINT/SIGTERM flush gene bank then exit ──
     let shutdown_state = shared_state.clone();
     let shutdown_path = gene_bank_path.clone();
-    let shutdown_tx_sig = shutdown_tx.clone();
-    bg_tasks.spawn(async move {
-        // Wait for a shutdown signal, then flush gene bank and signal shutdown.
+    tokio::spawn(async move {
+        // Wait for a shutdown signal, then flush gene bank and exit.
         // Surface handler-setup failure instead of silently dropping the
         // shutdown task — a setup failure must leave a log line.
         #[cfg(unix)]
@@ -1306,7 +1206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         info!("shutting down");
-        let _ = shutdown_tx_sig.send(true);
+        std::process::exit(0);
     });
 
     // ── Optional TUI dashboard ──────────────────────────────────────
@@ -1337,7 +1237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (quit_tx, quit_rx) = tokio::sync::oneshot::channel();
             // Dashboard lives in a blocking-friendly task so it can do
             // its terminal I/O without starving the runtime.
-            bg_tasks.spawn(async move {
+            tokio::spawn(async move {
                 if let Err(e) = wafrift_proxy::tui::run(cfg, rx, quit_tx).await {
                     eprintln!("TUI exited with error: {e}");
                 }
@@ -1346,8 +1246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // graceful shutdown on the same code path SIGINT uses.
             let quit_state = shared_state.clone();
             let quit_path = gene_bank_path.clone();
-            let shutdown_tx_tui = shutdown_tx.clone();
-            bg_tasks.spawn(async move {
+            tokio::spawn(async move {
                 if quit_rx.await.is_ok() {
                     if let Some(path) = &quit_path {
                         // Snapshot-then-drop — never fsync under the lock.
@@ -1356,7 +1255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             warn!(path = %path.display(), error = %e, "gene bank flush from TUI quit failed");
                         }
                     }
-                    let _ = shutdown_tx_tui.send(true);
+                    std::process::exit(0);
                 }
             });
         }
@@ -1367,78 +1266,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(p) => p,
             Err(_) => continue,
         };
-        tokio::select! {
-            biased;
-            _ = shutdown_rx.changed() => {
-                break;
-            }
-            accept_result = listener.accept() => {
-                let (stream, peer) = accept_result?;
-                let io = TokioIo::new(stream);
-                let shared_state = shared_state.clone();
-                let config = config.clone();
-                let default_escalation = default_escalation.clone();
-                let client = global_client.clone();
-                let mitm_ca = mitm_ca.clone();
-                let policy = policy.clone();
-                let limits = limits.clone();
-                let scope = scope.clone();
-                let rate_limiter = rate_limiter.clone();
-                let response_profiles = response_profiles.clone();
+        let (stream, peer) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let shared_state = shared_state.clone();
+        let config = config.clone();
+        let default_escalation = default_escalation.clone();
+        let client = global_client.clone();
+        let mitm_ca = mitm_ca.clone();
+        let policy = policy.clone();
+        let limits = limits.clone();
+        let scope = scope.clone();
+        let rate_limiter = rate_limiter.clone();
+        let response_profiles = response_profiles.clone();
 
-                // Per-connection peer-loopback gate for /_wafrift/status. The
-                // bind-address check (expose_wafrift_status) is necessary but
-                // not sufficient: a reverse proxy or socat fronting wafrift on
-                // loopback would otherwise leak host names and proven winners
-                // to external callers. Require BOTH bind AND peer to be
-                // loopback before exposing the status endpoint.
-                let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
+        // Per-connection peer-loopback gate for /_wafrift/status. The
+        // bind-address check (expose_wafrift_status) is necessary but
+        // not sufficient: a reverse proxy or socat fronting wafrift on
+        // loopback would otherwise leak host names and proven winners
+        // to external callers. Require BOTH bind AND peer to be
+        // loopback before exposing the status endpoint.
+        let expose_status_per_conn = expose_wafrift_status && peer.ip().is_loopback();
 
-                let logger = logger.clone();
-                bg_tasks.spawn(async move {
-                    let _permit = permit;
-                    if let Err(err) = http1::Builder::new()
-                        .preserve_header_case(true)
-                        .title_case_headers(true)
-                        .serve_connection(
-                            io,
-                            service_fn(move |req| {
-                                proxy(
-                                    req,
-                                    shared_state.clone(),
-                                    config.clone(),
-                                    default_escalation.clone(),
-                                    client.clone(),
-                                    mitm_enabled,
-                                    mitm_ca.clone(),
-                                    policy.clone(),
-                                    limits.clone(),
-                                    scope.clone(),
-                                    rate_limiter.clone(),
-                                    expose_status_per_conn,
-                                    logger.clone(),
-                                    response_profiles.clone(),
-                                )
-                            }),
+        let logger = logger.clone();
+        tokio::task::spawn(async move {
+            let _permit = permit;
+            if let Err(err) = http1::Builder::new()
+                .preserve_header_case(true)
+                .title_case_headers(true)
+                .serve_connection(
+                    io,
+                    service_fn(move |req| {
+                        proxy(
+                            req,
+                            shared_state.clone(),
+                            config.clone(),
+                            default_escalation.clone(),
+                            client.clone(),
+                            mitm_enabled,
+                            mitm_ca.clone(),
+                            policy.clone(),
+                            limits.clone(),
+                            scope.clone(),
+                            rate_limiter.clone(),
+                            expose_status_per_conn,
+                            logger.clone(),
+                            response_profiles.clone(),
                         )
-                        .with_upgrades()
-                        .await
-                    {
-                        warn!("failed to serve connection: {:?}", err);
-                    }
-                });
+                    }),
+                )
+                .with_upgrades()
+                .await
+            {
+                warn!("failed to serve connection: {:?}", err);
             }
-        }
+        });
     }
-
-    bg_tasks.abort_all();
-    while let Some(res) = bg_tasks.join_next().await {
-        if res.is_err() {
-            warn!("background task panicked");
-        }
-    }
-
-    Ok(())
 }
 
 // header_value_to_string, split_url_for_mutation, error_response
@@ -1483,7 +1365,7 @@ async fn forward_with_evade_retry(
             Arc::clone(&limits),
             Arc::clone(&response_profiles),
             // 1-based: the first attempt reports `1`, not `0`.
-            u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
+            attempt.saturating_add(1),
         )
         .await?;
         let status = resp.status().as_u16();
@@ -1505,6 +1387,75 @@ async fn forward_with_evade_retry(
         *r.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
         r
     }))
+}
+
+/// Find a header value by case-insensitive name in a `(name, value)` list,
+/// returning `""` when absent. Used by the finding-classification path for
+/// request and response Content-Type lookups.
+fn header_value(headers: &[(String, String)], name: &str) -> String {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
+/// Detonate a response body out-of-process via the `detonate` tool to prove
+/// whether reflected JS executes. Async (tokio) so it never blocks the proxy
+/// reactor. `None` when the tool is absent / errored — classification then
+/// degrades to reflection-only. Mirrors `wafrift-cli`'s `exec_proof` bridge;
+/// a shared `detonate-client` crate is the right home once a third consumer
+/// appears (§7 DEDUP — two call sites is not yet worth a crate).
+async fn detonate_response(body: &[u8], url: &str) -> Option<finding_class::DetonationVerdict> {
+    use tokio::io::AsyncWriteExt;
+    let bin = std::env::var_os("WAFRIFT_DETONATE_BIN").unwrap_or_else(|| "detonate".into());
+    // Engine selector (`$WAFRIFT_DETONATE_ENGINE`, default `jsdet`): `chrome`
+    // selects the real-browser oracle that also classifies mutation-XSS. The
+    // proxy is a separate binary from wafrift-cli, so it reads its own env var
+    // rather than the cli's process-wide config.
+    let engine = std::env::var("WAFRIFT_DETONATE_ENGINE")
+        .map(|e| e.trim().to_ascii_lowercase())
+        .ok()
+        .filter(|e| e == "chrome" || e == "jsdet")
+        .unwrap_or_else(|| "jsdet".to_string());
+    let mut child = tokio::process::Command::new(bin)
+        .args(["--url", url, "--engine", &engine])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        // Reap a hung/stuck detonate when this future is dropped (timeout below
+        // or request cancellation) — otherwise a wedged child would linger and,
+        // on the proxy's hot path, accumulate into a resource-exhaustion DoS.
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // detonate read_to_string's all of stdin before emitting its one JSON
+        // line, so writing then dropping (EOF) can't deadlock.
+        let _ = stdin.write_all(body).await;
+    }
+    // Hard ceiling against a wedged detonate blocking the request handler. The
+    // jsdet sandbox finishes in ~2s; the chrome engine cold-starts a browser and
+    // has its own 15s internal kill, so allow it more headroom.
+    let budget = if engine == "chrome" { 20 } else { 10 };
+    let out = tokio::time::timeout(std::time::Duration::from_secs(budget), child.wait_with_output())
+        .await
+        .ok()? // Elapsed → None (child killed on drop)
+        .ok()?; // io error → None
+    #[derive(serde::Deserialize)]
+    struct P {
+        executed: bool,
+        #[serde(default)]
+        sink: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
+    }
+    let p: P = serde_json::from_slice(&out.stdout).ok()?;
+    Some(finding_class::DetonationVerdict {
+        executed: p.executed,
+        sink: p.sink.unwrap_or_default(),
+        message: p.message.unwrap_or_default(),
+    })
 }
 
 /// Run `evade` + upstream `reqwest` forward for one logical request.
@@ -1563,7 +1514,8 @@ async fn forward_wafrift_request(
 
         // Prevent unbounded memory growth from arbitrary Host headers (DoS vector).
         // Evict the oldest host (FIFO) rather than an arbitrary HashMap bucket.
-        if st.hosts.len() >= 10_000 && !st.hosts.contains_key(&host) {
+        // Uses MAX_RESTORED_HOSTS so the runtime cap matches the restore cap.
+        if st.hosts.len() >= crate::gene_bank_io::MAX_RESTORED_HOSTS && !st.hosts.contains_key(&host) {
             while let Some(key_to_remove) = st.host_fifo.pop_front() {
                 if st.hosts.remove(&key_to_remove).is_some() {
                     break;
@@ -1577,40 +1529,6 @@ async fn forward_wafrift_request(
             st.host_fifo.push_back(host.clone());
         }
         let hs = st.hosts.entry(host.clone()).or_default();
-
-        // H1: Cross-host seeding from WAF genome.
-        // When this is a brand-new host AND the gene bank already knows the
-        // WAF (from a prior restore or from the persisted waf_name on a
-        // sibling host), pre-populate proven_winners from the WAF genome
-        // so the proxy skips cold-start discovery entirely.
-        //
-        // Constraints:
-        //  - Sync GeneBank I/O inside the tokio::sync::Mutex is intentional:
-        //    the lock is held for a bounded read (one JSON file). No .await.
-        //  - Only fires once per host (is_new guard) and only when the winner
-        //    pool is still empty, so it never overwrites runtime-discovered data.
-        if is_new && hs.proven_winners.is_empty() {
-            if let Some(ref waf) = hs.waf_name.clone() {
-                if let Ok(mut bank) = GeneBank::open_default() {
-                    if let Some(genome) = bank.load(waf) {
-                        // class is unknown at this point (we only have the host
-                        // and the WAF name); use the global seed_winners.
-                        let seeds = genome.seed_winners();
-                        let capped: Vec<String> = seeds.into_iter().take(5).collect();
-                        if !capped.is_empty() {
-                            info!(
-                                host = %host,
-                                waf = %waf,
-                                seeds = capped.len(),
-                                "cross-host gene bank seeding"
-                            );
-                            hs.proven_winners = capped;
-                            hs.discovery_complete = true;
-                        }
-                    }
-                }
-            }
-        }
 
         // Apply default escalation if requested.
         if let Some(esc) = &default_escalation {
@@ -1726,7 +1644,7 @@ async fn forward_wafrift_request(
     // mutating the path's last segment is reserved for the more
     // aggressive `evade_smart` URL-aware variants and is not
     // something a passive proxy should do silently.
-    if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+    if MUTATE_URL_ENABLED.load(std::sync::atomic::Ordering::Acquire)
         && let Some((scheme_authority, path_and_query)) =
             split_url_for_mutation(&evasion_result.request.url)
     {
@@ -1745,13 +1663,49 @@ async fn forward_wafrift_request(
         }
     }
 
+    // ── Path-prefix mutation (--mutate-path-prefix, off by default) ──
+    // R62 pass-21: CVE-2025-29914 (Coraza < 3.3.3) and three related
+    // path-shape variants. Applied AFTER --mutate-url so the
+    // path-prefix is the outermost transformation visible on the wire.
+    let prefix_idx = MUTATE_PATH_PREFIX.load(std::sync::atomic::Ordering::Acquire);
+    if prefix_idx != MUTATE_PATH_PREFIX_DISABLED
+        && let Some((scheme_authority, path_and_query)) =
+            split_url_for_mutation(&evasion_result.request.url)
+    {
+        let strategy =
+            match wafrift_encoding::path_prefix::PathPrefixStrategy::all().get(prefix_idx as usize)
+            {
+                Some(s) => *s,
+                // Defence in depth: the startup-time validator already
+                // rejects out-of-range indices, but trust nothing on the
+                // hot path.
+                None => return Ok(error_response(
+                    hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal: corrupt MUTATE_PATH_PREFIX index",
+                )),
+            };
+        let (mutated_pq, label) =
+            wafrift_encoding::path_prefix::mutate_path_prefix(&path_and_query, strategy);
+        if mutated_pq != path_and_query {
+            let new_url = format!("{scheme_authority}{mutated_pq}");
+            debug!(
+                host = %host,
+                from = %path_and_query,
+                to = %mutated_pq,
+                technique = %label,
+                "path-prefix mutation applied"
+            );
+            evasion_result.request.url = new_url;
+        }
+    }
+
     // ── Body padding (8KB/16KB cloud-WAF inspection bypass) ─────────
     // Applied AFTER URL validation but BEFORE the upstream fetch so
     // SSRF policy still gates the unmodified URL and the WAF sees the
     // padded body on the wire. Skipped when the configured size is
     // below the useful threshold (small pads can't push payload past
     // any real WAF window) or when the content-type is opaque.
-    let pad_target = BODY_PADDING_BYTES.load(std::sync::atomic::Ordering::Relaxed);
+    let pad_target = BODY_PADDING_BYTES.load(std::sync::atomic::Ordering::Acquire);
     if pad_target >= wafrift_evolution::body_padding::MIN_USEFUL_PAD {
         let ct = evasion_result
             .request
@@ -1812,14 +1766,29 @@ async fn forward_wafrift_request(
             evasion_result.request.method.as_str(),
             path_for_intercept,
         );
+        // RAII cleanup: cancel the registration on ANY exit from this scope —
+        // crucially including async task-cancellation. If the client
+        // disconnects, hyper drops this request future mid-`select!`-await;
+        // NEITHER arm runs, so the explicit timeout-arm cancel cannot fire and
+        // the sender + pending entry would leak until the next `register` GC.
+        // A Drop guard runs even on cancellation. `cancel` is idempotent (a
+        // no-op once `resolve` or the timeout path already removed the entry).
+        struct CancelOnDrop {
+            store: &'static wafrift_proxy::intercept::InterceptStore,
+            id: u64,
+        }
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) {
+                self.store.cancel(self.id);
+            }
+        }
+        let _intercept_guard = CancelOnDrop { store, id };
         let decision = tokio::select! {
             d = rx => d.unwrap_or(wafrift_proxy::intercept::InterceptDecision::Release),
             _ = tokio::time::sleep(wafrift_proxy::intercept::INTERCEPT_TIMEOUT) => {
-                // Operator walked away. Cancel the registration so
-                // the sender + pending entry don't leak in the
-                // store forever — without this the BTreeMaps would
-                // grow unbounded under sustained intercept timeouts.
-                store.cancel(id);
+                // Operator walked away → default-allow. `_intercept_guard`
+                // cancels the registration on scope exit, so no explicit
+                // cancel is needed here.
                 warn!(
                     host = %host,
                     "intercept default-allow after {} secs (operator did not act)",
@@ -1946,23 +1915,7 @@ async fn forward_wafrift_request(
                 ));
             }
         };
-        // DNS-rebinding defence: rewrite the URL to use the IP literal
-        // from pinned_upstream so reqwest never issues a second DNS lookup
-        // for this hostname. Restore the original hostname as the Host
-        // header so virtual-hosting on the upstream still works.
-        let (pinned_url, pinned_host) = match pin_url_to_first_addr(
-            &evasion_result.request.url,
-            &pinned_upstream,
-        ) {
-            Ok(v) => v,
-            Err(msg) => {
-                warn!(host = %host, "{}", msg);
-                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-            }
-        };
-        let mut builder = client.request(method, &pinned_url);
-        // Always set Host to the original hostname (not the IP literal).
-        builder = builder.header("Host", &pinned_host);
+        let mut builder = client.request(method, &evasion_result.request.url);
         for (k, v) in &evasion_result.request.headers {
             if k.eq_ignore_ascii_case("host")
                 // Strip Content-Length: evasion may have mutated the body. Reqwest
@@ -2066,7 +2019,7 @@ async fn forward_wafrift_request(
         // profile classifier is authoritative. For 200-class responses
         // the oracle's body-marker and challenge detection is the only
         // signal that distinguishes "real bypass" from "soft block".
-        if !profile_blocked && status_code >= 200 && status_code < 300 {
+        if !profile_blocked && (200..300).contains(&status_code) {
             use wafrift_oracle::response_oracle::{ResponseContext, ResponseOracle};
             let oracle = ResponseOracle::new();
             let is_gzip = header_pairs.iter().any(|(k, v)| {
@@ -2146,69 +2099,57 @@ async fn forward_wafrift_request(
                 && store.get(&host).is_none()
                 && store.should_prompt_operator(&host)
             {
-                // Auto-solve path: when the captchaforge bridge was
-                // installed via `--captchaforge`, fire the headless-
-                // browser solver against this response body and
-                // record the resulting clearance cookie. Falls back
-                // to the operator-prompt warn! when the bridge is
-                // absent (build without the feature, or the flag
-                // wasn't set).  Pre-fix the proxy ONLY warned and
-                // never invoked the solver — every claim in the
-                // --captchaforge install banner ("responses will be
-                // auto-solved") was a lie.
-                let auto_solved = try_auto_solve_challenge(
-                    store,
-                    &host,
-                    &buf,
-                    &wafrift_req.url,
-                    kind,
-                )
-                .await;
-                if !auto_solved {
-                    warn!(
-                        host = %host,
-                        kind = %kind.label(),
-                        "managed challenge detected and no clearance cookie on file — clear the \
-                         challenge in a browser; the cookie will be captured on the next response"
-                    );
-                }
+                warn!(
+                    host = %host,
+                    kind = %kind.label(),
+                    "managed challenge detected and no clearance cookie on file — clear the \
+                     challenge in a browser; the cookie will be captured on the next response"
+                );
             }
         }
     }
 
-    // ── WAF identification + feedback loop — single critical section ──
-    // All four logical steps (read current WAF name, conditionally
-    // write it, record signal, credit successes) are combined into one
-    // lock acquire. This eliminates three redundant lock/unlock round-
-    // trips per request and prevents a TOCTOU race where another task
-    // could overwrite waf_name between the read and write steps.
-    let waf_name_for_tui = {
-        let body_slice = &buf[..buf.len().min(8192)];
-        // Detect lazily outside the lock (pure computation, no shared
-        // state) so the lock hold time stays minimal.
-        let detections = if signal.matched_waf.is_none() {
-            wafrift_detect::waf_detect::detect(status_code, &header_pairs, body_slice)
+    // ── WAF identification: which product is in front of us? ────────
+    // The response signal may have already identified the WAF from a
+    // loaded profile. If not, fall back to wafrift-detect's
+    // header/body fingerprint database (160+ vendor rules).
+    let detected_waf = {
+        let st = state.lock().await;
+        st.hosts.get(&host).and_then(|h| h.waf_name.clone())
+    };
+    if detected_waf.is_none() {
+        if let Some(ref waf_name) = signal.matched_waf {
+            let mut st = state.lock().await;
+            if let Some(hs) = st.hosts.get_mut(&host)
+                && hs.waf_name.is_none()
+            {
+                // Re-check under the lock: the outer `detected_waf.is_none()`
+                // read dropped the lock, so two concurrent responses for the
+                // same host could both reach here. `confirm_waf` is last-write-
+                // wins, so without this guard they'd race to pin different WAF
+                // names. First writer wins; the rest are a no-op.
+                hs.confirm_waf(Some(waf_name.clone()));
+                info!(
+                    host = %host,
+                    waf = %waf_name,
+                    source = "response_profile",
+                    "WAF identified"
+                );
+            }
         } else {
-            vec![]
-        };
-
-        let mut st = state.lock().await;
-        // Step 1 + 2: WAF identification (read-then-write in one go).
-        if st.hosts.get(&host).and_then(|h| h.waf_name.as_ref()).is_none() {
-            if let Some(ref waf_name) = signal.matched_waf {
-                if let Some(hs) = st.hosts.get_mut(&host) {
-                    hs.confirm_waf(Some(waf_name.clone()));
-                    info!(
-                        host = %host,
-                        waf = %waf_name,
-                        source = "response_profile",
-                        "WAF identified"
-                    );
-                }
-            } else if let Some(top) = detections.first()
+            let body_slice = &buf[..buf.len().min(8192)];
+            let detections =
+                wafrift_detect::waf_detect::detect(status_code, &header_pairs, body_slice);
+            if let Some(top) = detections.first()
                 && top.confidence >= wafrift_detect::waf_detect::ACTIONABLE_CONFIDENCE_THRESHOLD
             {
-                if let Some(hs) = st.hosts.get_mut(&host) {
+                let mut st = state.lock().await;
+                if let Some(hs) = st.hosts.get_mut(&host)
+                    && hs.waf_name.is_none()
+                {
+                    // Re-check under the lock (see the response_profile branch):
+                    // closes the read-None / drop-lock / re-acquire TOCTOU so
+                    // concurrent responses can't race to pin different names.
                     hs.confirm_waf(Some(top.name.clone()));
                     info!(
                         host = %host,
@@ -2220,6 +2161,7 @@ async fn forward_wafrift_request(
                 }
             }
         }
+    }
 
     // ── Feedback loop: rich signal replaces binary block/pass ────────
     // Key insight: a 429 (rate limit) is NOT a technique failure —
@@ -2228,6 +2170,8 @@ async fn forward_wafrift_request(
     // the current evasion technique. record_signal also ingests the
     // matched profile's prioritize/avoid lists so future requests
     // bias toward techniques known to bypass this WAF.
+    {
+        let mut st = state.lock().await;
         if let Some(hs) = st.hosts.get_mut(&host) {
             hs.record_signal(
                 signal.classification == BlockClass::HardBlock,
@@ -2272,11 +2216,7 @@ async fn forward_wafrift_request(
                 *st.techniques_used.entry(name).or_insert(0) += 1;
             }
         }
-        // All mutable borrows finished — safe to take a shared read now.
-        // Captures the WAF name written above (if any) so the TUI event
-        // below doesn't need a second lock acquire.
-        st.hosts.get(&host).and_then(|h| h.waf_name.clone())
-    }; // end single critical section — lock released here
+    }
 
     // ── Inject response tagging headers ──────────────────────────────
     // These are visible in Burp, browser devtools, and curl -v so the
@@ -2319,9 +2259,13 @@ async fn forward_wafrift_request(
         let resp_body_excerpt = buf[..buf.len().min(cap)].to_vec();
         let resp_body_total = buf.len() as u64;
 
-        // WAF name captured inside the single critical section above
-        // (waf_name_for_tui) — no second lock needed here.
-        let waf_name = waf_name_for_tui;
+        // WAF identification — re-read under the lock so we get the
+        // most recent value (this function ran the identification a
+        // few lines above).
+        let waf_name = {
+            let st = state.lock().await;
+            st.hosts.get(&host).and_then(|h| h.waf_name.clone())
+        };
 
         emit_tui(wafrift_proxy::tui::Event::Request {
             host: host.clone(),
@@ -2344,6 +2288,47 @@ async fn forward_wafrift_request(
             resp_body_total,
             attempts: attempt_idx,
         });
+    }
+
+    // ── Finding classification (wafrift-as-a-proxy) ─────────────────────
+    // As another tool (sqlmap / Burp / ffuf / manual) drives payloads
+    // through us, classify whether its input REFLECTED in the response —
+    // and, when a `detonate` binary is configured, whether it EXECUTES.
+    // This turns wafrift-as-a-proxy into a live finding classifier for
+    // whatever drives it: separating "the input came back" (scanner noise)
+    // from "the input runs" (a confirmed client-side exploit). Reflection
+    // is cheap and always on; execution proof is opt-in (set
+    // `WAFRIFT_DETONATE_BIN`) and only attempted on a reflected HTML
+    // response, so the hot path stays cheap by default.
+    if !is_block {
+        let req_ct = header_value(&evasion_result.request.headers, "content-type");
+        let inputs = finding_class::extract_request_inputs(
+            &request_log_uri,
+            evasion_result.request.body.as_deref(),
+            &req_ct,
+        );
+        let resp_ct = header_value(&header_pairs, "content-type");
+        // Detonate (out-of-process, async) ONLY when something reflected, a
+        // detonate binary is configured, and the response is HTML — keeping the
+        // hot path cheap; otherwise classification is reflection-only.
+        let do_exec = std::env::var_os("WAFRIFT_DETONATE_BIN").is_some()
+            && finding_class::is_html_like(&resp_ct)
+            && !finding_class::reflected_inputs(&inputs, &buf).is_empty();
+        let verdict = if do_exec {
+            detonate_response(&buf, &request_log_uri).await
+        } else {
+            None
+        };
+        // Canonical (testable) classifier; the precomputed async verdict is
+        // surfaced through its sync hook.
+        let class = finding_class::classify(&inputs, &buf, &resp_ct, do_exec, move |_| verdict);
+        if let Some(summary) = class.summary() {
+            if class.is_exploit() {
+                warn!(host = %host, uri = %request_log_uri, "{summary}");
+            } else {
+                info!(host = %host, uri = %request_log_uri, "{summary}");
+            }
+        }
     }
 
     Ok(response_builder
@@ -2900,13 +2885,28 @@ async fn forward_passthrough(
             }
             filtered_headers.push((k.clone(), v.clone()));
         }
+        // §15 SSRF / DNS-rebind: pin the validated upstream addresses and dial
+        // THOSE. Without this, `sc.send(..)` re-resolves the host inside
+        // `send_pinned(None)` on rquest's (non-bogon-filtering) resolver, so an
+        // attacker who flips the DNS record between the `assert_forward_url_allowed`
+        // validation above and this send could land on 169.254.169.254 / RFC1918
+        // (a DNS-rebind TOCTOU on the stealth out-of-scope passthrough path).
+        // Mirrors the pinned path in `forward_wafrift_request`.
+        let pinned_upstream = match resolve_forward_url_pinned(&req.url, &policy).await {
+            Ok(v) => v,
+            Err(msg) => {
+                warn!(host = %host, url = %req.url, "{}", msg);
+                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
+            }
+        };
         let stealth_resp = match sc
-            .send(
+            .send_pinned(
                 req.method.as_str(),
                 &req.url,
                 &filtered_headers,
                 req.body.as_deref(),
                 max,
+                Some(&pinned_upstream),
             )
             .await
         {
@@ -2939,25 +2939,7 @@ async fn forward_passthrough(
                 ));
             }
         };
-        // DNS-rebinding defence: resolve the URL to a pinned IP before
-        // forwarding so that reqwest never issues a second DNS lookup.
-        let pinned_addrs = match resolve_forward_url_pinned(&req.url, &policy).await {
-            Ok(v) => v,
-            Err(msg) => {
-                warn!(host = %host, url = %req.url, "{}", msg);
-                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-            }
-        };
-        let (pinned_url, pinned_host) = match pin_url_to_first_addr(&req.url, &pinned_addrs) {
-            Ok(v) => v,
-            Err(msg) => {
-                warn!(host = %host, "{}", msg);
-                return Ok(error_response(StatusCode::FORBIDDEN, &msg));
-            }
-        };
-        let mut builder = client.request(method, &pinned_url);
-        // Always set Host to the original hostname (not the IP literal).
-        builder = builder.header("Host", &pinned_host);
+        let mut builder = client.request(method, &req.url);
         for (k, v) in &req.headers {
             if k.eq_ignore_ascii_case("host")
                 || k.eq_ignore_ascii_case("content-length")

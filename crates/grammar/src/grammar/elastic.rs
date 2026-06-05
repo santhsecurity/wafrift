@@ -56,7 +56,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // Nested object obfuscation
     results.push(payload.replace("\"query\"", "\"q\""));
 
-    results
+    super::variant_util::finalize(results, payload)
 }
 
 #[cfg(test)]

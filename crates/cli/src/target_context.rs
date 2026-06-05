@@ -11,7 +11,7 @@ use wafrift_encoding::encoding::Strategy;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
-pub enum TargetContext {
+pub(crate) enum TargetContext {
     /// HTTP request header value (X-*, Authorization, etc.).
     Header,
     /// Request body (POST/PUT body, freeform).
@@ -41,7 +41,7 @@ impl TargetContext {
 /// unusable in a context are excluded. Borderline cases (e.g. base64
 /// anywhere) stay in — `--explain` shows the reasoning and the user
 /// decides.
-pub fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'static str> {
+pub(crate) fn context_applicability(s: Strategy, ctx: TargetContext) -> Result<(), &'static str> {
     use Strategy::{ChunkedSplit, DeflateEncode, GzipEncode, NullByte, ParameterPollution};
     use TargetContext::{Cookie, Header, QueryParam};
     match (s, ctx) {

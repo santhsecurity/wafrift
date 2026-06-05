@@ -16,6 +16,20 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use wafrift_grammar::grammar;
 
+/// Payload from stdin caps at 16 MiB — large enough for any
+/// real-world attack payload (megabyte multipart uploads, big binary
+/// blobs) but small enough to catch `cat /dev/zero | wafrift evade`
+/// accidents and process-replacement attacks where stdin is wired to
+/// an attacker-controlled stream.
+const EVADE_STDIN_PAYLOAD_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Decoded-payload cap for `wafrift evade`. Single source of truth so
+/// `resolve_payload` can pre-gate `--payload-b64` length before
+/// allocating the decoded buffer, and the post-decode check in
+/// `run_evade` enforces the same number. See `run_evade` for the
+/// dogfood evidence (17 GB RSS from 64 KiB random input).
+pub(crate) const EVADE_PAYLOAD_MAX_BYTES: usize = 16 * 1024;
+
 use crate::Level;
 use crate::explain::ExplainTrace;
 use crate::helpers::{
@@ -26,7 +40,7 @@ use crate::target_context::TargetContext;
 use crate::technique_filter::TechniqueFilter;
 
 #[derive(Args, Debug)]
-pub struct EvadeArgs {
+pub(crate) struct EvadeArgs {
     /// Payload to mutate and encode. Mutually exclusive with `--stdin`
     /// and `--payload-b64`.
     #[arg(
@@ -64,7 +78,12 @@ pub struct EvadeArgs {
     #[arg(long, default_value = "text", value_parser = ["text", "json", "jsonl"])]
     pub format: String,
 
-    /// Evasion intensity.
+    /// Evasion intensity. Approximate variant counts on an XSS
+    /// payload to set expectations: light ~12, medium ~58, heavy
+    /// ~1500. Heavy may emit 100x the variants of light and a
+    /// proportionally larger JSON blob — choose based on the
+    /// rate-limit budget of the downstream `wafrift scan` if you
+    /// plan to feed these variants into a live target.
     #[arg(long, value_enum, default_value_t = Level::Medium)]
     pub level: Level,
 
@@ -85,9 +104,14 @@ pub struct EvadeArgs {
     #[arg(long, num_args = 1.., value_delimiter = ',')]
     pub exclude: Vec<String>,
 
-    /// Filter techniques by where the payload will land (header, body,
-    /// query-param, cookie). Encoding strategies whose output is
-    /// unusable in the chosen context are skipped (visible with --explain).
+    /// Where the payload will be INJECTED — the HTTP channel, not the
+    /// attack class. Allowed values: `header`, `body`, `query-param`,
+    /// `cookie`. Attack class (xss / sql / cmdi / ssrf etc.) is inferred
+    /// from the payload itself by the grammar engine; do not pass it
+    /// here. Mnemonic: "an XSS payload going in a query param" →
+    /// `--target-context query-param`. Encoding strategies whose
+    /// output is unusable in the chosen channel are skipped (visible
+    /// with --explain).
     #[arg(long, value_enum)]
     pub target_context: Option<TargetContext>,
 
@@ -99,10 +123,16 @@ pub struct EvadeArgs {
     /// Write output to a file instead of stdout.
     #[arg(long, short)]
     pub output: Option<PathBuf>,
+
+    /// Allow `--output` to overwrite an existing file. Default
+    /// is to refuse so two back-to-back evades cannot silently
+    /// clobber the first run's result. R44 fix (dogfood pass 4).
+    #[arg(long, default_value_t = false)]
+    pub force_overwrite: bool,
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
+pub(crate) fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     // `--quiet` and `--format json` BOTH select machine-readable
     // output.  Either spelling now produces the wrapped form
     // (single top-level object with a `variants` array) — that's
@@ -111,6 +141,37 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
     // the explicit `--format jsonl` (added 2026-05 by dogfood pass
     // 4).
     let quiet = quiet || args.format == "json" || args.format == "jsonl";
+    // R44 fix (dogfood pass 4): pre-fix `--output PATH` with the
+    // default text format silently ignored -o, emitted the colored
+    // text body to stdout, and exited 0 with NO file written. The
+    // text branch was println-based throughout and never consulted
+    // args.output. Reject the combination explicitly so the
+    // operator switches to a machine-readable format or drops -o.
+    if args.output.is_some() && args.format == "text" {
+        eprintln!(
+            "{} --output / -o requires `--format json` or `--format jsonl`. \
+             Text-mode output carries ANSI color codes that are unsafe to \
+             persist (they would appear as escape sequences in the file). \
+             Re-run with `--format json -o {} ` or drop -o to print to stdout.",
+            "Input error:".red().bold(),
+            args.output
+                .as_ref()
+                .map_or("<path>".to_string(), |p| p.display().to_string()),
+        );
+        return ExitCode::from(2);
+    }
+    // R44 fix (dogfood pass 4): pre-fix `-o existing.json` overwrote
+    // the existing file with zero warning. Two back-to-back evades
+    // with the same output path silently clobbered the first
+    // result. Warn at the start of run if the file exists so the
+    // operator notices before re-launching scan; --force-overwrite
+    // opts back into the legacy behaviour.
+    if let Some(ref path) = args.output
+        && let Err(msg) = crate::helpers::confirm_output_overwrite_safe(path, args.force_overwrite)
+    {
+        eprintln!("{} {msg}", "Output error:".red().bold());
+        return ExitCode::from(2);
+    }
     let payload = match resolve_payload(&args) {
         Ok(p) => p,
         Err(msg) => {
@@ -118,6 +179,28 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Mutation engine generates O(payload_size × variants) bytes;
+    // 64 KiB random input still produced 17 GB RSS in dogfooding
+    // (the per-byte permutation explosion is super-linear). Real
+    // attack payloads are kilobytes at most — XSS one-liners
+    // (~256 bytes), SQL tautologies (~64 bytes), command-injection
+    // chains (~1 KiB). 16 KiB is generous for any legitimate
+    // payload AND keeps RSS under 1 GB in the worst case observed.
+    // Cap lives module-level (`EVADE_PAYLOAD_MAX_BYTES`) so the
+    // base64 input path can pre-gate before allocating the decode.
+    if payload.len() > EVADE_PAYLOAD_MAX_BYTES {
+        eprintln!(
+            "{} payload is {} bytes; the mutation engine fans out per-byte and \
+             accidentally piping a wordlist or large body OOMs the process. Cap is \
+             {} bytes ({} KiB). Use `wafrift scan` for path-level testing of large \
+             inputs, or split the payload into the actual attack vector.",
+            "Input error:".red().bold(),
+            payload.len(),
+            EVADE_PAYLOAD_MAX_BYTES,
+            EVADE_PAYLOAD_MAX_BYTES / 1024,
+        );
+        return ExitCode::from(2);
+    }
 
     let filter = match TechniqueFilter::parse(&args.only, &args.exclude) {
         Ok(f) => f,
@@ -314,9 +397,21 @@ pub fn run_evade(args: EvadeArgs, quiet: bool) -> ExitCode {
             // unchanged. Pinned at 1 today; integration tests assert
             // these keys exist so a regression that drops them lights
             // up at PR time.
+            // R53 pass-15 §8-A (CLAUDE.md §11 UTILIZATION): include
+            // a per-invocation timestamp. Pre-fix five concurrent
+            // `wafrift evade` invocations with the same payload
+            // produced structurally identical JSON envelopes;
+            // dedup / triage / audit tooling collapsed them.
+            // generated_at_unix_ms is additive (no schema bump
+            // needed — schema_version bumps only on remove/rename).
+            let generated_at_unix_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
             let mut top = json!({
                 "schema_version": 1u32,
                 "wafrift_version": env!("CARGO_PKG_VERSION"),
+                "generated_at_unix_ms": generated_at_unix_ms,
                 "variants": variant_objs,
             });
             if let Some(t) = trace.as_ref() {
@@ -518,6 +613,22 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
         if trimmed.is_empty() {
             return Err("--payload-b64 is empty".to_string());
         }
+        // R55 pass-17 I3 (CLAUDE.md §15 AUDIT / unbounded reads):
+        // base64 inflates 3 bytes → 4 chars, so a `--payload-b64` of
+        // ~22 KiB is the largest input that can decode to within the
+        // 16 KiB payload cap. Reject earlier inputs BEFORE the
+        // allocator materialises the decoded buffer — a 1 GiB base64
+        // arg used to fully decode to ~750 MiB before the post-decode
+        // check at the top of `run_evade` rejected it. Slack of +64
+        // covers padding chars and stray whitespace inside the string.
+        const B64_MAX_LEN: usize = (EVADE_PAYLOAD_MAX_BYTES * 4) / 3 + 64;
+        if trimmed.len() > B64_MAX_LEN {
+            return Err(format!(
+                "--payload-b64 is {} bytes encoded; the decoded payload would exceed the {} byte cap",
+                trimmed.len(),
+                EVADE_PAYLOAD_MAX_BYTES,
+            ));
+        }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(trimmed)
             .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(trimmed))
@@ -529,15 +640,13 @@ fn resolve_payload(args: &EvadeArgs) -> Result<String, String> {
     }
 
     if args.stdin {
-        use std::io::{IsTerminal, Read};
+        use std::io::IsTerminal;
         if io::stdin().is_terminal() {
             return Err(
                 "--stdin requires a pipe (e.g. `echo 'X' | wafrift evade --stdin ...`); refusing to wait on an interactive terminal".to_string(),
             );
         }
-        let mut buf: Vec<u8> = Vec::new();
-        io::stdin()
-            .read_to_end(&mut buf)
+        let mut buf = crate::safe_body::read_bounded_stdin_bytes(EVADE_STDIN_PAYLOAD_MAX_BYTES)
             .map_err(|e| format!("failed to read payload from stdin: {e}"))?;
         // PowerShell silently prepends a UTF-8 BOM (`\xEF\xBB\xBF`)
         // to piped output by default — `Write-Output "x" | wafrift
@@ -639,6 +748,7 @@ mod tests {
             target_context: None,
             explain: false,
             output: None,
+            force_overwrite: false,
         }
     }
 

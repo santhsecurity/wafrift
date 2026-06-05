@@ -30,6 +30,33 @@ pub enum WafModelError {
         #[source]
         source: regex::Error,
     },
+
+    /// The equivalence oracle's UCB bandit was asked to draw a
+    /// counterexample word but the search space was empty — the
+    /// hypothesis has zero states, or the alphabet has zero symbols.
+    /// Neither is a valid input; the caller must supply a non-trivial
+    /// automaton and a non-empty alphabet.
+    #[error(
+        "UCB bandit equivalence oracle: search space is empty \
+         (state cover is empty or alphabet has zero symbols). \
+         Supply a non-trivial hypothesis and a non-empty alphabet."
+    )]
+    EmptySearchSpace,
+
+    /// The L\* observation table was found to be non-closed while
+    /// building a hypothesis. Pre-R51 this surfaced as a panic (the
+    /// `.expect("table closed ⇒ …")` call sites in build_hypothesis).
+    /// A WAF that returns non-deterministic oracle answers (load-
+    /// balanced cluster with inconsistent rule sets, mid-scan rule
+    /// reload, etc.) can push two identical prefixes to different
+    /// rows and trip this invariant. R51 pass-13 I3 (CLAUDE.md §15).
+    #[error(
+        "L* observation table is not closed at hypothesis-build time \
+         — likely caused by a non-deterministic oracle (WAF cluster, \
+         mid-scan rule reload). Retry with a stable target or raise \
+         the query budget."
+    )]
+    TableNotClosed,
 }
 
 /// Convenience alias used throughout the crate.

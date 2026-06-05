@@ -163,12 +163,11 @@ impl LatticeSearch {
             return;
         }
         for &s in &self.strategies {
-            if self.skip_consecutive_dupes {
-                if let Some(last) = prefix.last() {
-                    if *last == s {
-                        continue;
-                    }
-                }
+            if self.skip_consecutive_dupes
+                && let Some(last) = prefix.last()
+                && *last == s
+            {
+                continue;
             }
             prefix.push(s);
             self.enumerate_at_depth(remaining - 1, prefix, out);

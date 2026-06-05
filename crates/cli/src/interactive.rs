@@ -16,7 +16,7 @@ use wafrift_strategy::gene_bank::GeneBank;
 /// Entry point. Returns `ExitCode::SUCCESS` after the user quits the
 /// menu, or `ExitCode::from(1)` if the terminal cannot be put into raw
 /// mode (rare — pre-flight TTY check catches the common case).
-pub fn run_interactive() -> ExitCode {
+pub(crate) fn run_interactive() -> ExitCode {
     use crossterm::{
         event::{self, Event, KeyCode, KeyEventKind},
         execute,

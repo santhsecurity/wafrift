@@ -180,6 +180,93 @@ mod tests {
         assert!(String::from_utf8_lossy(&p.raw_bytes).contains("1;ext=foo"));
     }
 
+    // R69 pass-21 — CVE-2025-55315 chunk-extension lone-LF tests.
+
+    #[test]
+    fn chunk_extension_lone_lf_payload_contains_lone_lf_after_extension() {
+        // The smoking gun: a bare `\n` (0x0A) MUST appear after the
+        // extension token and BEFORE the smuggled prefix. If a future
+        // "tidy" pass normalises this to `\r\n`, the entire CVE-2025-55315
+        // bypass mechanism evaporates because both parsers see the same
+        // legal CRLF and the desync is gone.
+        let p = chunk_extension_lone_lf(
+            "example.com",
+            "GET /admin HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        )
+        .unwrap();
+        // Find `evilext=` then assert the next byte is exactly 0x0A
+        // (bare LF) — not 0x0D 0x0A (CRLF).
+        let pos = p
+            .raw_bytes
+            .windows(b"evilext=".len())
+            .position(|w| w == b"evilext=")
+            .expect("extension marker must appear in wire bytes");
+        let next = p.raw_bytes[pos + b"evilext=".len()];
+        assert_eq!(
+            next, b'\n',
+            "byte after `evilext=` MUST be lone LF (0x0A); CRLF would defeat the desync"
+        );
+        // And the byte before MUST NOT be CR — a `\r\n` would mean we
+        // accidentally emitted a regular CRLF.
+        assert_ne!(
+            p.raw_bytes[pos + b"evilext=".len() - 1],
+            b'\r',
+            "no CR before the lone-LF — must be a bare LF, not CRLF"
+        );
+    }
+
+    #[test]
+    fn chunk_extension_lone_lf_smuggled_prefix_reaches_wire() {
+        // Operator-visible contract: the smuggled prefix MUST appear
+        // verbatim in the wire bytes. If it didn't, the bypass would
+        // generate a benign chunked request and never exercise the
+        // CVE.
+        let p = chunk_extension_lone_lf(
+            "example.com",
+            "GET /admin HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        )
+        .unwrap();
+        let wire = String::from_utf8_lossy(&p.raw_bytes);
+        assert!(
+            wire.contains("/admin"),
+            "smuggled prefix must reach the wire — pre-fix a re-encoding pass dropped it"
+        );
+    }
+
+    #[test]
+    fn chunk_extension_lone_lf_variant_tag_matches() {
+        // Anti-rig: the SmugglingVariant tag MUST be `ChunkExtensionLoneLf`,
+        // not `ChunkExtension`. The bandit and gene-bank dedup by variant
+        // tag, so a wrong tag would silently merge CVE-2025-55315 successes
+        // into the legacy chunk-extension pool.
+        let p = chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        assert_eq!(p.variant, SmugglingVariant::ChunkExtensionLoneLf);
+    }
+
+    #[test]
+    fn chunk_extension_lone_lf_terminates_chunked_body_cleanly() {
+        // Anti-rig: the outer chunked encoding MUST end with `0\r\n\r\n`
+        // — the standard zero-length terminator. Without it, the back-end
+        // hangs waiting for more chunks and the smuggling test times out
+        // rather than completing the desync.
+        let p = chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        assert!(
+            p.raw_bytes.ends_with(b"0\r\n\r\n"),
+            "outer chunked body must terminate with 0\\r\\n\\r\\n; got tail: {:?}",
+            &p.raw_bytes[p.raw_bytes.len().saturating_sub(16)..]
+        );
+    }
+
+    #[test]
+    fn chunk_extension_lone_lf_canary_is_unique_per_call() {
+        // Anti-rig: every call produces a distinct canary so dogfood
+        // log collation can correlate per-probe (per CLAUDE.md §13).
+        // A static canary would conflate probes across runs.
+        let a = chunk_extension_lone_lf("a.example", "GET / HTTP/1.1\r\nHost: a\r\n\r\n").unwrap();
+        let b = chunk_extension_lone_lf("a.example", "GET / HTTP/1.1\r\nHost: a\r\n\r\n").unwrap();
+        assert_ne!(a.canary.token, b.canary.token);
+    }
+
     #[test]
     fn method_body_smuggle_variants() {
         for method in ["GET", "PUT", "DELETE", "PATCH", "OPTIONS"] {
@@ -230,17 +317,14 @@ mod tests {
         assert_eq!(ps.len(), 3);
     }
 
-        #[test]
-    fn websocket_smuggle_stable_key() {
+    #[test]
+    fn websocket_smuggle_random_key() {
         let p1 = websocket_smuggle("example.com", "/chat").unwrap();
         let p2 = websocket_smuggle("example.com", "/chat").unwrap();
         let s1 = String::from_utf8_lossy(&p1.raw_bytes);
         let s2 = String::from_utf8_lossy(&p2.raw_bytes);
-        assert!(s1.contains("Sec-WebSocket-Key:"), "must include websocket key header");
-        assert_eq!(s1, s2, "same host+path must produce identical stable key");
-        let p3 = websocket_smuggle("example.com", "/other").unwrap();
-        let s3 = String::from_utf8_lossy(&p3.raw_bytes);
-        assert_ne!(s1, s3, "different paths must produce different keys");
+        assert!(s1.contains("Sec-WebSocket-Key:"));
+        assert_ne!(s1, s2, "keys should be random per call");
     }
 
     #[test]
@@ -264,17 +348,11 @@ mod tests {
         assert!(s.contains("Content-Length:"));
     }
 
-        #[test]
-    fn canary_stable_per_payload() {
+    #[test]
+    fn canary_unique_per_payload() {
         let p1 = cl_te("example.com", "X").unwrap();
         let p2 = cl_te("example.com", "X").unwrap();
-        assert_eq!(p1.canary.token, p2.canary.token,
-            "same inputs must produce stable canary token");
-        use crate::safety::Canary;
-        let c1 = Canary::from_context(b"context-a");
-        let c2 = Canary::from_context(b"context-b");
-        assert_ne!(c1.token, c2.token,
-            "from_context must produce unique tokens for different contexts");
+        assert_ne!(p1.canary.token, p2.canary.token);
     }
 
     #[test]
@@ -365,31 +443,20 @@ mod tests {
     }
 
     #[test]
-    fn cache_buster_stable_and_numeric() {
-        // After FNV fix: cache_buster() is stable; uniqueness comes from cache_buster_for.
-        let b = crate::safety::cache_buster();
-        assert!(!b.is_empty(), "cache_buster must not return empty");
-        assert!(
-            b.parse::<u64>().is_ok(),
-            "cache_buster must produce a base-10 integer, got: {b:?}"
-        );
-        let c = crate::safety::cache_buster();
-        assert_eq!(b, c, "cache_buster must be deterministically stable");
-    }
-
-    #[test]
-    fn cache_buster_for_unique_per_url() {
+    fn cache_buster_unique_and_numeric() {
+        // Audit (2026-05-10): pre-fix this only checked non-empty.
+        // A bug returning a constant `"x"` would have passed.
+        // Now: uniqueness across N calls + valid base-10 integer.
         use std::collections::HashSet;
         let mut seen = HashSet::new();
-        for i in 0u64..100 {
-            let url = format!("https://example.com/path?n={i}");
-            let b = crate::safety::cache_buster_for(url.as_bytes());
-            assert!(!b.is_empty(), "cache_buster_for must not return empty");
+        for _ in 0..100 {
+            let b = crate::safety::cache_buster();
+            assert!(!b.is_empty(), "cache_buster must not return empty");
             assert!(
                 b.parse::<u64>().is_ok(),
-                "cache_buster_for must produce a base-10 integer, got: {b:?}"
+                "cache_buster must produce a base-10 integer, got: {b:?}"
             );
-            assert!(seen.insert(b), "cache_buster_for collided for different URLs");
+            assert!(seen.insert(b), "cache_buster collided across 100 calls");
         }
     }
 
@@ -710,8 +777,7 @@ mod tests {
             "must produce padding_count + 1 headers (5 padding + 1 payload = 6)"
         );
         // Padding headers use X-Pad-{i} name.
-        for i in 0..5 {
-            let (name, val) = &headers[i];
+        for (i, (name, val)) in headers.iter().enumerate().take(5) {
             assert_eq!(
                 name,
                 &format!("X-Pad-{i}"),
@@ -748,8 +814,8 @@ mod tests {
         let headers = header_overflow_smuggle(94, "Authorization", "Bearer smuggled");
         assert_eq!(headers.len(), 95, "must have 95 headers total (94 padding + 1 payload)");
         // All padding headers must be X-Pad-0 through X-Pad-93.
-        for i in 0..94 {
-            assert_eq!(headers[i].0, format!("X-Pad-{i}"));
+        for (i, header) in headers.iter().enumerate().take(94) {
+            assert_eq!(header.0, format!("X-Pad-{i}"));
         }
         // Payload is the 95th.
         assert_eq!(headers[94].0, "Authorization");
@@ -884,7 +950,7 @@ mod tests {
     /// Body must be: `5\r\n\r\n0\r\n\r\n`
     /// - `5\r\n` = chunk-size line (3 bytes; CL covers ONLY these 3)
     /// - `\r\n`  = chunk-data (the 5-byte chunk uses \r\n as content — note:
-    ///             actual chunk would be 5 bytes but this probe is timing-based)
+    ///   actual chunk would be 5 bytes but this probe is timing-based)
     /// - `0\r\n\r\n` = terminating chunk
     ///
     /// CL=3 makes the CL-following front-end read exactly the 3-byte
@@ -1067,7 +1133,7 @@ mod tests {
     /// `vh_masked_header` returns exactly 2 variants.
     #[test]
     fn vh_masked_header_returns_two_variants() {
-        let variants = vh_masked_header("Host", "evil.internal");
+        let variants = vh_masked_header("Host", "evil.internal").unwrap();
         assert_eq!(
             variants.len(),
             2,
@@ -1078,7 +1144,7 @@ mod tests {
     /// Space-prefix variant has a leading space before the header name.
     #[test]
     fn vh_masked_header_space_prefix_wire_format() {
-        let variants = vh_masked_header("Host", "evil.internal");
+        let variants = vh_masked_header("Host", "evil.internal").unwrap();
         let space_variant = String::from_utf8_lossy(&variants[0].raw_bytes);
         // The header line must start with a space (obs-fold / SP prefix).
         assert!(
@@ -1090,7 +1156,7 @@ mod tests {
     /// Char-rewrite variant replaces the first character with 'X'.
     #[test]
     fn vh_masked_header_char_rewrite_wire_format() {
-        let variants = vh_masked_header("Host", "evil.internal");
+        let variants = vh_masked_header("Host", "evil.internal").unwrap();
         let xname_variant = String::from_utf8_lossy(&variants[1].raw_bytes);
         // "Host" → "Xost"
         assert!(
@@ -1102,7 +1168,7 @@ mod tests {
     /// `vh_masked_header` with empty header name — must not panic.
     #[test]
     fn vh_masked_header_empty_name_no_panic() {
-        let variants = vh_masked_header("", "value");
+        let variants = vh_masked_header("", "value").unwrap();
         assert_eq!(variants.len(), 2, "must still return 2 variants for empty name");
         // Space-prefix: " : value"
         let s0 = String::from_utf8_lossy(&variants[0].raw_bytes);
@@ -1110,6 +1176,44 @@ mod tests {
         // Char-rewrite: empty name → "X-Unknown"
         let s1 = String::from_utf8_lossy(&variants[1].raw_bytes);
         assert!(s1.contains("X-Unknown: value\r\n"), "char-rewrite with empty name must use X-Unknown");
+    }
+
+    /// CRLF injection in masked_name is rejected — anti-rig for the
+    /// `.ok()` silent-drop bug (§15 AUDIT HUNTS: CRLF injection).
+    #[test]
+    fn vh_masked_header_rejects_crlf_in_name() {
+        let result = vh_masked_header("Host\r\nX-Injected: evil", "val");
+        assert!(
+            result.is_err(),
+            "CRLF in masked_name must be rejected, not silently swallowed"
+        );
+    }
+
+    /// CRLF injection in value is rejected.
+    #[test]
+    fn vh_masked_header_rejects_crlf_in_value() {
+        let result = vh_masked_header("Host", "evil.internal\r\nX-Injected: payload");
+        assert!(
+            result.is_err(),
+            "CRLF in value must be rejected"
+        );
+    }
+
+    /// NUL byte in masked_name is rejected.
+    #[test]
+    fn vh_masked_header_rejects_nul_in_name() {
+        let result = vh_masked_header("Host\0extra", "val");
+        assert!(
+            result.is_err(),
+            "NUL byte in masked_name must be rejected"
+        );
+    }
+
+    /// LF-only (no CR) in value is also rejected.
+    #[test]
+    fn vh_masked_header_rejects_lf_in_value() {
+        let result = vh_masked_header("X-Foo", "bar\nbaz");
+        assert!(result.is_err(), "bare LF in value must be rejected");
     }
 
     // ── 3. expect_100_smuggle ───────────────────────────────────────────────
@@ -1225,13 +1329,11 @@ mod tests {
         // Payload appears after stage 2.
         assert!(s.contains("PAYLOAD"), "caller payload must appear");
         // Stage 1's Content-Length must equal the byte length of stage 2.
-        let stage2_body = format!(
-            "POST /images/ HTTP/1.1\r\n\
+        let stage2_body = "POST /images/ HTTP/1.1\r\n\
              Host: t\r\n\
              Content-Length: 0\r\n\
              \r\n\
-             PAYLOAD"
-        );
+             PAYLOAD";
         let expected_cl = stage2_body.len();
         assert!(
             s.contains(&format!("Content-Length: {expected_cl}\r\n")),
@@ -1260,7 +1362,7 @@ mod tests {
     /// `malformed_host_split` returns one payload per delimiter (8).
     #[test]
     fn malformed_host_split_variant_count() {
-        let variants = malformed_host_split("foo");
+        let variants = malformed_host_split("foo").unwrap();
         assert_eq!(
             variants.len(),
             8,
@@ -1272,7 +1374,7 @@ mod tests {
     /// All variants have a `Host:` header and end with `\r\n\r\n`.
     #[test]
     fn malformed_host_split_structure() {
-        for v in malformed_host_split("example.com") {
+        for v in malformed_host_split("example.com").unwrap() {
             let s = String::from_utf8_lossy(&v.raw_bytes);
             assert!(s.contains("Host: "), "must have Host: header, got:\n{s}");
             assert!(
@@ -1286,7 +1388,7 @@ mod tests {
     /// Delimiter characters are inserted into the host value.
     #[test]
     fn malformed_host_split_delimiters_present() {
-        let variants = malformed_host_split("bar");
+        let variants = malformed_host_split("bar").unwrap();
         let raw_strs: Vec<_> = variants
             .iter()
             .map(|v| String::from_utf8_lossy(&v.raw_bytes).to_string())
@@ -1303,7 +1405,7 @@ mod tests {
     /// `malformed_host_split` with very short host (shorter than insert_pos=3).
     #[test]
     fn malformed_host_split_short_host() {
-        let variants = malformed_host_split("ab");
+        let variants = malformed_host_split("ab").unwrap();
         // Must not panic; all must have a Host header.
         for v in &variants {
             let s = String::from_utf8_lossy(&v.raw_bytes);
@@ -1339,7 +1441,7 @@ mod tests {
         ];
         for case in cases {
             // Must not panic.
-            let variants = malformed_host_split(case);
+            let variants = malformed_host_split(case).unwrap();
             assert_eq!(variants.len(), 8, "must always produce 8 variants for input {case:?}");
             for v in &variants {
                 // Must produce a syntactically valid GET request with a Host header.
@@ -1444,7 +1546,7 @@ mod tests {
     /// `chunk_extension_variants` returns exactly 8 variants.
     #[test]
     fn chunk_extension_variants_count() {
-        let variants = chunk_extension_variants("SMUGGLED");
+        let variants = chunk_extension_variants("SMUGGLED").unwrap();
         assert_eq!(
             variants.len(),
             8,
@@ -1456,7 +1558,7 @@ mod tests {
     /// Standard key=value extension variant wire format.
     #[test]
     fn chunk_extension_variants_standard_wire_format() {
-        let variants = chunk_extension_variants("BODY");
+        let variants = chunk_extension_variants("BODY").unwrap();
         let standard = String::from_utf8_lossy(&variants[0].raw_bytes);
         assert!(
             standard.contains("1;x=y\r\nX\r\n"),
@@ -1469,7 +1571,7 @@ mod tests {
     /// Tab-separated extension variant has `\t` between `;` and name.
     #[test]
     fn chunk_extension_variants_tab_extension() {
-        let variants = chunk_extension_variants("");
+        let variants = chunk_extension_variants("").unwrap();
         let tab_variant = String::from_utf8_lossy(&variants[1].raw_bytes);
         assert!(
             tab_variant.contains(";\t"),
@@ -1480,7 +1582,7 @@ mod tests {
     /// Quoted-string extension variant preserves the semicolon inside quotes.
     #[test]
     fn chunk_extension_variants_quoted_string() {
-        let variants = chunk_extension_variants("Q");
+        let variants = chunk_extension_variants("Q").unwrap();
         let quoted = String::from_utf8_lossy(&variants[4].raw_bytes);
         assert!(
             quoted.contains(";x=\"y;z\"\r\nX\r\n"),
@@ -1491,7 +1593,7 @@ mod tests {
     /// All 8 variants use `Transfer-Encoding: chunked`.
     #[test]
     fn chunk_extension_variants_all_use_chunked_te() {
-        for v in chunk_extension_variants("PAYLOAD") {
+        for v in chunk_extension_variants("PAYLOAD").unwrap() {
             let s = String::from_utf8_lossy(&v.raw_bytes);
             assert!(
                 s.contains("Transfer-Encoding: chunked\r\n"),
@@ -1503,13 +1605,113 @@ mod tests {
     /// All 8 variants contain the terminating chunk `0\r\n\r\n`.
     #[test]
     fn chunk_extension_variants_all_have_terminator() {
-        for v in chunk_extension_variants("END") {
+        for v in chunk_extension_variants("END").unwrap() {
             assert!(
                 v.raw_bytes.windows(5).any(|w| w == b"0\r\n\r\n"),
                 "all variants must have terminating chunk, got:\n{}",
                 String::from_utf8_lossy(&v.raw_bytes)
             );
         }
+    }
+
+    // ── §15 hostile-input regression tests ──────────────────────────────────
+
+    /// `malformed_host_split` with an embedded CRLF must return Err.
+    ///
+    /// Pre-fix: the function had no guard and would interpolate the CRLF
+    /// directly into `Host: {mangled}\r\n`, injecting a raw header into
+    /// all 8 probe payloads.
+    #[test]
+    fn malformed_host_split_rejects_crlf_injection() {
+        use crate::safety::SafetyError;
+        // CR+LF embedded in host_value
+        let err = malformed_host_split("abc\r\nX-Evil: injected");
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "CRLF in host_value must be rejected; got: {err:?}"
+        );
+        // Bare LF
+        let err = malformed_host_split("abc\nEvil");
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "bare LF in host_value must be rejected; got: {err:?}"
+        );
+        // NUL byte (truncates Host at NUL on many stacks)
+        let err = malformed_host_split("abc\x00.evil.com");
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "NUL byte in host_value must be rejected; got: {err:?}"
+        );
+        // Clean value still succeeds
+        malformed_host_split("example.com").expect("clean host_value must succeed");
+    }
+
+    /// `h2c_smuggle` with a CRLF-embedded `http2_settings` must return Err.
+    ///
+    /// Pre-fix: only `host` was guarded; `http2_settings` was interpolated
+    /// verbatim into `HTTP2-Settings: {settings}\r\n`.
+    #[test]
+    fn h2c_smuggle_rejects_crlf_in_settings() {
+        use crate::safety::SafetyError;
+        let err = h2c_smuggle("example.com", Some("AAAA\r\nEvil: hdr"));
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "CRLF in http2_settings must be rejected; got: {err:?}"
+        );
+        let err = h2c_smuggle("example.com", Some("AAAA\nEvil"));
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "bare LF in http2_settings must be rejected; got: {err:?}"
+        );
+        // None (default) must still succeed
+        h2c_smuggle("example.com", None).expect("None settings must succeed");
+        // Safe caller-supplied value must succeed
+        h2c_smuggle("example.com", Some("AAQAAA")).expect("safe settings must succeed");
+    }
+
+    /// `h2c_post_smuggle` with a CRLF-embedded `http2_settings` must return Err.
+    ///
+    /// Same vulnerability as `h2c_smuggle` — the `http2_settings` parameter
+    /// was not guarded before interpolation into `HTTP2-Settings: {settings}\r\n`.
+    #[test]
+    fn h2c_post_smuggle_rejects_crlf_in_settings() {
+        use crate::safety::SafetyError;
+        let err = h2c_post_smuggle("example.com", b"body", Some("X\r\nEvil: yes"));
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "CRLF in http2_settings must be rejected; got: {err:?}"
+        );
+        let err = h2c_post_smuggle("example.com", b"body", Some("X\x00evil"));
+        assert!(
+            matches!(err, Err(SafetyError::HeaderInjection)),
+            "NUL in http2_settings must be rejected; got: {err:?}"
+        );
+        // None must succeed
+        h2c_post_smuggle("example.com", b"body", None)
+            .expect("None settings must succeed");
+    }
+
+    /// `chunk_extension_variants` with an oversized body must return Err.
+    ///
+    /// Pre-fix: the comment claimed "length-only guard" but no guard existed.
+    /// An 8× amplification (one clone per variant) on a 500 MiB body would
+    /// exhaust ~4 GiB of RAM. The fix adds a 64 KiB cap.
+    #[test]
+    fn chunk_extension_variants_rejects_oversized_body() {
+        use crate::safety::SafetyError;
+        // One byte over the 64 KiB limit must be rejected.
+        let over = "A".repeat(64 * 1024 + 1);
+        let err = chunk_extension_variants(&over);
+        assert!(
+            matches!(err, Err(SafetyError::PrefixTooLong { .. })),
+            "body over 64 KiB must be rejected; got: {err:?}"
+        );
+        // Exactly at the limit must succeed.
+        let exactly = "B".repeat(64 * 1024);
+        chunk_extension_variants(&exactly)
+            .expect("body at exactly 64 KiB must succeed");
+        // Empty body must succeed.
+        chunk_extension_variants("").expect("empty body must succeed");
     }
 
     // ── CVE / real-world adversarial payloads ───────────────────────────────
@@ -1588,7 +1790,7 @@ mod tests {
                         assert!(!p.raw_bytes.is_empty(), "zero_cl_desync must not be empty");
 
                         // 2. vh_masked_header
-                        let vs = vh_masked_header("Host", "t");
+                        let vs = vh_masked_header("Host", "t").unwrap();
                         assert_eq!(vs.len(), 2, "vh_masked_header must return 2");
 
                         // 3. expect_100_smuggle
@@ -1608,7 +1810,7 @@ mod tests {
                         assert!(!bytes.is_empty());
 
                         // 7. malformed_host_split
-                        let vs = malformed_host_split("example.com");
+                        let vs = malformed_host_split("example.com").unwrap();
                         assert_eq!(vs.len(), 8);
 
                         // 8. browser_powered_h2_downgrade
@@ -1620,7 +1822,7 @@ mod tests {
                         assert!(!bytes.is_empty());
 
                         // 10. chunk_extension_variants
-                        let vs = chunk_extension_variants("X");
+                        let vs = chunk_extension_variants("X").unwrap();
                         assert_eq!(vs.len(), 8);
                     }
                 })

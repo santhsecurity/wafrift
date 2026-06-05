@@ -8,23 +8,11 @@
 //!
 //! Uses `#[serial]` on mock-server tests to prevent Windows TCP saturation.
 
-use std::process::Command;
-
 use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 /// Mock server: always returns 200 OK (no WAF blocking — all variants pass).
 async fn spawn_allow_all_mock() -> std::net::SocketAddr {
@@ -50,23 +38,9 @@ async fn spawn_allow_all_mock() -> std::net::SocketAddr {
             });
         }
     });
-    // Probe-until-ready using stdlib connect (avoids tokio-reactor saturation).
+    // Probe-until-ready. R66 §7 DEDUP via common::wait_for_server.
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock never became ready at {addr}");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
 }
@@ -87,10 +61,22 @@ fn scan_appears_in_main_help() {
 fn scan_help_exits_0_and_documents_flags() {
     let (code, stdout, _) = wafrift(&["scan", "--help"]);
     assert_eq!(code, 0, "scan --help must exit 0");
-    assert!(stdout.contains("--payload"), "must document --payload: {stdout}");
-    assert!(stdout.contains("--format"), "must document --format: {stdout}");
-    assert!(stdout.contains("--level"), "must document --level: {stdout}");
-    assert!(stdout.contains("--param"), "must document --param: {stdout}");
+    assert!(
+        stdout.contains("--payload"),
+        "must document --payload: {stdout}"
+    );
+    assert!(
+        stdout.contains("--format"),
+        "must document --format: {stdout}"
+    );
+    assert!(
+        stdout.contains("--level"),
+        "must document --level: {stdout}"
+    );
+    assert!(
+        stdout.contains("--param"),
+        "must document --param: {stdout}"
+    );
 }
 
 // ── Argument validation (offline) ─────────────────────────────────────────
@@ -171,28 +157,59 @@ fn scan_json_output_has_required_fields_on_allow_all_target() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--no-auto-escalate",
+        "--no-probe-surfaces",
     ]);
-    assert_eq!(code, 0, "scan on allow-all must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 6,
+        "unguarded allow-all mock with zero meaningful bypass → exit 6; stderr: {stderr}"
+    );
 
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("scan --format json must emit valid JSON");
 
     // Required top-level fields in the scan JSON output.
-    assert!(
-        v["target"].is_string(),
-        "target must be a string: {v}"
-    );
+    assert!(v["target"].is_string(), "target must be a string: {v}");
     assert!(
         v["bypass_variants"].is_array(),
         "bypass_variants must be an array: {v}"
     );
+    assert!(v["blocked"].is_number(), "blocked must be a number: {v}");
     assert!(
-        v["blocked"].is_number(),
-        "blocked must be a number: {v}"
+        v["bypass_rate_pct"].is_number() || v["bypass_rate_pct"].is_null(),
+        "bypass_rate_pct is a number when waf_in_play else null: {v}"
     );
     assert!(
-        v["bypass_rate_pct"].is_number(),
-        "bypass_rate_pct must be a number: {v}"
+        v["waf_engagement"]["level"].is_string(),
+        "waf_engagement.level must be present: {v}"
+    );
+    assert!(
+        v["meaningful_bypass_rate_pct"].is_number(),
+        "meaningful_bypass_rate_pct must be a number: {v}"
+    );
+    assert!(
+        v["unguarded_pass"].is_number(),
+        "unguarded_pass must be a number: {v}"
+    );
+    assert!(
+        v["meaningful_bypassed"].is_number(),
+        "meaningful_bypassed must be a number: {v}"
+    );
+    // Identical mock body for every request → unguarded, not a WAF bypass finding.
+    assert_eq!(
+        v["waf_engagement"]["level"].as_str().unwrap(),
+        "unguarded",
+        "allow-all identical mock must be unguarded: {v}"
+    );
+    assert_eq!(v["meaningful_bypassed"].as_u64().unwrap(), 0);
+    assert_eq!(
+        v["waf_bypass"]["verdict"].as_str().unwrap(),
+        "waf_not_in_play"
+    );
+    assert!(!v["waf_bypass"]["waf_in_play"].as_bool().unwrap());
+    assert!(
+        v["bypass_rate_pct"].is_null(),
+        "legacy rate must be null when no WAF: {v}"
     );
     assert!(
         v["baseline_transport_ok"].is_boolean(),
@@ -202,14 +219,30 @@ fn scan_json_output_has_required_fields_on_allow_all_target() {
         v["aborted_rate_limited"].is_boolean(),
         "aborted_rate_limited must be boolean: {v}"
     );
+    assert!(
+        v["challenges"].is_number(),
+        "challenges must be a number in JSON output: {v}"
+    );
     // Each bypass_variant has payload + techniques + repro_curl.
     let variants = v["bypass_variants"].as_array().unwrap();
     if !variants.is_empty() {
         let bv = &variants[0];
-        assert!(bv["payload"].is_string(), "bypass_variant.payload must be string: {bv}");
-        assert!(bv["techniques"].is_array(), "bypass_variant.techniques must be array: {bv}");
-        assert!(bv["repro_curl"].is_string(), "bypass_variant.repro_curl must be string: {bv}");
-        assert!(bv["confidence"].is_number(), "bypass_variant.confidence must be number: {bv}");
+        assert!(
+            bv["payload"].is_string(),
+            "bypass_variant.payload must be string: {bv}"
+        );
+        assert!(
+            bv["techniques"].is_array(),
+            "bypass_variant.techniques must be array: {bv}"
+        );
+        assert!(
+            bv["repro_curl"].is_string(),
+            "bypass_variant.repro_curl must be string: {bv}"
+        );
+        assert!(
+            bv["confidence"].is_number(),
+            "bypass_variant.confidence must be number: {bv}"
+        );
     }
 }
 
@@ -231,9 +264,8 @@ fn scan_blocked_target_reports_zero_bypass_variants() {
         .build()
         .unwrap();
 
-    let listener = rt.block_on(async {
-        tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
-    });
+    let listener =
+        rt.block_on(async { tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap() });
     let addr = listener.local_addr().unwrap();
 
     rt.spawn(async move {
@@ -261,7 +293,8 @@ fn scan_blocked_target_reports_zero_bypass_variants() {
     {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100)) {
+            match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(100))
+            {
                 Ok(_) => break,
                 Err(_) => {
                     if std::time::Instant::now() >= deadline {
@@ -285,11 +318,19 @@ fn scan_blocked_target_reports_zero_bypass_variants() {
         "--quiet",
         "--delay-ms",
         "0",
+        "--no-auto-escalate",
+        "--no-probe-surfaces",
     ]);
-    assert_eq!(code, 0, "scan against always-403 must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 4,
+        "always-403 WAF with no bypass → exit 4; stderr: {stderr}"
+    );
 
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("scan output must be valid JSON");
     // bypass_variants must be an array (may be empty for a solid block-all).
-    assert!(v["bypass_variants"].is_array(), "bypass_variants must be array: {v}");
+    assert!(
+        v["bypass_variants"].is_array(),
+        "bypass_variants must be array: {v}"
+    );
 }

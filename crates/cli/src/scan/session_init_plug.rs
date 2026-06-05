@@ -14,7 +14,8 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use crate::session_init::{SessionState, establish_from_file};
+use crate::session_init::{SessionState, establish_from_file_with_headers};
+use reqwest::header::HeaderMap;
 
 /// Run the session-init phase. Returns:
 ///
@@ -29,11 +30,12 @@ use crate::session_init::{SessionState, establish_from_file};
 ///   means subsequent scans will be anonymous, which would
 ///   silently change the scan's semantics — explicit error is
 ///   the right move).
-pub async fn run(
+pub(crate) async fn run(
     session_init_path: Option<&Path>,
     insecure: bool,
     scan_text: bool,
     timeout: Duration,
+    default_headers: HeaderMap,
 ) -> Result<Option<SessionState>, ExitCode> {
     let Some(path) = session_init_path else {
         return Ok(None);
@@ -41,7 +43,7 @@ pub async fn run(
     if scan_text {
         println!("{}", "[0/3] Establishing session...".bold().cyan());
     }
-    match establish_from_file(path, timeout, insecure).await {
+    match establish_from_file_with_headers(path, timeout, insecure, default_headers).await {
         Ok(state) => {
             if scan_text {
                 println!("  {} {}", "✓".green(), state.summary.bright_white());
@@ -62,7 +64,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn run_with_none_path_returns_ok_none_no_io() {
         // The fast path — no --session-init flag, no work.
-        let result = run(None, false, false, Duration::from_secs(1)).await;
+        let result = run(None, false, false, Duration::from_secs(1), HeaderMap::new()).await;
         assert!(matches!(result, Ok(None)));
     }
 
@@ -74,7 +76,14 @@ mod tests {
         // semantics).
         let missing =
             std::env::temp_dir().join("wafrift-scan-session-init-DOES-NOT-EXIST-9999.curl");
-        let result = run(Some(&missing), false, false, Duration::from_secs(2)).await;
+        let result = run(
+            Some(&missing),
+            false,
+            false,
+            Duration::from_secs(2),
+            HeaderMap::new(),
+        )
+        .await;
         match result {
             Err(_) => {} // ExitCode::from(1) — Debug not derivable on ExitCode
             Ok(_) => panic!("missing file must error"),
@@ -91,7 +100,14 @@ mod tests {
             std::process::id()
         ));
         std::fs::write(&path, "").unwrap();
-        let result = run(Some(&path), false, false, Duration::from_secs(2)).await;
+        let result = run(
+            Some(&path),
+            false,
+            false,
+            Duration::from_secs(2),
+            HeaderMap::new(),
+        )
+        .await;
         match result {
             Err(_) => {}
             Ok(_) => panic!("empty file must error"),

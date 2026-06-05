@@ -16,6 +16,18 @@ Per (corpus case, WAF target) we measure:
    techniques were applied?
 3. **Bypass rate** — `bypassed / total` across all (case, strategy, variant)
    triples where raw was blocked.
+4. **Send errors count as non-bypasses — deliberate, conservative.** A
+   variant whose request fails to *send* (transport timeout, DNS failure,
+   connection reset, rate-limit drop, or a request the HTTP client refuses
+   to build) stays in `total` and is counted as a non-bypass, never a
+   bypass — a bypass must be a *confirmed* get-through to the origin, and
+   an un-sent variant cannot be one. This can only ever **deflate** the
+   measured rate, never inflate it: on a flaky or actively-hostile target
+   (where transport errors are common) the reported rate is a conservative
+   **floor**, not a point estimate — infrastructure noise pulls it down,
+   not up. (The `equiv-cegis` *learner* excludes errored sends from its
+   model; the headline *metric* deliberately includes them, to keep the
+   number a hard, never-inflated floor.)
 
 ## Headline numbers
 
@@ -72,17 +84,23 @@ For internal iteration, default `--variants 5` is fine.
 
 ## Oracle (planned, not yet wired)
 
-Today we count a bypass when the WAF returns non-blocked. That includes
-"WAF allowed the request, but it was malformed garbage that no parser
-would accept." That's a fake bypass.
+**Status: ENFORCED.** As of R32 the per-attack-class oracle is
+mandatory and the `--oracle-gate` flag is a deprecated no-op.
+For each candidate bypass we construct the appropriate oracle —
+`SqlOracle`, `XssOracle`, `SstiOracle`, `CmdiOracle`, `PathOracle`
+— via the `PayloadOracle` trait and call `.is_semantically_valid(
+original, transformed)`. Only payloads where the oracle confirms
+structural validity contribute to `evaded_summary.overall_bypass_rate`.
+The legacy non-oracle counter is still emitted in the JSON as
+`legacy_inflated_rate_DO_NOT_USE` for backwards-compat diffing
+and is explicitly flagged as deprecated.
 
-Next step: per-attack-class oracle. For each successful bypass, run the
-payload through `wafrift_oracle::<class>::is_semantically_valid` (the
-oracle layer that already exists for SQL, XSS, SSTI, CMDi, Path). Only
-count bypasses where the oracle confirms structural validity.
-
-This will likely **lower** reported bypass rates substantially, which is
-the point. Honest numbers are useful; inflated numbers are a liability.
+Pre-oracle: a bypass meant "the WAF returned non-blocked"; that
+includes "WAF allowed the request but the payload was malformed
+garbage no parser would accept" — fake bypasses inflating the
+headline. Oracle-gated counts are the honest number; the inflated
+counter is preserved only so external diffs against pre-oracle
+results don't break.
 
 ## Differential vs other tools (planned)
 

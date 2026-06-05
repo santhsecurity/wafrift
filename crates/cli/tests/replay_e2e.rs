@@ -15,9 +15,10 @@
 //! 7. Missing required args exit non-zero.
 //! 8. Unknown technique selector exits non-zero.
 
-use std::process::Command;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 /// Spawn a mock that returns `status_code` for every request.
 async fn spawn_status_mock(status_code: u16, body: &'static str) -> std::net::SocketAddr {
@@ -48,36 +49,9 @@ async fn spawn_status_mock(status_code: u16, body: &'static str) -> std::net::So
     });
     // Probe-until-ready using stdlib connect (avoids reactor saturation).
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
-}
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
 }
 
 // ── Help surface ──────────────────────────────────────────────────────────
@@ -141,7 +115,10 @@ fn replay_json_output_has_required_fields() {
     assert!(v["param"].is_string(), "param must be string: {v}");
     assert!(v["method"].is_string(), "method must be string: {v}");
     assert!(v["techniques"].is_array(), "techniques must be array: {v}");
-    assert!(v["repro_curl"].is_string(), "repro_curl must be string: {v}");
+    assert!(
+        v["repro_curl"].is_string(),
+        "repro_curl must be string: {v}"
+    );
 }
 
 #[test]
@@ -217,9 +194,8 @@ fn replay_200_response_sets_blocked_false() {
         200,
         "status must be 200: {v}"
     );
-    assert_eq!(
-        v["blocked"].as_bool().unwrap_or(true),
-        false,
+    assert!(
+        !v["blocked"].as_bool().unwrap_or(true),
         "200 response must set blocked=false: {v}"
     );
 }
@@ -256,9 +232,8 @@ fn replay_403_response_sets_blocked_true() {
         403,
         "status must be 403: {v}"
     );
-    assert_eq!(
+    assert!(
         v["blocked"].as_bool().unwrap_or(false),
-        true,
         "403 response must set blocked=true: {v}"
     );
 }
@@ -274,7 +249,10 @@ fn replay_missing_target_exits_nonzero() {
         "--technique",
         "encoding/url/single",
     ]);
-    assert_ne!(code, 0, "missing --target must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "missing --target must exit non-zero; stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -286,7 +264,10 @@ fn replay_missing_payload_exits_nonzero() {
         "--technique",
         "encoding/url/single",
     ]);
-    assert_ne!(code, 0, "missing --payload must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "missing --payload must exit non-zero; stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -301,5 +282,8 @@ fn replay_missing_technique_source_exits_nonzero() {
         "--format",
         "json",
     ]);
-    assert_ne!(code, 0, "missing technique source must exit non-zero; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "missing technique source must exit non-zero; stderr: {stderr}"
+    );
 }

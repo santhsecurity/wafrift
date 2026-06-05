@@ -11,6 +11,7 @@ keywords = ["waf", "evolution", "security", "fuzzing", "evasion"]
 categories = ["algorithms", "network-programming"]
 
 [dependencies]
+boundedio = { workspace = true }
 wafrift-types = { workspace = true }
 wafrift-encoding = { workspace = true }
 wafrift-detect = { workspace = true }

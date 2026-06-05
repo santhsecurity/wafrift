@@ -57,16 +57,6 @@ pub fn classify_status_code(code: u16) -> (Verdict, Signal) {
     }
 }
 
-/// Determine if a status code is definitively terminal (does not need body
-/// or connection signals to resolve).
-#[must_use]
-pub fn is_definitive_status(code: u16) -> bool {
-    matches!(
-        code,
-        200 | 201 | 202 | 204 | 401 | 403 | 406 | 418 | 444 | 499 | 500 | 502 | 504
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,12 +89,6 @@ mod tests {
             let (v, _) = classify_status_code(code);
             assert!(matches!(v, Verdict::ServerError { .. }));
         }
-    }
-
-    #[test]
-    fn definitive_detection() {
-        assert!(is_definitive_status(403));
-        assert!(!is_definitive_status(503));
     }
 
     #[test]
@@ -176,6 +160,71 @@ mod tests {
                 matches!(v, Verdict::ServerError { .. }),
                 "{code} should be server_error"
             );
+        }
+    }
+
+    // -- §12 boundary tests -------------------------------------------------
+
+    #[test]
+    fn boundary_exactly_400_is_blocked() {
+        // 400 is not in the explicit match arm but falls in 400..=499
+        // catch-all, so it must be blocked.
+        let (v, _) = classify_status_code(400);
+        assert!(v.is_blocked(), "400 must be classified as blocked");
+    }
+
+    #[test]
+    fn boundary_exactly_499_is_blocked() {
+        let (v, _) = classify_status_code(499);
+        // 499 is explicitly handled as blocked + Timeout signal
+        assert!(v.is_blocked(), "499 must be classified as blocked");
+    }
+
+    #[test]
+    fn boundary_exactly_500_is_server_error() {
+        let (v, _) = classify_status_code(500);
+        assert!(matches!(v, Verdict::ServerError { .. }), "500 must be server_error");
+    }
+
+    #[test]
+    fn boundary_exactly_599_is_server_error() {
+        let (v, _) = classify_status_code(599);
+        assert!(matches!(v, Verdict::ServerError { .. }), "599 must be server_error");
+    }
+
+    #[test]
+    fn boundary_exactly_600_is_allowed_catch_all() {
+        // 600 falls outside 400..=499 and 500..=599, so it becomes
+        // the last catch-all branch (allowed). Pin this so a future
+        // re-ordering of the match arms doesn't silently change the
+        // semantics.
+        let (v, _) = classify_status_code(600);
+        assert!(v.is_allowed(), "600 must fall through to allowed catch-all");
+    }
+
+    #[test]
+    fn signal_carries_the_original_status_code() {
+        // The signal must embed the exact code that was classified,
+        // not a normalized or rounded value.
+        let (_, sig) = classify_status_code(418);
+        match sig {
+            Signal::StatusCode { code, .. } => {
+                assert_eq!(code, 418, "signal must carry code=418");
+            }
+            other => panic!("unexpected signal: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signal_expected_is_always_200() {
+        // `expected` is pinned at 200 for all status codes so the
+        // operator sees "I expected 200, got 418" in reports.
+        let (_, sig) = classify_status_code(418);
+        match sig {
+            Signal::StatusCode { expected, .. } => {
+                assert_eq!(expected, 200, "expected must be 200");
+            }
+            other => panic!("unexpected signal: {other:?}"),
         }
     }
 }

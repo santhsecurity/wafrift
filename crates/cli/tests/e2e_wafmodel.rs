@@ -102,22 +102,22 @@ fn harden_json_format_produces_valid_json() {
         "JSON must have 'all_proven' key"
     );
     assert!(v.get("classes").is_some(), "JSON must have 'classes' key");
-    assert!(
-        v["classes"].is_array(),
-        "'classes' must be a JSON array"
-    );
+    assert!(v["classes"].is_array(), "'classes' must be a JSON array");
 }
 
 #[test]
 fn harden_json_added_rules_have_correct_transform_array() {
     let (stdout, _e, _code) = run(&["harden", "--class", "xss", "--format", "json"]);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).expect("must be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("must be valid JSON");
     let classes = v["classes"].as_array().expect("classes is array");
     for class in classes {
-        let rules = class["added_rules"].as_array().expect("added_rules is array");
+        let rules = class["added_rules"]
+            .as_array()
+            .expect("added_rules is array");
         for rule in rules {
-            let tf = rule["transforms"].as_array().expect("transforms must be an array");
+            let tf = rule["transforms"]
+                .as_array()
+                .expect("transforms must be an array");
             assert!(
                 !tf.is_empty(),
                 "every added rule must have a non-empty transforms array"

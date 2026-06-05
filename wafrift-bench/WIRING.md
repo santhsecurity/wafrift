@@ -36,6 +36,7 @@ The bench harness exercises:
 | `content-type` | content_type::generate_variants_from_body (multipart, JSON, XML, ...) | parser-discrepancy attack |
 | `redos` | inline catastrophic-backtracking shape generator | regex DoS / fail-open trigger |
 | `differential` | evolution::differential::generate_probes filtered by class | rule-fingerprint coverage probe |
+| `ml-evasion` | strategy::apply_ml_evasion_if_applicable → wafmodel::propose_mutation + is_attack_payload (manifold-projected structural mutation), fired live + oracle-verified | ML-WAF structural evasion; routes ONLY when `--waf-name` is ML-backed (AWS/CF/Akamai bot-mgmt, Datadome) — a clean no-op on rule WAFs. Adaptive boundary descent (wafmodel::evade_ml driven by live feedback) is a tracked frontier item |
 
 ## What's wired into the proxy binary
 

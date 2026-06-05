@@ -1,12 +1,21 @@
 # Body substrings that indicate a request succeeded against the protected
 # application (not the WAF passing through, but the app actually responding
 # to authenticated/successful operations).
-
+#
+# MATCHING DISCIPLINE (read before adding a marker): these are matched with a
+# case-insensitive SUBSTRING test (`body.contains(marker)`), so a marker must
+# be a phrase that does NOT appear inside common failure/block wording or
+# unrelated tokens. Short generic words are unsafe:
+#   - "success"      matched "successfully blocked" on WAF block pages.
+#   - "authenticated" matched "unauthenticated" (the OPPOSITE meaning).
+#   - "home"         matched "chrome" — any block page mentioning the browser.
+# Those three produced false SuccessMarker signals, which (via the response
+# oracle's status-blocked-vs-success conflict rule) misclassified clean 403/401
+# blocks as Ambiguous. Prefer multi-word, success-specific phrases that a block
+# or "not authorized" page would never contain.
 patterns = [
     "welcome",
     "login successful",
-    "success",
-    "authenticated",
+    "authentication successful",
     "dashboard",
-    "home",
 ]

@@ -24,7 +24,7 @@
 //!
 //! Every parser-diff subcommand also builds its `reqwest::Client`
 //! from the exact same recipe: operator timeout + `--insecure` +
-//! limited-5 redirect + the shared `User-Agent` + `--proxy` /
+//! limited-5 redirect + the shared browser header identity + `--proxy` /
 //! `--header` plumbing via `pentest_client::apply_pentest_flags`.
 //! Pre-extract, that was 22 lines copy-pasted across nine command
 //! files — one line at a time, drifting each time someone tuned
@@ -37,6 +37,74 @@ use std::time::Duration;
 use colored::{ColoredString, Colorize};
 use reqwest::Client;
 
+/// Count the `"high"` and `"medium"` severity results in one pass.
+///
+/// R55 pass-17 I5b (CLAUDE.md §7 DEDUP): every `emit_output` in the
+/// parser-diff family started with the same two `iter().filter(...)
+/// .collect()` allocations. The collects were never used as Vecs —
+/// every consumer immediately called `.len()` on them. A two-line
+/// `count_*` helper removes 14 lines of duplicated filtering across
+/// the diff family and avoids the unnecessary allocation.
+pub(crate) fn count_high_medium<R>(results: &[R], severity: impl Fn(&R) -> &str) -> (usize, usize) {
+    let high = results.iter().filter(|r| severity(r) == "high").count();
+    let medium = results.iter().filter(|r| severity(r) == "medium").count();
+    (high, medium)
+}
+
+/// Print the canonical text summary banner the parser-diff family
+/// emits at the top of its non-JSON output.
+///
+/// `issue_phrase` is the full pluralisable noun phrase, including its
+/// `(s)` so the caller controls where the suffix lands grammatically
+/// (`"divergence(s)"` reads naturally; `"mutation(s) accepted by
+/// target"` keeps the suffix on the head noun).
+///
+/// R55 pass-17 I5 (CLAUDE.md §7 DEDUP): four `emit_output` functions
+/// (`body_diff`, `query_diff`, `header_diff`, `cors_diff`) each had
+/// the SAME six-line `println!("  {} {} divergence(s) — {} high, {}
+/// medium · {} error(s)" ...)` block with only the command label
+/// differing. Three already drift slightly (cors uses `"CORS
+/// issue(s)"` vs `"divergence(s)"`, the colour of the count word
+/// could trivially drift next). One copy here = one place to tune.
+pub(crate) fn print_text_summary(
+    cmd_label: &str,
+    issue_phrase: &str,
+    high: usize,
+    medium: usize,
+    errors: u32,
+) {
+    println!();
+    println!(
+        "  {} {} {issue_phrase} — {} high, {} medium · {errors} error(s)",
+        format!("[wafrift {cmd_label} summary]")
+            .bright_cyan()
+            .bold(),
+        (high + medium).to_string().bold().yellow(),
+        high.to_string().bright_red().bold(),
+        medium.to_string().yellow(),
+    );
+}
+
+/// Print the canonical "baseline HTTP X (Y bytes) → probe HTTP A (B
+/// bytes, Δ C%)" arrow that body_diff / query_diff / header_diff all
+/// emit per result.
+///
+/// R55 pass-17 I5. The 8-line block lived inline in 3 emit_output
+/// implementations; convergent so the next tuning (e.g. switch from
+/// `Δ {:+.1}%` to `Δ {:+.2}%` or colour-code the delta) lives here.
+pub(crate) fn print_baseline_probe_arrow(
+    baseline_status: u16,
+    baseline_body_len: usize,
+    probe_status: u16,
+    probe_body_len: usize,
+    body_delta_pct: f64,
+) {
+    println!(
+        "    {} baseline HTTP {baseline_status} ({baseline_body_len} bytes) → probe HTTP {probe_status} ({probe_body_len} bytes, Δ {body_delta_pct:+.1}%)",
+        "↘".bright_black(),
+    );
+}
+
 /// Render a `"high"` / `"medium"` / `"none"` severity string as the
 /// canonical coloured badge the parser-diff family prints in its
 /// per-probe summary. Extracted from 9 identical `match r.severity
@@ -44,7 +112,7 @@ use reqwest::Client;
 /// bright_black }` blocks so a future palette tweak lives in one
 /// place.
 #[must_use]
-pub fn severity_badge(severity: &str) -> ColoredString {
+pub(crate) fn severity_badge(severity: &str) -> ColoredString {
     match severity {
         "high" => severity.bright_red().bold(),
         "medium" => severity.yellow().bold(),
@@ -63,14 +131,14 @@ pub fn severity_badge(severity: &str) -> ColoredString {
 /// Gated `#[cfg(test)]` because every caller is in a test block;
 /// without the gate the bin compilation flags this as dead code.
 #[cfg(test)]
-pub const TEST_SETTLE: Duration = Duration::from_millis(200);
+pub(crate) const TEST_SETTLE: Duration = Duration::from_millis(200);
 
 /// Print `value` to stdout as 2-space-indented JSON, or on
 /// serialisation failure print a `JSON error: {e}` line to stderr
 /// (matching the contract every parser-diff `--format json` arm
 /// shipped pre-extract). Lifting the 4-line match means a future
 /// `--no-color` / structured-error policy lives in one place.
-pub fn print_pretty_json(value: &serde_json::Value) {
+pub(crate) fn print_pretty_json(value: &serde_json::Value) {
     match serde_json::to_string_pretty(value) {
         Ok(s) => println!("{s}"),
         Err(e) => eprintln!("JSON error: {e}"),
@@ -85,22 +153,36 @@ use crate::scan::pentest_client;
 /// per-request timeout, `--insecure` TLS-cert-verify bypass, limited-5
 /// redirect chain (parser-diff probes follow redirects so a routing
 /// probe lands on the right origin), the shared
-/// [`crate::config::shared_user_agent`] so the operator-configured UA
-/// flows through, and finally the pentest-plumbing of `--proxy` +
-/// `-H/--header` via [`pentest_client::apply_pentest_flags`]. Errors
+/// [`crate::config::shared_scan_browser_headers`] identity so the
+/// operator-configured UA and profile headers flow through, and finally
+/// the pentest-plumbing of `--proxy` + `-H/--header` via
+/// [`pentest_client::apply_pentest_flags`]. Errors
 /// emit a red diagnostic on stderr and return `ExitCode::from(1)` —
 /// matching the prior copy-pasted behaviour byte-for-byte so existing
 /// CI gates keep their exit-code contract.
-pub fn build_diff_http_client(
+pub(crate) fn build_diff_http_client(
     timeout_secs: u64,
     insecure: bool,
     proxy: Option<&str>,
     headers: &[String],
 ) -> Result<Client, ExitCode> {
-    let ua = crate::config::shared_user_agent();
-    let mut builder = wafrift_transport::base_client_builder(timeout_secs, insecure, Some(&ua))
-        .redirect(reqwest::redirect::Policy::limited(5));
-    builder = pentest_client::apply_pentest_flags_or_print(builder, proxy, headers, None)?;
+    let scan_identity = crate::config::shared_scan_browser_headers(None).map_err(|e| {
+        eprintln!(
+            "  {} {e}",
+            "✗ Failed to resolve browser headers:".red().bold()
+        );
+        ExitCode::from(1)
+    })?;
+    let default_headers = scan_identity.headers;
+    let mut builder = wafrift_transport::base_client_builder(timeout_secs, insecure, None)
+        .default_headers(default_headers.clone())
+        .redirect(crate::helpers::safe_redirect_policy(5));
+    builder = pentest_client::apply_pentest_flags_or_print(
+        builder,
+        proxy,
+        headers,
+        Some(&default_headers),
+    )?;
     builder.build().map_err(|e| {
         eprintln!("  {} {e}", "✗ Failed to build HTTP client:".red().bold());
         ExitCode::from(1)
@@ -115,7 +197,7 @@ pub fn build_diff_http_client(
 /// the 4-arg unpack at every site. A new diff cmd just adds a
 /// one-liner `impl_parser_diff_http_args!(NewDiffArgs);` (or
 /// hand-rolls the impl) and inherits the client wiring for free.
-pub trait ParserDiffHttpArgs {
+pub(crate) trait ParserDiffHttpArgs {
     fn timeout_secs(&self) -> u64;
     fn insecure(&self) -> bool;
     fn proxy(&self) -> Option<&str>;
@@ -129,20 +211,30 @@ pub trait ParserDiffHttpArgs {
 /// definitions in `h2_diff_cmd` and `query_diff_cmd`. Errors
 /// surface the reqwest error verbatim so a caller's `eprintln!`
 /// can name the failing URL.
-pub async fn fire_get_status_len(
+pub(crate) async fn fire_get_status_len(
     http: &Client,
     url: &str,
 ) -> std::result::Result<(u16, usize), String> {
     let resp = http.get(url).send().await.map_err(|e| format!("{e}"))?;
     let status = resp.status().as_u16();
-    let body = resp.bytes().await.map_err(|e| format!("{e}"))?;
+    // §15 OOM / decompression-bomb: cap the body so a hostile target can't
+    // serve a compressed bomb. The diff commands only need the body LENGTH
+    // to detect parser differentials; 8 MiB is far more than any real response.
+    // On overrun return the cap as the observed length (still a real signal —
+    // a response the bomb-cap fires on is structurally distinct from a 200-byte
+    // block page).
+    let body = crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok((status, body.len()))
 }
 
 /// Build the canonical parser-diff client straight from any
 /// [`ParserDiffHttpArgs`] view. Equivalent to spelling out the
 /// 4 accessors at the call site — see [`build_diff_http_client`].
-pub fn build_diff_http_client_for(args: &impl ParserDiffHttpArgs) -> Result<Client, ExitCode> {
+pub(crate) fn build_diff_http_client_for(
+    args: &impl ParserDiffHttpArgs,
+) -> Result<Client, ExitCode> {
     build_diff_http_client(
         args.timeout_secs(),
         args.insecure(),
@@ -192,7 +284,7 @@ macro_rules! impl_parser_diff_http_args {
 /// don't have to construct snapshots, while the actual % formula
 /// lives in respdiff (shared with every other Santh scanner).
 #[must_use]
-pub fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
+pub(crate) fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
     let diff = synthetic_size_diff(baseline_len, probe_len);
     respdiff::body_size_delta_pct(&diff)
 }
@@ -207,8 +299,24 @@ pub fn body_delta_pct(baseline_len: usize, probe_len: usize) -> f64 {
 /// retained so the 11 parser-diff subcommands keep their existing
 /// `(u16, u16, f64) -> &'static str` signature while the rule lives
 /// upstream.
+///
+/// R55 pass-18 I3 (CLAUDE.md §15 AUDIT / §13 DOGFOOD anti-noise):
+/// throttle / origin-unavailable statuses (429, 502, 503, 504, plus
+/// Cloudflare's 520–527 origin-error band) classify as `"none"`. A
+/// 200 → 429 flip is "the target is rate-limiting your variant", not
+/// a WAF bypass — pre-fix this surfaced as `"high"` and drowned real
+/// findings under rate-limit noise. The bypass_probe family already
+/// had this gate at `probe_classify.rs:38`; lifting it here makes
+/// the rule the same for every parser-diff subcommand in one place.
 #[must_use]
-pub fn severity_of(baseline_status: u16, probe_status: u16, body_delta_pct: f64) -> &'static str {
+pub(crate) fn severity_of(
+    baseline_status: u16,
+    probe_status: u16,
+    body_delta_pct: f64,
+) -> &'static str {
+    if crate::probe_classify::is_throttle_or_unavailable(probe_status) {
+        return "none";
+    }
     // Synthesize a ResponseDiff carrying just the inputs respdiff's
     // classifier looks at. body_size_delta_pct grading uses
     // baseline_body_size + current_body_size to recompute the %; we
@@ -233,6 +341,35 @@ pub fn severity_of(baseline_status: u16, probe_status: u16, body_delta_pct: f64)
         respdiff::DiffSeverity::High => "high",
         respdiff::DiffSeverity::Medium => "medium",
         respdiff::DiffSeverity::Low | respdiff::DiffSeverity::None => "none",
+    }
+}
+
+/// Cache-divergence severity (cache_diff family). Lowercase return
+/// vocabulary is part of the JSON output schema (`severity: "high"`),
+/// LAW 2 — do not rename without a deprecation cycle.
+///
+/// `"high"` = body hash matches baseline at the same status (strong
+/// cache hit / collision evidence); `"medium"` = cache-signal headers
+/// match (weaker — a cache layer is in front but content differs);
+/// `"none"` otherwise.
+///
+/// Lives here, not in `cache_diff_cmd.rs`, because every diff family
+/// keeping its own severity helper is exactly the drift §7 forbids:
+/// when respdiff's classifier grows a 6th category every local
+/// severity_* must catch up, and one inevitably won't.
+#[must_use]
+pub(crate) fn severity_of_cache(
+    body_hash_match: bool,
+    cache_signals_match: bool,
+    probe_status: u16,
+    baseline_status: u16,
+) -> &'static str {
+    if body_hash_match && probe_status == baseline_status {
+        "high"
+    } else if cache_signals_match {
+        "medium"
+    } else {
+        "none"
     }
 }
 
@@ -328,6 +465,89 @@ mod tests {
         };
         let client = build_diff_http_client_for(&a);
         assert!(client.is_ok());
+    }
+
+    async fn capture_diff_client_request(headers: Vec<String>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.expect("accept");
+            let mut request = Vec::new();
+            loop {
+                let mut buf = [0u8; 1024];
+                let n = sock.read(&mut buf).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n")
+                    || request.len() > 16 * 1024
+                {
+                    break;
+                }
+            }
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .expect("write response");
+            sock.shutdown().await.expect("shutdown");
+            String::from_utf8(request).expect("request should be UTF-8 headers")
+        });
+
+        let client = build_diff_http_client(8, false, None, &headers).expect("build client");
+        client
+            .get(format!("http://{addr}/wire"))
+            .send()
+            .await
+            .expect("send request");
+        server.await.expect("server task")
+    }
+
+    fn captured_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+        request.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
+    #[tokio::test]
+    async fn build_diff_http_client_sends_shared_browser_headers_on_wire() {
+        let request = capture_diff_client_request(Vec::new()).await;
+        let facts = guise::fingerprint::default_profile_facts();
+        assert_eq!(
+            captured_header(&request, "User-Agent"),
+            Some(facts.user_agent)
+        );
+        assert_eq!(captured_header(&request, "Accept"), Some(facts.accept));
+        assert_eq!(
+            captured_header(&request, "Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(
+            captured_header(&request, "Sec-Fetch-Mode"),
+            Some("navigate")
+        );
+    }
+
+    #[tokio::test]
+    async fn build_diff_http_client_header_overrides_preserve_browser_identity() {
+        let request = capture_diff_client_request(vec!["X-Trace-Probe: parser-diff".into()]).await;
+        let facts = guise::fingerprint::default_profile_facts();
+        assert_eq!(
+            captured_header(&request, "User-Agent"),
+            Some(facts.user_agent)
+        );
+        assert_eq!(
+            captured_header(&request, "Accept-Language"),
+            Some(facts.accept_language)
+        );
+        assert_eq!(
+            captured_header(&request, "X-Trace-Probe"),
+            Some("parser-diff")
+        );
     }
 
     // ── fire_get_status_len ───────────────────────────────────
@@ -455,6 +675,48 @@ mod tests {
         assert_eq!(severity_of(200, 500, 0.0), "high");
     }
 
+    // ── throttle / origin-unavailable anti-rig ────────────────
+    //
+    // R55 pass-18 I3: a 200 → {429,502,503,504,520..=527} flip is NOT
+    // a WAF bypass; it's the origin telling us to slow down or
+    // failing. Must classify as "none" so the diff family doesn't
+    // flag rate-limit noise as high-severity findings.
+
+    #[test]
+    fn severity_of_treats_429_as_none_not_high() {
+        assert_eq!(severity_of(200, 429, 0.0), "none");
+        assert_eq!(severity_of(200, 429, 95.0), "none");
+    }
+
+    #[test]
+    fn severity_of_treats_5xx_throttle_band_as_none() {
+        for code in [502_u16, 503, 504] {
+            assert_eq!(
+                severity_of(200, code, 0.0),
+                "none",
+                "{code} must be treated as throttle, not a bypass"
+            );
+        }
+    }
+
+    #[test]
+    fn severity_of_treats_cloudflare_origin_band_as_none() {
+        for code in 520_u16..=527 {
+            assert_eq!(
+                severity_of(200, code, 0.0),
+                "none",
+                "{code} (CF origin-error band) must be throttle, not bypass"
+            );
+        }
+    }
+
+    #[test]
+    fn severity_of_408_is_throttle_not_bypass() {
+        // 408 Request Timeout — the origin terminated the connection
+        // because it timed out on us, not because we bypassed control.
+        assert_eq!(severity_of(200, 408, 0.0), "none");
+    }
+
     #[test]
     fn severity_of_is_high_when_status_class_flips_down() {
         assert_eq!(severity_of(403, 200, 0.0), "high");
@@ -492,4 +754,30 @@ mod tests {
 
     // status_class lives upstream in respdiff (covered by
     // `respdiff::diff::tests::status_class_collapses_to_century`).
+
+    // ── severity_of_cache ────────────────────────────────────
+
+    #[test]
+    fn severity_of_cache_high_when_body_hash_matches_and_status_matches() {
+        assert_eq!(severity_of_cache(true, false, 200, 200), "high");
+    }
+
+    #[test]
+    fn severity_of_cache_not_high_when_status_differs_even_if_body_matches() {
+        // Identical bodies under different statuses is unusual but
+        // possible — treat as "medium" only if cache headers match,
+        // else "none".
+        assert_eq!(severity_of_cache(true, false, 200, 403), "none");
+        assert_eq!(severity_of_cache(true, true, 200, 403), "medium");
+    }
+
+    #[test]
+    fn severity_of_cache_medium_when_only_cache_signals_match() {
+        assert_eq!(severity_of_cache(false, true, 200, 200), "medium");
+    }
+
+    #[test]
+    fn severity_of_cache_none_when_nothing_matches() {
+        assert_eq!(severity_of_cache(false, false, 200, 200), "none");
+    }
 }

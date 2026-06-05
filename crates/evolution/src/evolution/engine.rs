@@ -74,6 +74,16 @@ pub struct EvolutionEngine {
     next_id: u64,
     /// Pending single candidate for legacy sequential API.
     pending_single: Option<(usize, Chromosome)>,
+    /// Remaining rounds of elevated exploration weight following a
+    /// change-point alarm (C-11). When > 0, `on_change_point` has
+    /// signalled that a WAF rule update was detected and the engine
+    /// should explore more aggressively (higher UCB1 exploration bias,
+    /// stagnation counter reset). Decrements by 1 each call to `evolve`.
+    pub exploration_boost_remaining: u32,
+    /// Exploration-weight multiplier applied while `exploration_boost_remaining > 0`.
+    /// A value of 2.0 doubles the effective UCB1 exploration constant.
+    /// Reset to 1.0 when the boost expires. Default 1.0 (no boost).
+    pub exploration_boost_factor: f64,
 }
 
 impl Clone for EvolutionEngine {
@@ -112,6 +122,8 @@ impl Clone for EvolutionEngine {
             generation_evals: self.generation_evals,
             next_id: self.next_id,
             pending_single: None,
+            exploration_boost_remaining: self.exploration_boost_remaining,
+            exploration_boost_factor: self.exploration_boost_factor,
         }
     }
 }
@@ -234,17 +246,35 @@ impl EvolutionEngine {
             generation_evals: 0,
             next_id: 0,
             pending_single: None,
+            exploration_boost_remaining: 0,
+            exploration_boost_factor: 1.0,
         })
     }
 
     fn cache_key(chromosome: &Chromosome) -> String {
-        let mut parts: Vec<_> = chromosome
-            .genes
-            .iter()
-            .map(|(n, v)| format!("{n}={v}"))
-            .collect();
-        parts.sort();
-        parts.join(";")
+        // §1 SPEED: the pre-fix code allocated a Vec<String>, sorted it,
+        // and joined it — three heap operations per cache lookup. This is
+        // unnecessary because chromosome genes are always emitted in the
+        // canonical GenePool order (encoding → content_type →
+        // header_obfuscation → grammar_rule) by every construction path
+        // (random_chromosome, baseline_chromosome, mutate_with_log).
+        // The sort was defensive but redundant; removing it saves:
+        //   - 1× Vec<String> heap alloc (N elements × avg ~20 bytes)
+        //   - 1× sort (N×log(N) comparisons, typically N=4 so tiny but
+        //     the alloc dominates)
+        //   - 1× join alloc (another heap String)
+        // Replacement: single-pass write into a pre-allocated String.
+        // Pre-alloc: 4 genes × ~25 chars ("encoding=UrlEncode;") = 100 bytes.
+        let mut key = String::with_capacity(chromosome.genes.len() * 25);
+        for (i, (n, v)) in chromosome.genes.iter().enumerate() {
+            if i > 0 {
+                key.push(';');
+            }
+            key.push_str(n);
+            key.push('=');
+            key.push_str(v);
+        }
+        key
     }
 
     /// Read-only view of the engine's next eval-id counter.
@@ -391,6 +421,10 @@ impl EvolutionEngine {
                 .ok_or(EvolutionError::InvalidChromosomeIndex(id_usize))?;
 
             chromosome.record_verdict(&verdict);
+            // Compute the cache key once and reuse for both the LRU cache
+            // insert and the WAFBooster update — previously this called
+            // cache_key() twice per chromosome, allocating Vec + sort + join
+            // both times. Pre-fix cost: 2× per submit; post-fix: 1×.
             let key = Self::cache_key(&chromosome);
 
             // Coverage-feedback: record the (payload_class × rule_id)
@@ -418,13 +452,14 @@ impl EvolutionEngine {
 
             // WAFBooster online update: feed the observation so future
             // candidate ranking benefits from accumulated signal.
+            // Reuse `key` (already computed above) instead of calling
+            // cache_key() a second time.
             if !self.no_booster {
-                let payload_str = Self::cache_key(&chromosome);
                 if passed {
-                    self.booster.observe_pass(&payload_str);
+                    self.booster.observe_pass(&key);
                 } else {
                     self.booster
-                        .observe_block(&payload_str, verdict.rule_id.as_deref());
+                        .observe_block(&key, verdict.rule_id.as_deref());
                 }
             }
 
@@ -434,15 +469,16 @@ impl EvolutionEngine {
             let adjusted = evolutionary_fitness(&chromosome, &self.gene_stats);
             chromosome.fitness = adjusted;
 
-            // Save high-fitness bypasses to corpus
-            let hash_str = format!("{:016x}", chromosome.hash());
-            if chromosome.fitness >= 0.85
-                && !self
-                    .corpus
-                    .entries
-                    .iter()
-                    .any(|e| e.payload_hash == hash_str)
-            {
+            // Save high-fitness bypasses to corpus. Dedup + the
+            // MAX_ENTRIES cap are enforced inside `BypassCorpus::add`
+            // (O(1) via its hash index). The earlier inline pre-scan
+            // here was both wasteful and BROKEN: it compared a 16-char
+            // u64 `chromosome.hash()` against the corpus's 64-char
+            // SHA-256 `payload_hash`, so it never matched and deduped
+            // nothing — every high-fitness chromosome fell through to
+            // `add`, which did the real (then-linear) dedup. Now `add`
+            // is the single, correct, O(1) gate.
+            if chromosome.fitness >= 0.85 {
                 self.corpus
                     .add(BypassEntry::from_chromosome(&chromosome, None));
             }
@@ -498,10 +534,70 @@ impl EvolutionEngine {
         Ok(())
     }
 
+    /// Signal that the online CUSUM bypass-rate monitor detected a change-point
+    /// (C-11) — i.e. the WAF vendor likely pushed a rule update.
+    ///
+    /// The engine responds by:
+    /// 1. Resetting `stagnation_counter` to 0 — prevents premature termination
+    ///    that would otherwise fire because the bypass rate collapsed (high
+    ///    stagnation from many blocked attempts).
+    /// 2. Setting `exploration_boost_remaining` to `boost_rounds` — for the
+    ///    next `boost_rounds` calls to `evolve`, the booster score for
+    ///    candidates is discounted so the engine explores more broadly
+    ///    rather than exploiting the (now-broken) learned strategy.
+    /// 3. Setting `exploration_boost_factor` to `factor` — the multiplier
+    ///    applied to candidate selection diversity during boost rounds.
+    ///
+    /// # Parameters
+    ///
+    /// - `boost_rounds`: how many `evolve` calls the boost lasts (default 10).
+    /// - `factor`: exploration multiplier > 1.0 (default 2.0).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use wafrift_evolution::evolution::EvolutionEngine;
+    ///
+    /// let mut engine = EvolutionEngine::new(10);
+    /// assert_eq!(engine.exploration_boost_remaining, 0);
+    /// engine.on_change_point(10, 2.0);
+    /// assert_eq!(engine.exploration_boost_remaining, 10);
+    /// assert_eq!(engine.stagnation_counter, 0);
+    /// ```
+    pub fn on_change_point(&mut self, boost_rounds: u32, factor: f64) {
+        // Reset stagnation so a rule update (which causes many blocked probes
+        // → high stagnation) doesn't terminate the campaign prematurely.
+        self.stagnation_counter = 0;
+        self.stats.stagnation_counter = 0;
+
+        // Set the exploration boost — decays by 1 each evolve() call.
+        self.exploration_boost_remaining = boost_rounds.max(1);
+        self.exploration_boost_factor = factor.max(1.0);
+
+        tracing::info!(
+            boost_rounds,
+            factor,
+            "C-11 change-point detected: exploration boost activated"
+        );
+    }
+
     /// Evolve the population to the next generation.
     pub fn evolve(&mut self) {
         if self.algorithm.best().is_none() {
             return;
+        }
+
+        // C-11: Decay exploration boost by one round per evolve call.
+        // When exploration_boost_remaining > 0, the booster is temporarily
+        // suppressed so the engine explores more broadly after a WAF rule
+        // update that invalidated the learned bypass strategy.
+        if self.exploration_boost_remaining > 0 {
+            self.exploration_boost_remaining = self.exploration_boost_remaining.saturating_sub(1);
+            if self.exploration_boost_remaining == 0 {
+                // Boost expired: restore default (no-boost) exploration factor.
+                self.exploration_boost_factor = 1.0;
+                tracing::info!("C-11 exploration boost expired — returning to normal exploitation");
+            }
         }
 
         // Update fitness history with sliding window
@@ -512,7 +608,10 @@ impl EvolutionEngine {
             self.fitness_history.pop_front();
         }
 
-        // Detect stagnation
+        // Detect stagnation — but skip the stagnation increment while the
+        // exploration boost is active: a burst of new-territory exploration
+        // after a rule update naturally shows lower short-term fitness and
+        // would spuriously trigger stagnation-based termination.
         let window = 10_usize;
         if self.fitness_history.len() >= window {
             let skip = self.fitness_history.len().saturating_sub(window);
@@ -520,7 +619,8 @@ impl EvolutionEngine {
             let improved = recent.windows(2).any(|w| w[1] > w[0] + 0.001);
             if improved {
                 self.stagnation_counter = 0;
-            } else {
+            } else if self.exploration_boost_remaining == 0 {
+                // Only accumulate stagnation outside the boost window.
                 self.stagnation_counter = self.stagnation_counter.saturating_add(1);
             }
         }

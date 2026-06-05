@@ -79,9 +79,13 @@ pub fn still_evaluates(original: &str, cand: &str) -> bool {
             return !ce.trim().is_empty();
         }
         let cl = ce.to_ascii_lowercase();
-        // every structured token must survive (string-split rewrites
-        // keep them; the chokepoint forbids degradation to `7*7`).
-        want.iter().all(|t| cl.contains(t.as_str()))
+        // every structured token must survive AS A WHOLE TOKEN (string-split
+        // rewrites keep them; the chokepoint forbids degradation to `7*7`).
+        // §7 DEDUP + §14: `contains_token` (shared boundary-aware matcher)
+        // replaces the prior `cl.contains(t)` substring check, which let a
+        // marker survive buried in a larger identifier (`config` in
+        // `reconfigure`) — not the original template expression.
+        want.iter().all(|t| super::contains_token(&cl, t))
     } else {
         // arithmetic / detection probe: a non-empty expression in a
         // delimiter pair remains (value-equivalence handled by the
@@ -228,7 +232,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_evaluates(payload, payload) {
         return out;
@@ -250,10 +254,10 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
         let mut s = payload.to_string();
-        let mut rules: Vec<&'static str> = Vec::new();
+        let mut rules: Vec<&'static str> = Vec::with_capacity(8);
         if rng.chance(4, 5)
             && let Some(n) = rw_inner_ws(&s, &mut rng)
         {
@@ -312,14 +316,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 48,
-            verify: true,
-            vary_delivery: true,
-            param: "q".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 48, "q")
     }
 
     #[test]

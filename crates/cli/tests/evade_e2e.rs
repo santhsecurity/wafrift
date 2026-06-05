@@ -14,21 +14,10 @@
 //! 7. Text format is not a JSON object on stdout.
 //! 8. --payload-b64 accepts a base64-encoded payload and produces variants.
 
+mod common;
+use common::wafrift;
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
 
 fn wafrift_stdin(args: &[&str], stdin_data: &[u8]) -> (i32, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift"))
@@ -106,8 +95,7 @@ fn evade_json_format_emits_non_empty_variants_array() {
 
 #[test]
 fn evade_json_variants_have_required_fields() {
-    let (code, stdout, stderr) =
-        wafrift(&["evade", "--payload", "test-xss", "--format", "json"]);
+    let (code, stdout, stderr) = wafrift(&["evade", "--payload", "test-xss", "--format", "json"]);
     assert_eq!(code, 0, "evade must exit 0; stderr: {stderr}");
 
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON");
@@ -157,7 +145,10 @@ fn evade_only_selector_limits_technique_set() {
         let payload = variant["payload"].as_str().unwrap_or("");
         // URL-encoded "test" — characters may be encoded.
         // At minimum the payload must not be empty.
-        assert!(!payload.is_empty(), "variant payload must not be empty: {variant}");
+        assert!(
+            !payload.is_empty(),
+            "variant payload must not be empty: {variant}"
+        );
     }
 }
 
@@ -167,7 +158,10 @@ fn evade_only_selector_limits_technique_set() {
 fn evade_jsonl_format_emits_one_object_per_line() {
     let (code, stdout, stderr) =
         wafrift(&["evade", "--payload", "union select", "--format", "jsonl"]);
-    assert_eq!(code, 0, "evade --format jsonl must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "evade --format jsonl must exit 0; stderr: {stderr}"
+    );
 
     // Every non-empty line must be a valid JSON object.
     let mut line_count = 0usize;
@@ -178,7 +172,10 @@ fn evade_jsonl_format_emits_one_object_per_line() {
         }
         let obj: serde_json::Value =
             serde_json::from_str(trimmed).expect("each jsonl line must be valid JSON");
-        assert!(obj.is_object(), "jsonl line must be a JSON object: {trimmed}");
+        assert!(
+            obj.is_object(),
+            "jsonl line must be a JSON object: {trimmed}"
+        );
         line_count += 1;
     }
     assert!(
@@ -189,9 +186,11 @@ fn evade_jsonl_format_emits_one_object_per_line() {
 
 #[test]
 fn evade_jsonl_lines_have_payload_field() {
-    let (code, stdout, stderr) =
-        wafrift(&["evade", "--payload", "test", "--format", "jsonl"]);
-    assert_eq!(code, 0, "evade --format jsonl must exit 0; stderr: {stderr}");
+    let (code, stdout, stderr) = wafrift(&["evade", "--payload", "test", "--format", "jsonl"]);
+    assert_eq!(
+        code, 0,
+        "evade --format jsonl must exit 0; stderr: {stderr}"
+    );
 
     for line in stdout.lines() {
         let trimmed = line.trim();
@@ -244,8 +243,7 @@ fn evade_stdin_reads_payload_from_stdin() {
 fn evade_payload_b64_decodes_and_produces_variants() {
     // base64("union select") = "dW5pb24gc2VsZWN0"
     let b64 = "dW5pb24gc2VsZWN0";
-    let (code, stdout, stderr) =
-        wafrift(&["evade", "--payload-b64", b64, "--format", "json"]);
+    let (code, stdout, stderr) = wafrift(&["evade", "--payload-b64", b64, "--format", "json"]);
     assert_eq!(code, 0, "evade --payload-b64 must exit 0; stderr: {stderr}");
 
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON");

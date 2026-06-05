@@ -29,10 +29,10 @@ pub fn proxy_ip_is_forbidden(ip: IpAddr) -> bool {
         return true;
     }
     // IPv4 multicast: 224.0.0.0/4 (first octet 224–239).
-    if let IpAddr::V4(v4) = ip {
-        if v4.is_multicast() {
-            return true;
-        }
+    if let IpAddr::V4(v4) = ip
+        && v4.is_multicast()
+    {
+        return true;
     }
     false
 }
@@ -72,7 +72,7 @@ async fn resolve_host_all_public(host: &str, port: u16) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate `https?://...` (or absolute URL) before forwarding.
+/// Validate `https?://…` (or absolute URL) before forwarding.
 pub async fn assert_forward_url_allowed(url: &str, policy: &UpstreamPolicy) -> Result<(), String> {
     if policy.insecure_open_upstream {
         return Ok(());
@@ -172,8 +172,10 @@ pub async fn assert_connect_target_allowed(
 
 /// Validate `CONNECT` authority `host:port` AND return the resolved
 /// public socket addresses. Callers should pass these straight to
-/// `TcpStream::connect` instead of reusing `host:port` so a DNS rebinding
-/// flip between the validation and the connect cannot land.
+/// `TcpStream::connect_to_addr` instead of reusing `host:port` so a
+/// DNS rebinding flip between the validation and the connect cannot
+/// land — pre-fix `tunnel(addr: String)` re-resolved DNS, opening a
+/// TOCTOU window the audit caught as CRITICAL.
 pub async fn resolve_connect_target_allowed(
     addr: &str,
     policy: &UpstreamPolicy,
@@ -262,128 +264,6 @@ impl reqwest::dns::Resolve for BogonFilteringResolver {
                 )));
             }
             let iter: reqwest::dns::Addrs = Box::new(filtered.into_iter());
-            Ok(iter)
-        })
-    }
-}
-
-/// Rewrite `url` so that its hostname is replaced with an IP literal taken
-/// from `addrs` (the first entry). This eliminates the DNS-rebinding TOCTOU
-/// window on the reqwest forward path: once the hostname is gone from the URL
-/// reqwest never does another DNS lookup for it — the connection goes straight
-/// to the validated IP.
-///
-/// Returns `(pinned_url, original_host)`. The caller must set a `Host`
-/// request header using `original_host` so that virtual-hosting on the
-/// upstream works correctly.
-///
-/// # Errors
-///
-/// - `addrs` is empty.
-/// - `url` cannot be parsed as an absolute URL.
-/// - The URL has no host component.
-pub fn pin_url_to_first_addr(
-    url: &str,
-    addrs: &[SocketAddr],
-) -> Result<(String, String), String> {
-    let addr = addrs
-        .first()
-        .ok_or_else(|| "pin_url_to_first_addr: no addresses supplied".to_string())?;
-    let mut u = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-    let original_host = u
-        .host_str()
-        .ok_or_else(|| "upstream URL has no host".to_string())?
-        .to_string();
-    // If the URL is already an IP literal there is nothing to rewrite.
-    if original_host.parse::<IpAddr>().is_ok() {
-        return Ok((url.to_string(), original_host));
-    }
-    // set_host accepts bare IPv4 / bracketed IPv6.
-    let ip_str = match addr.ip() {
-        IpAddr::V6(v6) => format!("[{v6}]"),
-        IpAddr::V4(v4) => v4.to_string(),
-    };
-    u.set_host(Some(&ip_str))
-        .map_err(|e| format!("failed to rewrite host to IP literal: {e}"))?;
-    Ok((u.to_string(), original_host))
-}
-
-/// `reqwest::dns::Resolve` impl that pins a hostname to the first IP address
-/// returned by the system resolver (after bogon-filtering). Subsequent
-/// resolution requests for the **same hostname** return the cached IP
-/// directly: a DNS rebinding flip cannot land because the proxy never asks
-/// DNS again for a host it has already resolved to a public address.
-///
-/// When `allow_private_upstream` / `insecure_open_upstream` are set the
-/// bogon filter is skipped (lab mode), but the pin-on-first-resolution
-/// behaviour still applies so connections stay coherent.
-///
-/// The `pinned` table is exposed so callers can seed it from the result of
-/// `resolve_forward_url_pinned`, ensuring the URL-rewrite path and the
-/// resolver path both agree on the pinned IP.
-pub struct PinningResolver {
-    pub policy: Arc<UpstreamPolicy>,
-    /// hostname -> first validated IP seen. Pinned once, never evicted.
-    pub pinned: Arc<std::sync::Mutex<std::collections::HashMap<String, IpAddr>>>,
-}
-
-impl PinningResolver {
-    /// Create a new resolver with an empty pin table.
-    pub fn new(policy: Arc<UpstreamPolicy>) -> Self {
-        Self {
-            policy,
-            pinned: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        }
-    }
-}
-
-impl reqwest::dns::Resolve for PinningResolver {
-    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-        let policy = self.policy.clone();
-        let pinned = self.pinned.clone();
-        let host = name.as_str().to_string();
-        Box::pin(async move {
-            // Fast path: already pinned for this resolver instance.
-            {
-                let map = pinned.lock().map_err(|_| {
-                    Box::<dyn std::error::Error + Send + Sync>::from(
-                        "PinningResolver: mutex poisoned".to_string(),
-                    )
-                })?;
-                if let Some(&ip) = map.get(&host) {
-                    // Return the pinned address. Port 0 — reqwest derives the
-                    // actual port from the URL, not the DNS result.
-                    let sa = SocketAddr::new(ip, 0);
-                    let iter: reqwest::dns::Addrs = Box::new(std::iter::once(sa));
-                    return Ok(iter);
-                }
-            }
-            // Slow path: first resolution for this host.
-            let allow_private = policy.allow_private_upstream || policy.insecure_open_upstream;
-            let lookups = tokio::net::lookup_host((host.as_str(), 0))
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-            let candidates: Vec<SocketAddr> = lookups
-                .into_iter()
-                .filter(|sa| allow_private || !ip_addr_is_bogon(sa.ip()))
-                .collect();
-            if candidates.is_empty() {
-                return Err(Box::<dyn std::error::Error + Send + Sync>::from(format!(
-                    "DNS rebinding refused: every address for {host} is in the bogon set"
-                )));
-            }
-            // Pin the first valid address so all future connections for this
-            // hostname in this client go to the same IP.
-            let pinned_ip = candidates[0].ip();
-            {
-                let mut map = pinned.lock().map_err(|_| {
-                    Box::<dyn std::error::Error + Send + Sync>::from(
-                        "PinningResolver: mutex poisoned".to_string(),
-                    )
-                })?;
-                map.entry(host).or_insert(pinned_ip);
-            }
-            let iter: reqwest::dns::Addrs = Box::new(candidates.into_iter());
             Ok(iter)
         })
     }
@@ -503,167 +383,5 @@ mod tests {
     #[test]
     fn public_v6_google_dns_ok() {
         assert!(!ip_addr_is_bogon("2001:4860:4860::8888".parse().unwrap()));
-    }
-
-    #[test]
-    fn pin_url_rewrites_hostname_to_ip_literal() {
-        let addrs = vec!["203.0.113.5:443".parse::<SocketAddr>().unwrap()];
-        let (pinned, host) =
-            pin_url_to_first_addr("https://example.com/some/path?q=1", &addrs).unwrap();
-        assert_eq!(host, "example.com");
-        assert!(
-            pinned.starts_with("https://203.0.113.5/"),
-            "expected IP-literal URL, got: {pinned}"
-        );
-        assert!(pinned.contains("/some/path"), "path must be preserved: {pinned}");
-        assert!(pinned.contains("q=1"), "query must be preserved: {pinned}");
-    }
-
-    #[test]
-    fn pin_url_noop_when_already_literal_ip() {
-        let addrs = vec!["203.0.113.5:443".parse::<SocketAddr>().unwrap()];
-        let url = "https://203.0.113.5/path";
-        let (pinned, host) = pin_url_to_first_addr(url, &addrs).unwrap();
-        assert_eq!(pinned, url);
-        assert_eq!(host, "203.0.113.5");
-    }
-
-    #[test]
-    fn pin_url_empty_addrs_errors() {
-        let result = pin_url_to_first_addr("https://example.com/", &[]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("no addresses supplied"));
-    }
-
-    /// DNS rebinding regression test.
-    ///
-    /// Simulates the exact attack: the mock resolver returns a public IP on
-    /// the first lookup, then switches to 127.0.0.1 on subsequent calls.
-    /// The `PinningResolver` must return the first (public) IP for every
-    /// call after the initial resolution, never the private rebind address.
-    #[tokio::test]
-    async fn dns_rebinding_pinning_resolver_holds_first_ip() {
-        use reqwest::dns::Resolve as _;
-        use std::str::FromStr as _;
-
-        // Public IP returned on the first DNS lookup.
-        let public_ip: IpAddr = "203.0.113.5".parse().unwrap();
-        // Private IP the attacker's DNS would return on subsequent lookups.
-        let private_ip: IpAddr = "127.0.0.1".parse().unwrap();
-
-        let policy = Arc::new(UpstreamPolicy {
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-        });
-        let resolver = PinningResolver::new(policy.clone());
-        let pinned_map = resolver.pinned.clone();
-
-        // Seed the pin table as if the resolver already performed the first
-        // (public) lookup. This replicates how PinningResolver.resolve() works
-        // on the initial call — we cannot mock tokio::net::lookup_host so we
-        // directly inject the validated result.
-        {
-            let mut map = pinned_map.lock().unwrap();
-            map.insert("rebind-target.example".to_string(), public_ip);
-        }
-
-        // Second resolution attempt via the Resolve trait — the attacker has
-        // now flipped DNS so the system resolver would return private_ip.
-        // Because the host is already pinned, PinningResolver must return
-        // public_ip WITHOUT performing a new system lookup.
-        let name = reqwest::dns::Name::from_str("rebind-target.example")
-            .expect("valid DNS name");
-        let mut addrs_iter = resolver
-            .resolve(name)
-            .await
-            .expect("resolution must succeed for a pinned hostname");
-
-        let returned = addrs_iter.next().expect("must return at least one address");
-        assert_eq!(
-            returned.ip(),
-            public_ip,
-            "PinningResolver returned {}, expected pinned public IP {}",
-            returned.ip(),
-            public_ip
-        );
-        assert_ne!(
-            returned.ip(),
-            private_ip,
-            "PinningResolver must NEVER return the private rebind address"
-        );
-
-        // Also verify pin_url_to_first_addr produces an IP-literal URL so
-        // reqwest has no hostname left to re-resolve at connect time.
-        let addrs = vec![SocketAddr::new(public_ip, 443)];
-        let (pinned_url, original_host) =
-            pin_url_to_first_addr("https://rebind-target.example/api", &addrs)
-                .expect("pin_url_to_first_addr must succeed");
-        assert_eq!(original_host, "rebind-target.example");
-        assert!(
-            pinned_url.contains("203.0.113.5"),
-            "URL must contain IP literal, got: {pinned_url}"
-        );
-        assert!(
-            !pinned_url.contains("rebind-target.example"),
-            "URL must not contain hostname after pinning, got: {pinned_url}"
-        );
-    }
-
-    /// Concurrent second resolutions all hit the fast path and return the
-    /// pinned IP, never racing to insert a different value.
-    #[tokio::test]
-    async fn dns_rebinding_pinning_resolver_concurrent_resolutions_hold() {
-        use reqwest::dns::Resolve as _;
-        use std::str::FromStr as _;
-
-        let public_ip: IpAddr = "198.51.100.7".parse().unwrap();
-        let policy = Arc::new(UpstreamPolicy {
-            allow_private_upstream: false,
-            insecure_open_upstream: false,
-        });
-        let resolver = Arc::new(PinningResolver::new(policy));
-        // Seed the pin table.
-        {
-            let mut map = resolver.pinned.lock().unwrap();
-            map.insert("concurrent-rebind.example".to_string(), public_ip);
-        }
-
-        // Fire 8 concurrent resolution attempts — all must return the pinned IP.
-        let mut handles = Vec::new();
-        for _ in 0..8 {
-            let r = resolver.clone();
-            handles.push(tokio::spawn(async move {
-                let name = reqwest::dns::Name::from_str("concurrent-rebind.example").unwrap();
-                let mut iter = r.resolve(name).await.unwrap();
-                iter.next().unwrap().ip()
-            }));
-        }
-        for h in handles {
-            let ip = h.await.unwrap();
-            assert_eq!(
-                ip, public_ip,
-                "concurrent resolution returned wrong IP: {ip}"
-            );
-        }
-    }
-
-    /// Verify that pin_url_to_first_addr correctly handles IPv6 addresses
-    /// by emitting bracketed notation in the URL.
-    #[test]
-    fn pin_url_rewrites_hostname_to_ipv6_literal() {
-        let v6_ip: IpAddr = "2001:db8::1".parse().unwrap();
-        let addrs = vec![SocketAddr::new(v6_ip, 443)];
-        let (pinned, host) =
-            pin_url_to_first_addr("https://example.com/path", &addrs).unwrap();
-        assert_eq!(host, "example.com");
-        // IPv6 in URLs requires brackets: https://[2001:db8::1]/path
-        assert!(
-            pinned.contains("[2001:db8::1]"),
-            "IPv6 URL must use bracketed notation, got: {pinned}"
-        );
-        assert!(
-            !pinned.contains("example.com"),
-            "hostname must not appear after pinning, got: {pinned}"
-        );
     }
 }

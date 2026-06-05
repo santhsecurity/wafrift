@@ -41,18 +41,19 @@ use tracing::{debug, info, warn};
 use crate::helpers::shell_single_quote;
 use crate::probe_classify::{is_throttle_or_unavailable, severity_rank};
 
-#[derive(Args, Debug)]
-pub struct BypassProbeArgs {
+#[derive(Args, Debug, Default)]
+pub(crate) struct BypassProbeArgs {
     /// Target URL to probe. Must already return 401/403 (or any status
     /// the user wants to bypass) for the probe set to be meaningful.
     /// When `--paths-file` is set this is the base URL (<scheme://host>)
     /// and the file supplies the path list.
     pub url: String,
 
-    /// Path one URL path per line. Each path is appended to `<url>` and
-    /// probed with the full bypass set. Useful for sweeping a known
-    /// admin surface (`/admin /actuator /.env /wp-admin ...`). When
-    /// unset, only the single `url` arg is probed.
+    /// Path to a file containing one URL path per line. Each path is
+    /// appended to `<url>` and probed with the full bypass set. Useful
+    /// for sweeping a known admin surface (`/admin /actuator /.env
+    /// /wp-admin ...`). When unset, only the single `url` arg is
+    /// probed. Capped at 10 MiB to prevent accidental OOM.
     #[arg(long)]
     pub paths_file: Option<String>,
 
@@ -80,11 +81,12 @@ pub struct BypassProbeArgs {
     #[arg(long, default_value = "text", value_parser = ["text", "json"])]
     pub format: String,
 
-    /// Write JSON output to a file instead of stdout. Only honoured
-    /// when `--format json` is set; ignored otherwise. Used by
-    /// `wafrift legendary` to capture probe findings for the
-    /// markdown report without scrolling past the operator's
-    /// terminal — the same pattern `wafrift scan --output` follows.
+    /// Write JSON output to a file instead of stdout. Requires
+    /// `--format json`; an error is returned if `--format text` is
+    /// active (silently ignoring the flag would be a LAW 9 wiring
+    /// violation). Used by `wafrift legendary` to capture probe findings
+    /// for the markdown report — the same pattern `wafrift scan --output`
+    /// follows.
     #[arg(long, short)]
     pub output: Option<std::path::PathBuf>,
 
@@ -117,7 +119,7 @@ pub struct BypassProbeArgs {
 
 /// Classification of how a probe response diverged from the baseline.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct Divergence {
+pub(crate) struct Divergence {
     /// Probe family name (`headers`, `paths`, `methods`).
     pub family: String,
     /// Short label naming the specific probe within the family.
@@ -142,7 +144,7 @@ pub struct Divergence {
 /// Returns `Err` if the target URL can't be parsed, the HTTP client
 /// can't be built, or the baseline request fails outright (no
 /// connectivity).
-pub fn run_bypass_probe(mut args: BypassProbeArgs) -> Result<(), String> {
+pub(crate) fn run_bypass_probe(mut args: BypassProbeArgs) -> Result<(), String> {
     args.url = crate::helpers::normalize_target_url(&args.url);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -152,6 +154,17 @@ pub fn run_bypass_probe(mut args: BypassProbeArgs) -> Result<(), String> {
 }
 
 async fn run_async(args: BypassProbeArgs) -> Result<(), String> {
+    // §9 WIRING: Warn early when --output is provided without --format json,
+    // rather than silently ignoring the flag at the end. A silently-ignored
+    // flag is indistinguishable from a typo, which burns operator trust.
+    if args.output.is_some() && args.format != "json" {
+        return Err(
+            "--output requires --format json (bypass-probe JSON is the only \
+             structured output; re-run with --format json --output <path>)"
+                .to_string(),
+        );
+    }
+
     // Shared floor: timeout + insecure-toggle + (no UA override here —
     // bypass_probe historically sends reqwest's default UA so the
     // target sees a "neutral" client identity during the probe).
@@ -268,7 +281,21 @@ fn build_url_list(args: &BypassProbeArgs) -> Result<Vec<String>, String> {
     let Some(ref pf) = args.paths_file else {
         return Ok(vec![args.url.clone()]);
     };
-    let body = std::fs::read_to_string(pf).map_err(|e| format!("read {pf}: {e}"))?;
+    // §15 TOCTOU fix: the previous stat()+read_to_string() had a race window —
+    // the file could be replaced with a symlink to /dev/zero or a huge file
+    // between the two calls. read_bounded_text_file opens once and reads with
+    // a hard byte cap in the same open fd, eliminating the TOCTOU entirely.
+    const MAX_PATHS_FILE_BYTES: usize = 10 * 1024 * 1024;
+    let body =
+        crate::safe_body::read_bounded_text_file(std::path::Path::new(pf), MAX_PATHS_FILE_BYTES)
+            .map_err(|e| match e {
+                crate::safe_body::ReadError::Overrun { cap_bytes, .. } => format!(
+                    "--paths-file {pf} exceeds the {cap_bytes}-byte OOM guard; file too large"
+                ),
+                crate::safe_body::ReadError::Transport(msg) => {
+                    format!("read --paths-file {pf}: {msg}")
+                }
+            })?;
     // Strip any path component on the base URL — `--paths-file`
     // entries are absolute paths or `scheme://host` overrides, and
     // the only meaningful "base" is the authority.
@@ -434,7 +461,16 @@ async fn probe_one_url(
     let delay_ms = args.delay_ms;
     let body_thresh = args.body_diff_threshold_pct;
     let url_owned = url.to_string();
-    let base_origin = url.split('/').take(3).collect::<Vec<_>>().join("/");
+    let base_origin = {
+        let mut s = String::new();
+        for (i, part) in url.split('/').take(3).enumerate() {
+            if i > 0 {
+                s.push('/');
+            }
+            s.push_str(part);
+        }
+        s
+    };
     let probes_fired = work.len();
     let rate_limited = Arc::new(AtomicU32::new(0));
     // Shared cooldown deadline (process-monotonic ms since `start`) that
@@ -1460,9 +1496,7 @@ mod tests {
     /// Build a mock HTTP response whose body is exactly `n` bytes of 'X'.
     fn big_body_response(n: usize) -> String {
         let body: String = "X".repeat(n);
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n{body}",
-        )
+        format!("HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n{body}",)
     }
 
     #[serial_test::serial]
@@ -1546,7 +1580,7 @@ mod tests {
             "POST",
             "method override",
             200,
-            0,   // baseline_len = 0 (the overrun-corrupted value)
+            0, // baseline_len = 0 (the overrun-corrupted value)
             200,
             500, // any non-empty probe body
             10.0,
@@ -1556,5 +1590,35 @@ mod tests {
             d.is_some(),
             "classify MUST fire on zero-baseline + non-empty probe (the bug being prevented)"
         );
+    }
+    // -- Section 15 AUDIT: OOM guard on --paths-file ----------------------
+
+    #[test]
+    fn paths_file_at_cap_accepted() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(&b"https://example.com/path\n".repeat(1000))
+            .unwrap();
+        let mut args = methods_only_args("https://example.com/".into());
+        args.paths_file = Some(f.path().to_str().unwrap().to_string());
+        let result = build_url_list(&args);
+        assert!(result.is_ok(), "small file must be accepted: {:?}", result);
+    }
+
+    /// A paths-file above the 10 MiB OOM-guard cap must be rejected.
+    /// Pinned at exactly cap+1 byte so a future raise of the limit
+    /// fails this test (forcing the operator to also lift the
+    /// boundary check, not silently inflate it).
+    #[test]
+    fn paths_file_above_cap_rejected() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        // Write exactly cap+1 byte so a future raise of MAX_PATHS_FILE_BYTES
+        // forces the operator to also lift this assertion — not silently inflate.
+        f.write_all(&vec![b'a'; 10 * 1024 * 1024 + 1]).unwrap();
+        let mut args = methods_only_args("https://example.com/".into());
+        args.paths_file = Some(f.path().to_str().unwrap().to_string());
+        let err = build_url_list(&args).expect_err("file above cap must be rejected");
+        assert!(err.contains("OOM"), "error must mention OOM guard: {err}");
     }
 }

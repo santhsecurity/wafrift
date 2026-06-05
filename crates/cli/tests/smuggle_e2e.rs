@@ -17,20 +17,8 @@
 //! 10. `smuggle list` help documents the list surface.
 //! 11. `smuggle dry-run --help` documents required options.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ── Help surface ──────────────────────────────────────────────────────────
 
@@ -59,7 +47,10 @@ fn smuggle_list_help_documents_options() {
     let (code, stdout, _) = wafrift(&["smuggle", "list", "--help"]);
     assert_eq!(code, 0, "smuggle list --help must exit 0");
     // `list` is a simple command; at minimum --help must work.
-    assert!(!stdout.is_empty(), "smuggle list --help must produce output");
+    assert!(
+        !stdout.is_empty(),
+        "smuggle list --help must produce output"
+    );
 }
 
 #[test]
@@ -117,11 +108,17 @@ fn smuggle_list_distinguishes_detection_from_exploit_tier() {
 #[test]
 fn smuggle_dry_run_cl_te_emits_transfer_encoding_header() {
     let (code, stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "cl-te",
-        "--host", "example.com",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "cl-te",
+        "--host",
+        "example.com",
     ]);
-    assert_eq!(code, 0, "smuggle dry-run cl-te must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "smuggle dry-run cl-te must exit 0; stderr: {stderr}"
+    );
     assert!(
         stdout.contains("Transfer-Encoding"),
         "CL.TE payload must contain Transfer-Encoding header: {stdout}"
@@ -139,11 +136,17 @@ fn smuggle_dry_run_cl_te_emits_transfer_encoding_header() {
 #[test]
 fn smuggle_dry_run_te_cl_emits_transfer_encoding_header() {
     let (code, stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "te-cl",
-        "--host", "target.internal",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "te-cl",
+        "--host",
+        "target.internal",
     ]);
-    assert_eq!(code, 0, "smuggle dry-run te-cl must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "smuggle dry-run te-cl must exit 0; stderr: {stderr}"
+    );
     assert!(
         stdout.contains("Transfer-Encoding"),
         "TE.CL payload must contain Transfer-Encoding header: {stdout}"
@@ -157,11 +160,17 @@ fn smuggle_dry_run_te_cl_emits_transfer_encoding_header() {
 #[test]
 fn smuggle_dry_run_dual_cl_emits_two_content_length_headers() {
     let (code, stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "dual-cl",
-        "--host", "example.com",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "dual-cl",
+        "--host",
+        "example.com",
     ]);
-    assert_eq!(code, 0, "smuggle dry-run dual-cl must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "smuggle dry-run dual-cl must exit 0; stderr: {stderr}"
+    );
 
     // Dual-CL: two Content-Length lines with different values.
     let cl_count = stdout.matches("Content-Length").count();
@@ -176,11 +185,17 @@ fn smuggle_dry_run_meta_comment_contains_variant_key() {
     // The dry-run appends a `# ── meta ── variant=<key> …` comment line
     // so operators can grep the output in scripts.
     let (code, stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "cl-0",
-        "--host", "example.com",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "cl-0",
+        "--host",
+        "example.com",
     ]);
-    assert_eq!(code, 0, "smuggle dry-run cl-0 must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "smuggle dry-run cl-0 must exit 0; stderr: {stderr}"
+    );
     assert!(
         stdout.contains("cl-0"),
         "dry-run output must include the variant key somewhere: {stdout}"
@@ -192,12 +207,19 @@ fn smuggle_dry_run_meta_comment_contains_variant_key() {
 #[test]
 fn smuggle_dry_run_hex_format_emits_space_separated_octets() {
     let (code, stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "cl-te",
-        "--host", "example.com",
-        "--format", "hex",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "cl-te",
+        "--host",
+        "example.com",
+        "--format",
+        "hex",
     ]);
-    assert_eq!(code, 0, "smuggle dry-run --format hex must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "smuggle dry-run --format hex must exit 0; stderr: {stderr}"
+    );
 
     // Hex output: lines like "50 4f 53 54 20 2f …   POST / …"
     // Every line should start with two lowercase hex chars followed by a space.
@@ -220,14 +242,14 @@ fn smuggle_dry_run_hex_format_emits_space_separated_octets() {
 #[test]
 fn smuggle_dry_run_unknown_variant_exits_2() {
     let (code, _stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "not-a-real-variant",
-        "--host", "example.com",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "not-a-real-variant",
+        "--host",
+        "example.com",
     ]);
-    assert_eq!(
-        code, 2,
-        "unknown --variant must exit 2; stderr: {stderr}"
-    );
+    assert_eq!(code, 2, "unknown --variant must exit 2; stderr: {stderr}");
     assert!(
         stderr.contains("unknown variant") || stderr.contains("invalid value"),
         "error message must name the problem; stderr: {stderr}"
@@ -237,8 +259,10 @@ fn smuggle_dry_run_unknown_variant_exits_2() {
 #[test]
 fn smuggle_dry_run_missing_host_exits_nonzero() {
     let (code, _stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--variant", "cl-te",
+        "smuggle",
+        "dry-run",
+        "--variant",
+        "cl-te",
         // no --host
     ]);
     assert_ne!(
@@ -250,8 +274,10 @@ fn smuggle_dry_run_missing_host_exits_nonzero() {
 #[test]
 fn smuggle_dry_run_missing_variant_exits_nonzero() {
     let (code, _stdout, stderr) = wafrift(&[
-        "smuggle", "dry-run",
-        "--host", "example.com",
+        "smuggle",
+        "dry-run",
+        "--host",
+        "example.com",
         // no --variant
     ]);
     assert_ne!(

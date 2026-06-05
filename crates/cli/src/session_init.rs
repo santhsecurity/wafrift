@@ -44,7 +44,7 @@ fn origin_triple(u: &reqwest::Url) -> Option<(String, String, u16)> {
 /// caller-pinned values from the init curl) that should be carried
 /// on every subsequent request in the scan loop.
 #[derive(Debug, Clone, Default)]
-pub struct SessionState {
+pub(crate) struct SessionState {
     /// Headers ready to plug into `ClientBuilder::default_headers`.
     /// Always includes a `Cookie:` line when the init request
     /// returned `Set-Cookie` or the curl itself set a `Cookie:`.
@@ -60,7 +60,7 @@ pub struct SessionState {
 /// module doesn't pull `thiserror` into the cli crate's dep graph
 /// (kept lean per the pristine-code bar).
 #[derive(Debug)]
-pub enum SessionInitError {
+pub(crate) enum SessionInitError {
     ReadFile(String, std::io::Error),
     Parse(String),
     Request(String),
@@ -92,10 +92,28 @@ impl std::error::Error for SessionInitError {
 /// method / headers / body / Cookie — wafrift does not mutate the
 /// auth request, that's the operator's job to script correctly. We
 /// only act as the cookie jar + header carrier.
-pub async fn establish_from_curl(
+#[cfg(test)]
+fn default_session_init_headers() -> Result<HeaderMap, SessionInitError> {
+    crate::config::shared_scan_browser_headers(None)
+        .map(|identity| identity.headers)
+        .map_err(SessionInitError::Request)
+}
+
+#[cfg(test)]
+async fn establish_from_curl(
     parsed: ParsedCurl,
     timeout: Duration,
     insecure: bool,
+) -> Result<SessionState, SessionInitError> {
+    let headers = default_session_init_headers()?;
+    establish_from_curl_with_headers(parsed, timeout, insecure, headers).await
+}
+
+pub(crate) async fn establish_from_curl_with_headers(
+    parsed: ParsedCurl,
+    timeout: Duration,
+    insecure: bool,
+    default_headers: HeaderMap,
 ) -> Result<SessionState, SessionInitError> {
     let url = parsed.url.as_ref().ok_or(SessionInitError::NoUrl)?.clone();
     let method = parsed
@@ -113,8 +131,9 @@ pub async fn establish_from_curl(
     // The init request follows redirects deeper than the parser-diff
     // default (login flows routinely chain through 302s to /home
     // before setting the final cookies). Shared floor via
-    // base_client_builder for timeout + insecure + UA; the redirect
-    // policy stays caller-owned.
+    // base_client_builder for timeout + insecure; caller-provided
+    // browser defaults are installed below. The redirect policy stays
+    // caller-owned.
     //
     // CREDENTIAL-LEAK GUARD: reqwest's default redirect policy keeps
     // request-set headers across hops. With `Authorization: Bearer X`
@@ -124,8 +143,8 @@ pub async fn establish_from_curl(
     // the redirect hop changes origin (scheme + host + port), drop
     // `Authorization`, `Cookie`, `Proxy-Authorization`, and `Cookie2`.
     // Capped at 8 hops same as before.
-    let ua = crate::config::shared_user_agent();
-    let client = wafrift_transport::base_client_builder(timeout.as_secs(), insecure, Some(&ua))
+    let client = wafrift_transport::base_client_builder(timeout.as_secs(), insecure, None)
+        .default_headers(default_headers)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() >= 8 {
                 return attempt.error("too many redirects");
@@ -137,10 +156,7 @@ pub async fn establish_from_curl(
             // Stop returns whatever response we already have (the
             // 302 itself, including any Set-Cookie). Callers can
             // still extract cookies from the redirect response.
-            let prev_origin = attempt
-                .previous()
-                .last()
-                .and_then(origin_triple);
+            let prev_origin = attempt.previous().last().and_then(origin_triple);
             let next_origin = origin_triple(attempt.url());
             if let (Some(prev), Some(next)) = (prev_origin, next_origin)
                 && prev != next
@@ -254,10 +270,21 @@ pub async fn establish_from_curl(
 
 /// Convenience: read a curl-file from disk, tokenise + parse + fire
 /// it. Mirrors `wafrift import-curl`'s file-input mode.
-pub async fn establish_from_file(
+#[cfg(test)]
+async fn establish_from_file(
     path: &Path,
     timeout: Duration,
     insecure: bool,
+) -> Result<SessionState, SessionInitError> {
+    let headers = default_session_init_headers()?;
+    establish_from_file_with_headers(path, timeout, insecure, headers).await
+}
+
+pub(crate) async fn establish_from_file_with_headers(
+    path: &Path,
+    timeout: Duration,
+    insecure: bool,
+    default_headers: HeaderMap,
 ) -> Result<SessionState, SessionInitError> {
     // Bounded read — operator-supplied curl file. Defends against
     // `/dev/zero` typo and hostile symlink. Real "Copy as cURL"
@@ -285,15 +312,15 @@ pub async fn establish_from_file(
     };
     let tokens = shell_tokenize(&raw).map_err(SessionInitError::Parse)?;
     let parsed = parse_curl(&tokens).map_err(SessionInitError::Parse)?;
-    establish_from_curl(parsed, timeout, insecure).await
+    establish_from_curl_with_headers(parsed, timeout, insecure, default_headers).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     // All tests in this module bind a fresh `127.0.0.1:0` TCP
     // listener.  On Windows under default cargo-test parallelism
@@ -368,6 +395,90 @@ mod tests {
         let s = cookie.to_str().unwrap();
         assert!(s.contains("session=abc123"));
         assert!(s.contains("csrf=xyz"));
+    }
+
+    #[serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_from_curl_sends_shared_browser_identity() {
+        let seen_request = Arc::new(Mutex::new(String::new()));
+        let seen_request_writer = seen_request.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap();
+            *seen_request_writer.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let response = ok_with_setcookie("ok", &[("session", "ua-check")]);
+            let _ = sock.write_all(response.as_bytes()).await;
+            let _ = sock.shutdown().await;
+        });
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
+
+        let parsed = curl_from_url(&format!("http://{addr}/login"));
+        establish_from_curl(parsed, Duration::from_secs(3), false)
+            .await
+            .expect("init must succeed");
+
+        let request = seen_request.lock().unwrap().to_ascii_lowercase();
+        let facts = guise::fingerprint::default_profile_facts();
+        assert!(
+            request.contains(&format!("user-agent: {}", facts.user_agent).to_ascii_lowercase()),
+            "session-init request must carry shared UA, got {request:?}"
+        );
+        assert!(
+            request.contains(&format!("accept: {}", facts.accept).to_ascii_lowercase()),
+            "session-init request must carry shared Accept, got {request:?}"
+        );
+        assert!(
+            request.contains(
+                &format!("accept-language: {}", facts.accept_language).to_ascii_lowercase()
+            ),
+            "session-init request must carry shared Accept-Language, got {request:?}"
+        );
+    }
+
+    #[serial]
+    #[tokio::test(flavor = "current_thread")]
+    async fn establish_with_headers_sends_selected_profile_identity() {
+        let seen_request = Arc::new(Mutex::new(String::new()));
+        let seen_request_writer = seen_request.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap();
+            *seen_request_writer.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let response = ok_with_setcookie("ok", &[("session", "ua-check")]);
+            let _ = sock.write_all(response.as_bytes()).await;
+            let _ = sock.shutdown().await;
+        });
+        tokio::time::sleep(crate::parser_diff_common::TEST_SETTLE).await;
+
+        let parsed = curl_from_url(&format!("http://{addr}/login"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            HeaderValue::from_str("Profile-UA/7.0").unwrap(),
+        );
+        headers.insert(
+            reqwest::header::ACCEPT_LANGUAGE,
+            HeaderValue::from_str("en-US,en;q=0.9").unwrap(),
+        );
+        establish_from_curl_with_headers(parsed, Duration::from_secs(3), false, headers)
+            .await
+            .expect("init must succeed");
+
+        let request = seen_request.lock().unwrap().to_ascii_lowercase();
+        assert!(
+            request.contains("user-agent: profile-ua/7.0"),
+            "session-init request must carry selected UA, got {request:?}"
+        );
+        assert!(
+            request.contains("accept-language: en-us,en;q=0.9"),
+            "session-init request must carry selected language header, got {request:?}"
+        );
     }
 
     #[serial]

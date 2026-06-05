@@ -19,9 +19,11 @@ wafrift-encoding = { workspace = true }
 wafrift-grammar = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
-wafrift-fingerprint = { workspace = true }
 wafrift-recon = { workspace = true }
 wafrift-wafmodel = { workspace = true }
+wafrift-sanitizer = { workspace = true }
+wafrift-tcpoverlap = { workspace = true }
+wafrift-liveoracle = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 clap_mangen = { workspace = true }
@@ -29,6 +31,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 colored = { workspace = true }
 reqwest = { workspace = true }
+guise = { workspace = true }
+guise-pacing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }
@@ -48,6 +52,11 @@ wafrift-types = { workspace = true }
 pocgen = { workspace = true }
 wafrift-smuggling = { workspace = true, features = ["unsafe-probes"] }
 wafrift-content-type = { workspace = true }
+scanclient = { workspace = true }
+# Pulled in for `wafrift smuggle-emit` (probe_aggregator) — also gives
+# the CLI the SmuggleProbe trait surface without duplicating the
+# aggregator across crates.
+wafrift-core = { path = "../core" }
 # HTTP/3 + QUIC evasion data-plane primitives (QPACK desync, 0-RTT
 # replay, CID rotation, stream priority topology, MTU fragmentation).
 # Pulled in so `techniques list` enumerates the HTTP/3 surface and
@@ -55,9 +64,15 @@ wafrift-content-type = { workspace = true }
 wafrift-http3-evasion = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
-# Retry-After header parsing (RFC 9110 §10.2.3): integer delta-seconds
-# OR IMF-fixdate HTTP-date. Already in the workspace lock via hyper.
-httpdate = "1.0"
+# Crypto primitives for interactsh-compatible OOB callback server.
+rsa = { workspace = true }
+aes = { workspace = true }
+ctr = { workspace = true }
+sha2 = { workspace = true }
+# DEFLATE (zlib framing) for the `zb64` app-transform: base64(zlib(payload)),
+# the URL-state-compression idiom (pako/lz-string) a signature WAF can't inflate.
+# Already in the workspace lock (was a dev-dep for safe_body's gzip-bomb test).
+flate2 = "1"
 # Structured tracing — RUST_LOG=wafrift=debug wires through to every
 # subcommand. Already in the workspace lock via transitive deps; listed
 # explicitly so `use tracing::*` compiles in crate code without
@@ -103,9 +118,6 @@ libc = "0.2"
 proptest = { workspace = true }
 wiremock = { workspace = true }
 reqwest = { workspace = true }
-# Used by safe_body's gzip-bomb integration test — proves the
-# bounded-reader defence actually defeats a real-world bomb.
-flate2 = "1"
 # Cross-binary localhost serialisation. Each *_e2e.rs file spawns
 # a mock TCP listener AND invokes the `wafrift` binary as a
 # subprocess; under default cargo-test parallelism (one test
@@ -115,11 +127,15 @@ flate2 = "1"
 # adds a file-scoped lock so the wafrift-binary-spawning tests
 # run one-at-a-time across the workspace.
 serial_test = "3"
+tempfile = { workspace = true }
 
 [features]
-# proxy-pool (HTTP/SOCKS proxy rotation via wafrift-pool) is on by
-# default now that the CLI ships full transport features.
+# proxy-pool (HTTP/SOCKS proxy rotation via proxywire) is on by default
+# now that the CLI ships full transport features. origin-bypass and
+# gossan-integration remain opt-in because they pull in larger deps.
 default = ["proxy-pool"]
+gossan-integration = ["origin-bypass"]
+origin-bypass = ["wafrift-transport/origin-bypass"]
 proxy-pool = ["wafrift-transport/proxy-pool"]
 # `tls-impersonate` unlocks the `wafrift ja3-diff` subcommand (and any
 # future stealth-client CLI surface). It pulls in rquest + BoringSSL,

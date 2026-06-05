@@ -58,10 +58,10 @@ pub mod strategy;
 /// WAF-specific evasion presets loaded from TOML rules.
 pub mod waf_presets;
 
-pub use drift_window::{DriftDetector, ProbeObservation, RegimeChange};
+pub use drift_window::{BypassRateMonitor, ChangePointEvent, DriftDetector, ProbeObservation, RegimeChange};
 pub use host_state::HostState;
 pub use learning_cache::LearningCache;
-pub use ml_evasion::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable, evade_ml_backed};
+pub use ml_evasion::{DEFAULT_ML_BUDGET, apply_ml_evasion_if_applicable};
 pub use pipeline::{EvasionPipeline, EvasionPlanOutput};
 pub use planner::plan_pipelines;
 pub use strategy::*;

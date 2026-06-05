@@ -16,10 +16,11 @@
 //! 7. probes_fired > 0 on a live target.
 //! 8. --min-severity filters low-severity results.
 
-use std::process::Command;
-
 use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 /// Mock that simulates an X-Forwarded-For header bypass:
 /// - Any request with `X-Forwarded-For: 127.0.0.1` → 200 OK
@@ -38,12 +39,10 @@ async fn spawn_xfwd_bypass_mock() -> std::net::SocketAddr {
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
 
                 // Check for X-Forwarded-For: 127.0.0.1 header (case-insensitive).
-                let has_xfwd_local = req
-                    .lines()
-                    .any(|l| {
-                        let lower = l.to_ascii_lowercase();
-                        lower.starts_with("x-forwarded-for:") && lower.contains("127.0.0.1")
-                    });
+                let has_xfwd_local = req.lines().any(|l| {
+                    let lower = l.to_ascii_lowercase();
+                    lower.starts_with("x-forwarded-for:") && lower.contains("127.0.0.1")
+                });
 
                 let (status, reason, body): (&str, &str, &str) = if has_xfwd_local {
                     ("200", "OK", "admin panel bypassed")
@@ -62,36 +61,9 @@ async fn spawn_xfwd_bypass_mock() -> std::net::SocketAddr {
     });
     // Probe-until-ready using stdlib connect to avoid reactor saturation.
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     addr
-}
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
 }
 
 // ── Help surface ──────────────────────────────────────────────────────────

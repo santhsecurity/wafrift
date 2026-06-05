@@ -17,7 +17,7 @@
 //! [`EquivalenceOracle`]. Membership results are memoized so a live
 //! WAF is never asked the same question twice.
 
-use crate::error::Result;
+use crate::error::{Result, WafModelError};
 use crate::oracle::WafOracle;
 use crate::outcome::Outcome;
 use crate::sfa::{BytePred, Sfa, StateId};
@@ -329,7 +329,15 @@ fn build_hypothesis<F: FnMut(&[usize]) -> Result<bool>>(
     let n = access.len();
     let mut accept = vec![false; n];
     let mut delta: Vec<Vec<(BytePred, StateId)>> = vec![Vec::new(); n];
-    let eps_idx = t.e.iter().position(|e| e.is_empty()).expect("ε ∈ E");
+    // R51 pass-13 I3 (CLAUDE.md §15 AUDIT): non-deterministic oracle
+    // answers can break the L* closure invariant. Surface the
+    // failure as `WafModelError::TableNotClosed` so the caller can
+    // retry or raise the budget — never a mid-scan panic.
+    let eps_idx = t
+        .e
+        .iter()
+        .position(|e| e.is_empty())
+        .ok_or(WafModelError::TableNotClosed)?;
     for (st, acc) in access.iter().zip(accept.iter_mut()) {
         *acc = t.row(st, mq)?[eps_idx];
     }
@@ -340,11 +348,13 @@ fn build_hypothesis<F: FnMut(&[usize]) -> Result<bool>>(
             let tgt_row = t.row(&sa, mq)?;
             let tgt = *row_of
                 .get(&tgt_row)
-                .expect("table closed ⇒ every S·a row is an S row");
+                .ok_or(WafModelError::TableNotClosed)?;
             delta[st].push((alpha.guard(a), tgt));
         }
     }
-    let start = *row_of.get(&t.row(&[], mq)?).expect("ε row is a state");
+    let start = *row_of
+        .get(&t.row(&[], mq)?)
+        .ok_or(WafModelError::TableNotClosed)?;
     Ok(Sfa::new(start, accept, delta))
 }
 
@@ -717,8 +727,13 @@ where
     fn hypothesis(&mut self, alpha: &Alphabet) -> Result<Sfa> {
         let n = self.access.len();
         let mut accept = vec![false; n];
-        for (i, a) in self.access.clone().iter().enumerate() {
-            accept[i] = self.mqx.ask(a)?;
+        // §1 SPEED: index-based loop splits the borrow between `self.mqx`
+        // (mutable) and `self.access[i]` (immutable) without cloning the
+        // entire access list.  The pre-fix `self.access.clone().iter()`
+        // allocated O(states × avg_word_len) bytes on every hypothesis call —
+        // a cost that scales linearly with the L* discrimination-tree depth.
+        for (i, slot) in accept.iter_mut().enumerate().take(n) {
+            *slot = self.mqx.ask(&self.access[i])?;
         }
         let words = self.access.clone();
         let mut delta: Vec<Vec<(BytePred, StateId)>> = Vec::with_capacity(n);

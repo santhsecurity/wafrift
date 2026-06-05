@@ -41,7 +41,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
         results.push(format!("{payload} USING TTL 86400"));
     }
 
-    results
+    super::variant_util::finalize(results, payload)
 }
 
 #[cfg(test)]

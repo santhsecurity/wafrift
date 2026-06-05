@@ -1,0 +1,31 @@
+# Tier-B canonical attack classes for `wafrift audit` / `wafrift harden`.
+#
+# Each class pairs a small set of CANONICAL attacks with the CRS-normalized
+# detection TOKENS that a synthesized rule keys on. `audit` measures how many
+# of each attack's delivery candidates pass the WAF (the holes); `harden`
+# synthesizes two CRS-grade rules per token (single- and double-decode) and
+# proves the holes close with zero benign false positives.
+#
+# INVARIANT (enforced fail-closed by the loader): every class must carry at
+# least one attack AND at least one token — a class whose tokens do not detect
+# its attacks would make the harden proof vacuous, so an empty side is rejected
+# at load, never silently accepted. Extend coverage by adding a `[[class]]`
+# block here (Tier-B data), not by editing code.
+
+[[class]]
+name = "xss"
+attacks = [
+    "<script>alert(1)</script>",
+    "<svg onload=alert(1)>",
+    "<img src=x onerror=alert(1)>",
+]
+tokens = ["<script", "<svg", "<img", "onerror=", "onload="]
+
+[[class]]
+name = "sqli"
+attacks = [
+    "1' OR '1'='1",
+    "1 UNION SELECT pw FROM users",
+    "1; SELECT sleep(5)",
+]
+tokens = ["union select", "' or '", "sleep("]

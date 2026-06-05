@@ -13,11 +13,13 @@
 //! wires.
 
 use std::io::Write;
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+use common::wafrift;
 
 /// Spin up a tiny WAF emulator: 403 if the request line OR body
 /// contains the literal token "BLOCKED", 200 otherwise. Returns the
@@ -56,35 +58,9 @@ async fn spawn_mock_waf() -> (std::net::SocketAddr, Arc<AtomicUsize>) {
         }
     });
     {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
+        common::wait_for_server(addr);
     }
     (addr, counter)
-}
-
-/// Helper: invoke the real `wafrift` binary with the given args.
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("failed to spawn wafrift binary");
-    let code = output.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    (code, stdout, stderr)
 }
 
 /// Write a fixture raw HTTP request file with a §§ marker in the

@@ -17,7 +17,7 @@ wafrift-encoding = { workspace = true }
 wafrift-grammar = { workspace = true }
 wafrift-content-type = { workspace = true }
 wafrift-smuggling = { workspace = true }
-wafrift-fingerprint = { workspace = true }
+guise = { workspace = true }
 wafrift-detect = { workspace = true }
 wafrift-evolution = { workspace = true }
 wafrift-graphql = { workspace = true }
@@ -31,8 +31,6 @@ urlencoding.workspace = true
 tracing = { workspace = true }
 toml = { workspace = true }
 fs4 = { workspace = true }
-lru = { workspace = true }
-parking_lot = { workspace = true }
 thiserror = { workspace = true }
 wafrift-plugin-api = { workspace = true }
 

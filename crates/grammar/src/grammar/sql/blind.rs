@@ -48,7 +48,7 @@ pub(crate) fn order_by_probes(max_columns: u32) -> Vec<String> {
 /// Generate time-based blind SQL mutations.
 pub(crate) fn time_blind_mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
     let lower = payload.to_ascii_lowercase();
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
 
     for (blind_payload, rule) in TIME_BLINDS {
         if results.len() >= max_mutations {
@@ -82,7 +82,7 @@ pub(crate) fn time_blind_mutations(payload: &str, max_mutations: usize) -> Vec<S
 
 /// Generate stacked-query SQL mutations.
 pub(crate) fn stacked_query_mutations(payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
     let base = payload
         .trim_end_matches("--")
         .trim_end_matches('#')
@@ -191,7 +191,7 @@ const ERROR_BLINDS: &[(&str, &str)] = &[
 
 /// Generate boolean-based blind SQL mutations.
 pub(crate) fn boolean_blind_mutations(_payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
 
     for (blind_payload, rule) in BOOLEAN_BLINDS {
         if results.len() >= max_mutations {
@@ -209,7 +209,7 @@ pub(crate) fn boolean_blind_mutations(_payload: &str, max_mutations: usize) -> V
 
 /// Generate error-based blind SQL mutations.
 pub(crate) fn error_blind_mutations(_payload: &str, max_mutations: usize) -> Vec<SqlMutation> {
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(max_mutations);
 
     for (blind_payload, rule) in ERROR_BLINDS {
         if results.len() >= max_mutations {

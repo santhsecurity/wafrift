@@ -13,6 +13,10 @@
 //!
 //! This runs entirely in-process (no network) so it completes in <10s on
 //! any modern CI runner.
+//!
+//! NOTE: `wafrift-cli` is a binary crate; integration tests cannot import
+//! from it.  `BenchCase` and `build_request` below mirror the canonical
+//! definitions in `crates/cli/src/bench_waf.rs` — update both together.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -21,13 +25,10 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use wafrift_types::Request;
 
-// ── Corpus structure (mirrors bench_waf.rs internals) ────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct CorpusFile {
-    #[serde(default, rename = "case")]
-    cases: Vec<BenchCase>,
-}
+// -- Local mirror of bench_waf.rs BenchCase -----------------------------------
+// wafrift-cli is a binary crate; integration tests cannot import from it.
+// This struct mirrors crates/cli/src/bench_waf.rs:BenchCase.
+// Keep the two in sync when changing the schema.
 
 #[derive(Debug, Deserialize, Clone)]
 struct BenchCase {
@@ -36,14 +37,15 @@ struct BenchCase {
     payload: String,
     #[serde(default = "default_mode")]
     mode: String,
+    #[serde(default)]
+    description: String,
 }
 
 fn default_mode() -> String {
     "body_form_q".into()
 }
 
-// ── Mirrors bench_waf::build_request exactly ─────────────────────────────────
-
+/// Mirrors crates/cli/src/bench_waf.rs:build_request.
 fn build_request(base_url: &str, case: &BenchCase) -> Request {
     let payload = &case.payload;
     match case.mode.as_str() {
@@ -62,7 +64,6 @@ fn build_request(base_url: &str, case: &BenchCase) -> Request {
             r
         }
         _ => {
-            // body_form_q (default)
             let url = format!("{}/post", base_url.trim_end_matches('/'));
             let body = format!("q={}", urlencoding::encode(payload));
             let mut r = Request::post(url, body.into_bytes());
@@ -70,6 +71,14 @@ fn build_request(base_url: &str, case: &BenchCase) -> Request {
             r
         }
     }
+}
+
+// -- Corpus structure ---------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CorpusFile {
+    #[serde(default, rename = "case")]
+    cases: Vec<BenchCase>,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -156,7 +165,12 @@ fn all_corpus_case_ids_are_globally_unique() {
     let mut duplicates: Vec<String> = Vec::new();
     for (path, case) in &all {
         if !seen.insert(case.id.clone()) {
-            duplicates.push(format!("{}: duplicate id={}", path.display(), case.id));
+            duplicates.push(format!(
+                "{}: duplicate id={} (description: {})",
+                path.display(),
+                case.id,
+                case.description
+            ));
         }
     }
     assert!(
@@ -262,6 +276,7 @@ fn url_query_q_mode_puts_payload_in_url() {
         class: "sql".into(),
         payload: "1 OR 1=1".into(),
         mode: "url_query_q".into(),
+        description: String::new(),
     };
     let req = build_request("http://127.0.0.1:18081", &case);
     assert!(
@@ -282,6 +297,7 @@ fn body_form_q_mode_puts_payload_in_body() {
         class: "sql".into(),
         payload: "1 OR 1=1".into(),
         mode: "body_form_q".into(),
+        description: String::new(),
     };
     let req = build_request("http://127.0.0.1:18081", &case);
     let body = req.body_bytes().expect("body_form_q must have a body");
@@ -299,6 +315,7 @@ fn raw_body_mode_puts_payload_as_body() {
         class: "xss".into(),
         payload: "<script>alert(1)</script>".into(),
         mode: "raw_body".into(),
+        description: String::new(),
     };
     let req = build_request("http://127.0.0.1:18081", &case);
     let body = req.body_bytes().expect("raw_body must have a body");

@@ -215,10 +215,10 @@ proptest! {
     fn race_h2_last_byte_sync_rejects_even_stream_ids(id in 2u32..=1000, even_step in 2u32..=10) {
         let id = id - (id % 2); // ensure even
         if id == 0 {
-            prop_assert!(race::h2_last_byte_sync_frames(&[id], &[b'X']).is_none());
+            prop_assert!(race::h2_last_byte_sync_frames(&[id], b"X").is_none());
         } else {
             let _ = even_step; // (parameter unused — proptest just shrinks both)
-            prop_assert!(race::h2_last_byte_sync_frames(&[id], &[b'X']).is_none());
+            prop_assert!(race::h2_last_byte_sync_frames(&[id], b"X").is_none());
         }
     }
 }

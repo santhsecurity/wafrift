@@ -184,7 +184,7 @@ pub fn h2_multiplexed_overflow(
     // because the smuggling effect requires live multiplexing on a real
     // H2 connection.  The bytes here allow the caller to reconstruct the
     // frame sequence.
-    let benign_sse = format!("data: heartbeat\nid: 1\n\nevent: ping\ndata: ok\n\n");
+    let benign_sse = "data: heartbeat\nid: 1\n\nevent: ping\ndata: ok\n\n".to_string();
     let attack_sse = format!(
         "data: {attack_payload}\nid: {}\n\nevent: smuggle\ndata: end\n\n",
         canary.token

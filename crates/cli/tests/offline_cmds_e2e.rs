@@ -14,20 +14,8 @@
 //!  3. Core happy-path exits 0 and emits expected content.
 //!  4. Invalid inputs exit non-zero with an error.
 
-use std::process::Command;
-
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+mod common;
+use common::wafrift;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // egress-example
@@ -55,7 +43,10 @@ fn egress_example_default_emits_valid_json() {
     assert_eq!(code, 0, "egress-example must exit 0; stderr: {stderr}");
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("egress-example must emit valid JSON");
-    assert!(v.is_object(), "egress-example output must be a JSON object: {v}");
+    assert!(
+        v.is_object(),
+        "egress-example output must be a JSON object: {v}"
+    );
     assert!(
         v["proxies"].is_array(),
         "egress-example output must have a proxies array: {v}"
@@ -67,7 +58,10 @@ fn egress_example_default_emits_valid_json() {
 #[test]
 fn egress_example_tor_preset_contains_socks5_url() {
     let (code, stdout, stderr) = wafrift(&["egress-example", "--preset", "tor"]);
-    assert_eq!(code, 0, "egress-example --preset tor must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "egress-example --preset tor must exit 0; stderr: {stderr}"
+    );
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     let proxies = v["proxies"].as_array().unwrap();
     let has_socks5 = proxies.iter().any(|p| {
@@ -84,10 +78,7 @@ fn egress_example_tor_preset_contains_socks5_url() {
 #[test]
 fn egress_example_unknown_preset_exits_nonzero() {
     let (code, _stdout, _stderr) = wafrift(&["egress-example", "--preset", "this-is-not-a-preset"]);
-    assert_ne!(
-        code, 0,
-        "unknown --preset must exit non-zero"
-    );
+    assert_ne!(code, 0, "unknown --preset must exit non-zero");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +129,10 @@ fn completion_zsh_emits_content() {
 #[test]
 fn completion_powershell_emits_content() {
     let (code, stdout, stderr) = wafrift(&["completion", "powershell"]);
-    assert_eq!(code, 0, "completion powershell must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "completion powershell must exit 0; stderr: {stderr}"
+    );
     assert!(
         !stdout.trim().is_empty(),
         "completion powershell must emit content: {stderr}"
@@ -154,7 +148,10 @@ fn completion_powershell_emits_content() {
 fn completion_fish_emits_content() {
     let (code, stdout, stderr) = wafrift(&["completion", "fish"]);
     assert_eq!(code, 0, "completion fish must exit 0; stderr: {stderr}");
-    assert!(!stdout.trim().is_empty(), "completion fish must emit content: {stderr}");
+    assert!(
+        !stdout.trim().is_empty(),
+        "completion fish must emit content: {stderr}"
+    );
 }
 
 #[test]
@@ -188,7 +185,10 @@ fn report_empty_bank_exits_0_and_emits_markdown() {
     // With no proxy gene bank present, report falls back to an empty bank
     // and emits a "No bypasses recorded yet" markdown page.
     let (code, stdout, stderr) = wafrift(&["report"]);
-    assert_eq!(code, 0, "report must exit 0 on empty bank; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "report must exit 0 on empty bank; stderr: {stderr}"
+    );
     assert!(
         !stdout.trim().is_empty(),
         "report must emit markdown content: {stderr}"
@@ -203,7 +203,10 @@ fn report_empty_bank_exits_0_and_emits_markdown() {
 #[test]
 fn report_json_format_emits_valid_json_with_schema_version() {
     let (code, stdout, stderr) = wafrift(&["report", "--format", "json"]);
-    assert_eq!(code, 0, "report --format json must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "report --format json must exit 0; stderr: {stderr}"
+    );
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("report --format json must emit valid JSON");
 
@@ -229,7 +232,10 @@ fn report_json_format_emits_valid_json_with_schema_version() {
 #[test]
 fn report_json_empty_bank_has_zero_findings() {
     let (code, stdout, stderr) = wafrift(&["report", "--format", "json"]);
-    assert_eq!(code, 0, "report --format json must exit 0; stderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "report --format json must exit 0; stderr: {stderr}"
+    );
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     let findings = v["findings"].as_array().unwrap();
     // With an empty bank, there should be zero findings.
@@ -285,25 +291,25 @@ fn seed_help_exits_0() {
 
 #[test]
 fn seed_dry_run_waf_exits_0_and_reports_technique() {
+    // R56 pass-21 §10 COHERENCE: old camelCase ID "EncodingDoubleUrl" was
+    // renamed to path-style "encoding/url/double". Updated to match the
+    // canonical technique ID emitted by `wafrift techniques list`.
     let (code, stdout, stderr) = wafrift(&[
         "seed",
         "--technique",
-        "EncodingDoubleUrl",
+        "encoding/url/double",
         "--waf",
         "cloudflare",
         "--dry-run",
     ]);
-    assert_eq!(
-        code, 0,
-        "seed --dry-run must exit 0; stderr: {stderr}"
-    );
+    assert_eq!(code, 0, "seed --dry-run must exit 0; stderr: {stderr}");
     let combined = format!("{stdout}{stderr}");
     assert!(
         combined.to_lowercase().contains("dry run") || combined.to_lowercase().contains("would"),
         "seed --dry-run must mention dry run: combined={combined}"
     );
     assert!(
-        combined.contains("EncodingDoubleUrl"),
+        combined.contains("encoding/url/double"),
         "seed --dry-run must echo the technique name: combined={combined}"
     );
     assert!(
@@ -314,10 +320,13 @@ fn seed_dry_run_waf_exits_0_and_reports_technique() {
 
 #[test]
 fn seed_dry_run_multiple_techniques() {
+    // R56 pass-21 §10 COHERENCE: old camelCase IDs updated to path-style.
+    // EncodingDoubleUrl → encoding/url/double
+    // EncodingUrlUnicode → encoding/unicode/iis-percent (IIS %-encoding)
     let (code, stdout, stderr) = wafrift(&[
         "seed",
         "--technique",
-        "EncodingDoubleUrl,EncodingUrlUnicode",
+        "encoding/url/double,encoding/unicode/iis-percent",
         "--waf",
         "akamai",
         "--dry-run",
@@ -328,8 +337,8 @@ fn seed_dry_run_multiple_techniques() {
     );
     let combined = format!("{stdout}{stderr}");
     assert!(
-        combined.contains("EncodingDoubleUrl"),
-        "seed --dry-run must mention EncodingDoubleUrl: combined={combined}"
+        combined.contains("encoding/url/double"),
+        "seed --dry-run must mention encoding/url/double: combined={combined}"
     );
 }
 
@@ -337,7 +346,7 @@ fn seed_dry_run_multiple_techniques() {
 fn seed_missing_waf_and_host_exits_nonzero() {
     // `seed` requires either --waf or --host; neither → exits 1.
     let (code, _stdout, stderr) =
-        wafrift(&["seed", "--technique", "EncodingDoubleUrl", "--dry-run"]);
+        wafrift(&["seed", "--technique", "encoding/url/double", "--dry-run"]);
     assert_ne!(
         code, 0,
         "seed without --waf or --host must exit non-zero; stderr: {stderr}"

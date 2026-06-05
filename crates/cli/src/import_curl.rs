@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use crate::scan::ScanArgs;
 
 #[derive(Args, Debug)]
-pub struct ImportCurlArgs {
+pub(crate) struct ImportCurlArgs {
     /// The curl invocation itself, as one shell-quoted argument —
     /// `wafrift import-curl 'curl -s https://t/login -H "Cookie: s=1"'`.
     /// This is the form you get from Burp / Chromium "Copy as cURL".
@@ -313,7 +313,7 @@ pub(crate) fn parse_curl(tokens: &[String]) -> Result<ParsedCurl, String> {
     Ok(p)
 }
 
-pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
+pub(crate) fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
     // Source precedence: inline positional arg → file → stdin. clap's
     // `conflicts_with_all` already rejects more than one being set, so
     // here we just pick the one that is.
@@ -425,6 +425,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         target_positional: None,
         target: Some(target),
         from_discovery: None,
+        corpus: None,
         payload,
         // Without an explicit --param the canonical default is `q`,
         // matching `wafrift scan`'s own default — consistency, not a
@@ -446,6 +447,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         session_init: None,
         level: parse_level(&args.level),
         encoding_only: false,
+        dry_run: false,
         delay_ms: args.delay_ms,
         format: args.format,
         stealth_browser: None,
@@ -467,7 +469,7 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         // via `wafrift scan --auto-distill` when they want the
         // extra fires for cleaner reports.
         auto_distill: false,
-        auto_distill_max_fires: 200,
+        auto_distill_max_fires: crate::DEFAULT_AUTO_DISTILL_MAX_FIRES,
         // 0 = scan's dynamic default (concurrency 8/4 by delay;
         // timeout = workspace default). import-curl users haven't
         // historically had per-knob tuning here, so the safe move
@@ -475,8 +477,8 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         concurrency: 0,
         timeout_secs: 0,
         quiet: false,
-        callback_timeout_secs: 5,
-        exploit_cap: 500,
+        callback_timeout_secs: crate::DEFAULT_CALLBACK_TIMEOUT_SECS,
+        exploit_cap: crate::DEFAULT_EXPLOIT_CAP,
         // 0 = no cap; import-curl preserves prior unbounded behaviour
         // so a script piping a curl into the evasion loop doesn't
         // silently start truncating after this rev. Operators who
@@ -498,9 +500,19 @@ pub fn run_import_curl(args: ImportCurlArgs) -> ExitCode {
         egress_socks5: Vec::new(),
         egress_http_proxy: Vec::new(),
         egress_tailscale_nodes: Vec::new(),
-        egress_tailscale_socks_addr: "127.0.0.1:1055".to_string(),
-        egress_challenge_threshold: 3,
-        egress_cooldown_secs: 300,
+        egress_tailscale_socks_addr: crate::config::DEFAULT_TAILSCALE_SOCKS_ADDR.to_string(),
+        egress_challenge_threshold: crate::config::DEFAULT_EGRESS_CHALLENGE_THRESHOLD,
+        egress_cooldown_secs: crate::config::DEFAULT_EGRESS_COOLDOWN_SECS,
+        // import-curl doesn't expose a wall-clock cap; 0 = no limit.
+        scan_timeout_secs: 0,
+        // import-curl doesn't expose a max-fires cap; use generous default.
+        max_fires: crate::DEFAULT_MAX_FIRES,
+        full_scan_unguarded: false,
+        probe_surfaces: false,
+        auto_escalate: true,
+        no_auto_escalate: false,
+        no_probe_surfaces: false,
+        surface_cap: 12,
     };
 
     let cancel = tokio_util::sync::CancellationToken::new();
@@ -673,8 +685,7 @@ mod tests {
     // half (or the whole bare value), matching curl's wire behaviour.
     #[test]
     fn data_urlencode_encodes_value_only_for_kv_pair() {
-        let toks =
-            shell_tokenize("curl https://t/ --data-urlencode 'q=hello world'").unwrap();
+        let toks = shell_tokenize("curl https://t/ --data-urlencode 'q=hello world'").unwrap();
         let p = parse_curl(&toks).unwrap();
         assert_eq!(p.body.as_deref(), Some("q=hello%20world"));
     }
@@ -688,16 +699,14 @@ mod tests {
 
     #[test]
     fn data_urlencode_at_file_form_is_rejected_loudly() {
-        let toks =
-            shell_tokenize("curl https://t/ --data-urlencode '@/etc/passwd'").unwrap();
+        let toks = shell_tokenize("curl https://t/ --data-urlencode '@/etc/passwd'").unwrap();
         let err = parse_curl(&toks).unwrap_err();
         assert!(err.contains("@file"), "got: {err}");
     }
 
     #[test]
     fn data_urlencode_kv_at_file_form_rejected() {
-        let toks =
-            shell_tokenize("curl https://t/ --data-urlencode 'name=@/etc/passwd'").unwrap();
+        let toks = shell_tokenize("curl https://t/ --data-urlencode 'name=@/etc/passwd'").unwrap();
         let err = parse_curl(&toks).unwrap_err();
         assert!(err.contains("@file"), "got: {err}");
     }
@@ -705,18 +714,15 @@ mod tests {
     #[test]
     fn data_urlencode_legitimate_at_in_value_not_rejected() {
         // Anti-rig: email-like values must NOT trigger the @file guard.
-        let toks =
-            shell_tokenize("curl https://t/ --data-urlencode 'email=foo@bar.com'").unwrap();
+        let toks = shell_tokenize("curl https://t/ --data-urlencode 'email=foo@bar.com'").unwrap();
         let p = parse_curl(&toks).unwrap();
         assert_eq!(p.body.as_deref(), Some("email=foo%40bar.com"));
     }
 
     #[test]
     fn data_urlencode_and_plain_data_concat_with_ampersand() {
-        let toks = shell_tokenize(
-            "curl https://t/ -d 'a=1' --data-urlencode 'b=hello world'",
-        )
-        .unwrap();
+        let toks =
+            shell_tokenize("curl https://t/ -d 'a=1' --data-urlencode 'b=hello world'").unwrap();
         let p = parse_curl(&toks).unwrap();
         assert_eq!(p.body.as_deref(), Some("a=1&b=hello%20world"));
     }

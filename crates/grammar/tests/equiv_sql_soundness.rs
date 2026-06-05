@@ -219,7 +219,14 @@ fn delivery_labels_are_stable() {
                 // regardless of the JSON/XML/GraphQL transport envelope).
                 "xml_body",
                 "json_nested_deep",
-                "graphql"
+                "graphql",
+                // JSON-unicode-normalisation gap: payload value fully
+                // `\uXXXX`-escaped; backend JSON parser decodes to the same
+                // SQL bytes, WAF keyword-match misses the raw body.
+                "json_unicode_body",
+                // Charset confusion: UTF-7 multipart part; charset-honouring
+                // backend decodes the same SQL bytes, WAF sees shift sequences.
+                "utf7_multipart"
             ]
             .contains(&l),
             "unknown delivery label {l:?}"
@@ -553,6 +560,8 @@ fn end_to_end_public_api_shape() {
                 | DeliveryShape::XmlBody { .. }
                 | DeliveryShape::JsonNestedDeep { .. }
                 | DeliveryShape::GraphQLQuery { .. }
+                | DeliveryShape::JsonUnicodeBody { .. }
+                | DeliveryShape::Utf7MultipartField { .. }
         ));
     }
 }

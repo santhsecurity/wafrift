@@ -10,26 +10,15 @@
 //! validate WAF behaviour (there is no WAF in these tests; the mock
 //! acts only as the origin).
 
-use std::process::Command;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+mod common;
+use common::wafrift;
 
-fn wafrift(args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_wafrift"))
-        .args(args)
-        .output()
-        .expect("spawn wafrift binary");
-    let code = output.status.code().unwrap_or(-1);
-    (
-        code,
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Spawn a mock server that captures the raw bytes of ONE request, sends
 /// a fixed 200 response, then shuts down the accepted connection. The
@@ -67,25 +56,13 @@ async fn spawn_capturing_mock() -> (std::net::SocketAddr, tokio::sync::mpsc::Rec
     // requests. Using a TCP connect-poll instead of a fixed sleep avoids
     // the Windows loopback race, but we must drain the probe hit because
     // the channel-based mock counts every accepted connection.
-    {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            match std::net::TcpStream::connect_timeout(
-                &addr,
-                std::time::Duration::from_millis(100),
-            ) {
-                Ok(_) => break,
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        panic!("mock server at {addr} never became ready within 30s");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        }
-        // Drain the probe hit from the channel.
-        let _ = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
-    }
+    // R66 pass-21 §7 DEDUP: shared poll-until-ready helper. The hit
+    // drained from `rx` after readiness is preserved — trailer-diff
+    // mocks count every accepted connection on `rx` and we must
+    // discard the probe so test assertions only see wafrift's
+    // production requests.
+    common::wait_for_server(addr);
+    let _ = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;
     (addr, rx)
 }
 

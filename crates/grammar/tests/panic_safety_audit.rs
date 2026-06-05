@@ -44,6 +44,7 @@ const ALL_TYPES: &[PayloadType] = &[
     PayloadType::PathTraversal,
     PayloadType::TemplateInjection,
     PayloadType::NoSql,
+    PayloadType::Ssi,
     PayloadType::Unknown,
 ];
 

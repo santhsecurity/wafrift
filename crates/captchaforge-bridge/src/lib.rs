@@ -3,18 +3,18 @@
 //! Subscribes a `BrowserChallengeSolver` into wafrift's challenge
 //! flow. When wafrift's `ChallengeStore::dispatch` would otherwise
 //! escalate to the operator (cookie-solvable kinds with no cached
-//! cookie), the bridge spins up a chromiumoxide page from the
-//! captured challenge HTML, runs the captchaforge solver chain, and
-//! seeds the resulting clearance cookie back into wafrift's store.
+//! cookie), the bridge spins up a Firefox page via BiDi, runs the
+//! captchaforge solver chain, and seeds the resulting clearance cookie
+//! back into wafrift's store.
 //!
 //! # Examples
 //!
 //! Defaults are tuned for cloud WAF challenge pages — 60s overall
-//! solve budget, headless Chromium:
+//! solve budget, headless Firefox:
 //!
 //! ```ignore
 //! // Marked `ignore` because the doctest harness links the full
-//! // chromiumoxide → boring-sys2 → C++ runtime chain even without
+//! // rustenium → boring-sys2 → C++ runtime chain even without
 //! // running, and many minimal dev environments don't ship
 //! // `libstdc++-dev` (the symlink `libstdc++.so` the linker wants).
 //! // `cargo test --doc` on this crate will still pass on CI runners
@@ -34,8 +34,8 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
-use runtime_headless::{BrowserLaunchOptions, BrowserRuntime};
+use anyhow::{anyhow, Context, Result};
+use runtime_foxdriver::{launch_firefox, FoxBrowserConfig};
 use tokio::sync::Mutex;
 
 use wafrift_transport::challenge::{ChallengeKind, ChallengeStore};
@@ -61,19 +61,21 @@ pub struct BridgeConfig {
     /// Per-solve overall budget. Beyond this, the solver is killed
     /// and the bridge falls back to the operator-prompt path.
     pub solve_timeout_ms: u64,
-    /// Whether to launch chromium in headless mode. Some CF
+    /// Whether to launch Firefox in headless mode. Some CF
     /// challenges fingerprint headless detection — set to false on
     /// targets that block it.
     pub headless: bool,
-    /// Whether to launch chromium with `--no-sandbox` (process
-    /// isolation OFF). F97: pre-fix the bridge hardcoded
-    /// `no_sandbox: true`, meaning a malicious challenge page — or
-    /// any URL the operator pointed the solver at — could execute
-    /// JS with full OS privileges on the wafrift host. Default
-    /// `false` (sandbox ON, the secure choice); set `true` only on
-    /// CI runners and rootless containers where the sandbox can't
-    /// initialize.
+    /// Whether to launch with sandbox disabled. No-op for Firefox
+    /// (kept for API compat with old Chromium-based bridge).
     pub no_sandbox: bool,
+    /// Whether to navigate to `target_url` directly before falling
+    /// back to HTML injection. Default `true` because most WAF
+    /// challenge JS needs the correct origin to make XHR/fetch
+    /// requests (e.g. Cloudflare's proof-of-work handshake). When
+    /// the target is unreachable or the challenge is a one-time
+    /// response, the bridge falls back to injecting the captured
+    /// HTML.
+    pub navigate_first: bool,
 }
 
 impl Default for BridgeConfig {
@@ -82,18 +84,30 @@ impl Default for BridgeConfig {
             solve_timeout_ms: 60_000,
             headless: true,
             no_sandbox: false,
+            navigate_first: true,
         }
     }
 }
 
+#[must_use]
+fn bridge_launch_options(cfg: &BridgeConfig) -> FoxBrowserConfig {
+    FoxBrowserConfig {
+        headless: cfg.headless,
+        executable_path: std::env::var("FIREFOX_PATH")
+            .ok()
+            .or_else(|| which::which("firefox").ok().map(|p| p.to_string_lossy().to_string())),
+        ..Default::default()
+    }
+}
+
 /// Try to clear a managed challenge by loading the supplied HTML in
-/// a headless chromiumoxide page and running the captchaforge solver
+/// a headless Firefox page and running the captchaforge solver
 /// chain. Returns `Ok(Some(_))` on success, `Ok(None)` when no
 /// captcha was detected (likely a JS-only CF managed challenge that
-/// the cookie just needs time to land for), and `Err` on chromium /
+/// the cookie just needs time to land for), and `Err` on Firefox /
 /// solver / network failures.
 ///
-/// If the `CHROMIUM_PATH` environment variable is set, the binary at
+/// If the `FIREFOX_PATH` environment variable is set, the binary at
 /// that path is used instead of auto-detection. Setting it to a
 /// non-existent path forces an immediate error, which is useful in
 /// tests that verify the not-available code path.
@@ -104,96 +118,174 @@ pub async fn solve_in_browser(
 ) -> Result<Option<BridgeOutcome>> {
     let started = std::time::Instant::now();
 
-    let runtime = BrowserRuntime::launch(&BrowserLaunchOptions {
-        no_sandbox: cfg.no_sandbox,
-        // Cloudflare's managed challenge fingerprints HeadlessChrome —
-        // honour cfg.headless so callers can flip visible on targets
-        // that block it.
-        headed: !cfg.headless,
-        chrome_executable: std::env::var("CHROMIUM_PATH")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(runtime_headless::find_browser_executable),
-        ..Default::default()
-    })
-    .await
-    .map_err(|e| anyhow!("launch chromium: {e}"))?;
-    let browser = runtime.browser();
+    let launch_cfg = bridge_launch_options(cfg);
+    if let Some(ref path) = launch_cfg.executable_path {
+        if !std::path::Path::new(path).exists() {
+            return Err(anyhow!(
+                "firefox executable not found at {path} — install Firefox or set the FIREFOX_PATH environment variable"
+            ));
+        }
+    }
+    let page = launch_firefox(launch_cfg)
+        .await
+        .map_err(|e| anyhow!(
+            "launch firefox failed: {e} — verify Firefox is installed and on PATH, or set FIREFOX_PATH"
+        ))?;
+
+    let _ = captchaforge::apply_default_stealth_profile(&page).await;
 
     let solve_fut = async {
-        let page = browser.new_page("about:blank").await.context("new_page")?;
-        // Inject the challenge HTML directly so we don't depend on
-        // the original origin being reachable; chromium evaluates
-        // its scripts as if served from `target_url`.
-        //
-        // Both target_url and challenge_html are routed through the
-        // serde_json_escape helper so they land in the evaluated JS
-        // as proper JSON string literals. Pre-fix target_url used
-        // a manual `replace('\\'', "\\\\'")` that handled single quotes
-        // only — a target_url containing `"`, `\\`, or control
-        // characters could break out of the JS literal and execute
-        // arbitrary code in the chromium page context. Most relevant
-        // when the challenge response 302s to an attacker-controlled
-        // URL (open redirect / DNS rebind) which then becomes the
-        // target_url on the next call.
-        let escaped_html = serde_json_escape(challenge_html);
-        let escaped_url = serde_json_escape(target_url);
-        let setup = format!(
-            "Object.defineProperty(window, 'location', \
-                 {{ value: {{ href: {escaped_url} }}, writable: false }}); \
-             document.open(); document.write({escaped_html}); document.close();"
-        );
-        if let Err(e) = page.evaluate(setup).await {
-            tracing::warn!(error = %e, "captchaforge-bridge page.evaluate best-effort failed");
+        // Phase 1: Behavioral warm-up before the challenge evaluates us.
+        // Cloudflare Turnstile and reCAPTCHA v3 collect mouse/keyboard
+        // telemetry. A blank page with instant detection is a tell.
+        // Warm up: move mouse from origin → center → lower-right with
+        // realistic timing, then idle drift so the JS sees organic
+        // interaction before we inspect the DOM for challenge widgets.
+        let mut mouse = guise::human::HumanMouse::new(guise::human::MousePersona::Normal);
+        let viewport_w = 1920.0_f64;
+        let viewport_h = 1080.0_f64;
+        // Origin → center (first "user lands on page" movement).
+        mouse
+            .move_to(&page, viewport_w / 2.0, viewport_h / 2.0, 50.0)
+            .await
+            .ok();
+        // Short pause (user reading / processing).
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        // Small drift while "reading".
+        mouse
+            .idle_drift(&page, std::time::Duration::from_millis(600), 120)
+            .await
+            .ok();
+
+        // Phase 4: Try navigating to the target URL first. Most WAF
+        // challenge JS (Cloudflare managed, Akamai BMP) needs the
+        // correct origin to make XHR/fetch requests during its
+        // proof-of-work or fingerprinting handshake. document.write()
+        // injection leaves the page at about:blank, which blocks
+        // cross-origin requests and causes 0 % solution rates.
+        // If navigation fails (target unreachable, one-time token
+        // expired), fall back to HTML injection so the solver chain
+        // still has a chance with the captured markup.
+        let navigated = if cfg.navigate_first {
+            let nav_timeout = std::time::Duration::from_secs(15);
+            match tokio::time::timeout(nav_timeout, page.goto(target_url)).await {
+                Ok(Ok(())) => {
+                    tracing::debug!(
+                        url = target_url,
+                        "captchaforge-bridge navigated to target"
+                    );
+                    true
+                }
+                Ok(Err(e)) => {
+                    tracing::debug!(
+                        error = %e,
+                        "captchaforge-bridge navigation returned error, falling back to injection"
+                    );
+                    false
+                }
+                Err(_) => {
+                    tracing::debug!(
+                        "captchaforge-bridge navigation timed out, falling back to injection"
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        if !navigated {
+            // Inject the challenge HTML directly so we don't depend on
+            // the original origin being reachable; Firefox evaluates
+            // its scripts as if served from `target_url`.
+            //
+            // Both target_url and challenge_html are routed through the
+            // serde_json_escape helper so they land in the evaluated JS
+            // as proper JSON string literals. Pre-fix target_url used
+            // a manual `replace('\\'', "\\\\'")` that handled single quotes
+            // only — a target_url containing `"`, `\\`, or control
+            // characters could break out of the JS literal and execute
+            // arbitrary code in the Firefox page context. Most relevant
+            // when the challenge response 302s to an attacker-controlled
+            // URL (open redirect / DNS rebind) which then becomes the
+            // target_url on the next call.
+            let escaped_html = serde_json_escape(challenge_html);
+            let escaped_url = serde_json_escape(target_url);
+            let setup = format!(
+                "Object.defineProperty(window, 'location', \
+                     {{ value: {{ href: {escaped_url} }}, writable: false }}); \
+                 document.open(); document.write({escaped_html}); document.close();"
+            );
+            if let Err(e) = page.evaluate(setup).await {
+                tracing::warn!(error = %e, "captchaforge-bridge page.evaluate best-effort failed");
+            }
         }
+
+        // After navigation or injection, give scripts a moment to
+        // bootstrap before detection runs. 300 ms is enough for most
+        // challenge widgets; the polling loop later gives more time.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         let info = captchaforge::detect::detect(&page)
             .await
             .context("captchaforge detect")?;
-        if !captchaforge::detect::is_captcha(&info) {
-            return Ok::<_, anyhow::Error>(None);
-        }
         let chain = captchaforge::solver::CaptchaSolverChain::default_chain();
-        // CaptchaSolverChain::solve returns the chain's best
-        // CaptchaSolveResult (no Result wrapper) — failures are
-        // surfaced via .success=false rather than as Errors.
+        // Phase 1 fix: run the solver chain even when no visible
+        // captcha is detected. Cloudflare Turnstile invisible mode
+        // and managed challenges often have no detectable widget
+        // — the token/cookie populates via JS in the background.
+        // WaitForTokenSolver (first in chain) handles this passive
+        // case. Previously the bridge returned None here, never
+        // giving the chain a chance to harvest the cookie.
         let _result = chain.solve(&page, &info).await;
 
-        // Whether the solver returns success or not, harvest the
-        // page's cookies — clearance is set by the challenge JS
-        // even on partial successes, and the cookie itself is what
-        // wafrift cares about.
-        let cookies = page.get_cookies().await.unwrap_or_default();
-        for c in cookies {
-            let name = c.name.clone();
-            let kind = match name.as_str() {
-                "cf_clearance" => ChallengeKind::CloudflareManaged,
-                "_abck" | "ak_bmsc" => ChallengeKind::AkamaiBmp,
-                "aws-waf-token" => ChallengeKind::AwsWaf,
-                _ => continue,
-            };
-            return Ok(Some(BridgeOutcome {
-                cookie_header: format!("{}={}", name, c.value),
-                kind,
-                elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            }));
+        // Whether the solver returns success or not, poll for
+        // clearance cookies — challenge JS often sets them after a
+        // delay, and a single-shot check misses the common case.
+        // Poll every 500 ms for up to 10 s (or whatever budget
+        // remains from the overall solve_timeout_ms).
+        let poll_interval = std::time::Duration::from_millis(500);
+        let poll_deadline = started + std::time::Duration::from_millis(cfg.solve_timeout_ms);
+        loop {
+            let cookies = page.get_cookies().await.unwrap_or_default();
+            for c in cookies {
+                let name = c.name.clone();
+                let kind = match name.as_str() {
+                    "cf_clearance" => ChallengeKind::CloudflareManaged,
+                    "_abck" | "ak_bmsc" => ChallengeKind::AkamaiBmp,
+                    "aws-waf-token" => ChallengeKind::AwsWaf,
+                    _ => continue,
+                };
+                return Ok::<_, anyhow::Error>(Some(BridgeOutcome {
+                    cookie_header: format!("{}={}", name, c.value),
+                    kind,
+                    elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                }));
+            }
+            if std::time::Instant::now() + poll_interval >= poll_deadline {
+                break;
+            }
+            tokio::time::sleep(poll_interval).await;
         }
         Ok(None)
     };
 
     let timeout = std::time::Duration::from_millis(cfg.solve_timeout_ms);
-    let result = tokio::time::timeout(timeout, solve_fut)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "solve_in_browser exceeded {}ms budget",
-                cfg.solve_timeout_ms
-            )
-        })??;
+    let result = tokio::time::timeout(timeout, solve_fut).await;
 
-    // BrowserRuntime's Drop aborts the CDP handler task + tears down chrome.
-    drop(runtime);
-    Ok(result)
+    // Always close the browser, even on timeout or solver error, so the
+    // Firefox process doesn't leak.  A 5 s cap prevents a hung close from
+    // blocking teardown indefinitely.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), page.close()).await;
+
+    match result {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(anyhow!(
+            "solve_in_browser exceeded {}ms budget — increase BridgeConfig.solve_timeout_ms if the target is slow",
+            cfg.solve_timeout_ms
+        )),
+    }
 }
 
 fn serde_json_escape(s: &str) -> String {
@@ -271,15 +363,6 @@ pub enum InstallOutcome {
     AlreadyInstalled,
 }
 
-/// True when `install_global_solver` has completed at least once
-/// in this process. Lets call sites at the challenge-handling
-/// hot path gate on bridge availability without threading a flag
-/// from `main` through every async closure.
-#[must_use]
-pub fn is_installed() -> bool {
-    SOLVER_INSTALLED.get().is_some()
-}
-
 /// Marker function future wafrift binaries call from `main` to
 /// announce the bridge is active. The first caller performs the
 /// install and receives [`InstallOutcome::Installed`]; every
@@ -326,6 +409,7 @@ mod tests {
             solve_timeout_ms: 12345,
             headless: false,
             no_sandbox: false,
+            navigate_first: true,
         };
         set_global_config(custom.clone()).await;
         let read_back = current_config().await;
@@ -343,31 +427,258 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn is_installed_reflects_install_state() {
-        // OnceLock is process-global so earlier tests may have flipped
-        // it. The contract under test: after `install_global_solver`
-        // succeeds, `is_installed` is true. We can't reset the
-        // OnceLock so we can only check the post-install invariant.
-        install_global_solver().await.unwrap();
-        assert!(
-            is_installed(),
-            "is_installed must be true once install_global_solver has completed"
-        );
-    }
-
-    #[tokio::test]
-    async fn solve_in_browser_times_out_when_chromium_unavailable() {
-        // We can't guarantee chromium is installed on the test box.
+    async fn solve_in_browser_times_out_when_firefox_unavailable() {
+        // We can't guarantee Firefox is installed on the test box.
         // Set a tiny timeout so the test exits fast no matter what
-        // the underlying Browser::launch does (slow path: timeout;
+        // the underlying launch does (slow path: timeout;
         // fast path: launch fails immediately).
         let cfg = BridgeConfig {
             solve_timeout_ms: 200,
             headless: true,
             no_sandbox: false,
+            navigate_first: false,
         };
         let _ = solve_in_browser("<html></html>", "https://example.com/", &cfg).await;
-        // No assertion on outcome — chromium availability varies in
+        // No assertion on outcome — Firefox availability varies in
         // CI. The point is the function returns within ~the budget.
+    }
+
+    // ── BridgeConfig anti-rig: pin every default ────────────────────────
+
+    /// Anti-rig: pinning defaults here catches a security regression where
+    /// someone changes `no_sandbox` to `true` by default, silently giving
+    /// challenge-page JS full OS access on the wafrift host.
+    #[test]
+    fn bridge_config_no_sandbox_default_is_false() {
+        let c = BridgeConfig::default();
+        assert!(
+            !c.no_sandbox,
+            "no_sandbox MUST default to false — true = full OS privilege for challenge JS"
+        );
+    }
+
+    /// Anti-rig: headless defaults to true so CI/server runs work without
+    /// a display server. Changing to false breaks unattended automation.
+    #[test]
+    fn bridge_config_headless_default_is_true() {
+        let c = BridgeConfig::default();
+        assert!(
+            c.headless,
+            "headless must default to true for unattended operation"
+        );
+    }
+
+    /// Anti-rig: 60 s budget. Too short → legitimate JS challenges time out.
+    /// Too long → a stuck solve blocks the entire scan pipeline forever.
+    #[test]
+    fn bridge_config_solve_timeout_is_60_seconds() {
+        assert_eq!(
+            BridgeConfig::default().solve_timeout_ms,
+            60_000,
+            "default solve timeout must be exactly 60 000 ms"
+        );
+    }
+
+    /// Anti-rig: navigate_first defaults to true because most WAF
+    /// challenges need the correct origin for their JS handshake.
+    #[test]
+    fn bridge_config_navigate_first_default_is_true() {
+        let c = BridgeConfig::default();
+        assert!(
+            c.navigate_first,
+            "navigate_first must default to true for WAF JS challenge compatibility"
+        );
+    }
+
+    // ── BridgeConfig builder pattern ─────────────────────────────────────
+
+    #[test]
+    fn bridge_config_can_set_no_sandbox() {
+        let c = BridgeConfig {
+            no_sandbox: true,
+            ..BridgeConfig::default()
+        };
+        assert!(c.no_sandbox);
+        // Other fields unchanged.
+        assert!(c.headless);
+        assert_eq!(c.solve_timeout_ms, 60_000);
+    }
+
+    #[test]
+    fn bridge_config_can_set_visible_mode() {
+        let c = BridgeConfig {
+            headless: false,
+            ..BridgeConfig::default()
+        };
+        assert!(!c.headless);
+    }
+
+    #[test]
+    fn bridge_launch_options_maps_headless_correctly() {
+        let cfg = BridgeConfig {
+            headless: true,
+            ..BridgeConfig::default()
+        };
+        let options = bridge_launch_options(&cfg);
+        assert!(options.headless);
+    }
+
+    #[test]
+    fn bridge_launch_options_preserve_visible_override() {
+        let cfg = BridgeConfig {
+            headless: false,
+            ..BridgeConfig::default()
+        };
+        let options = bridge_launch_options(&cfg);
+        assert!(!options.headless);
+    }
+
+    #[test]
+    fn bridge_config_custom_timeout() {
+        let c = BridgeConfig {
+            solve_timeout_ms: 120_000,
+            ..BridgeConfig::default()
+        };
+        assert_eq!(c.solve_timeout_ms, 120_000);
+    }
+
+    // ── Vision solver wiring ─────────────────────────────────────────────
+
+    /// The bridge enables the `vision` feature on captchaforge, so the
+    /// YoloGridSolver and CrnnTextSolver must be present in the default
+    /// chain. If this test fails, the Cargo.toml feature flag is missing.
+    #[test]
+    fn default_chain_includes_vision_solvers() {
+        let chain = captchaforge::solver::CaptchaSolverChain::default_chain();
+        let names = chain.solver_names();
+        assert!(
+            names.contains(&"YoloGridSolver"),
+            "YoloGridSolver must be in default chain (vision feature enabled?)"
+        );
+        assert!(
+            names.contains(&"CrnnTextSolver"),
+            "CrnnTextSolver must be in default chain (vision feature enabled?)"
+        );
+    }
+
+    // ── serde_json_escape edge cases ─────────────────────────────────────
+
+    /// serde_json_escape must handle the empty string (→ `""`) without
+    /// panic. An earlier version called `.unwrap()` on a `to_string`
+    /// error that can't happen for valid UTF-8 strings but pinning ensures
+    /// the fallback `"\"\""` branch is never needed for valid input.
+    #[test]
+    fn serde_json_escape_empty_string() {
+        let s = serde_json_escape("");
+        assert_eq!(s, "\"\"");
+    }
+
+    #[test]
+    fn serde_json_escape_backslash_escaped() {
+        let s = serde_json_escape("a\\b");
+        // The backslash must be doubled: "a\\b" → `"a\\\\b"` (as raw str).
+        assert!(s.contains("\\\\"), "backslash not doubled: {s}");
+    }
+
+    #[test]
+    fn serde_json_escape_newline_escaped() {
+        let s = serde_json_escape("a\nb");
+        assert!(s.contains("\\n"), "newline not escaped: {s}");
+    }
+
+    #[test]
+    fn serde_json_escape_tab_escaped() {
+        let s = serde_json_escape("a\tb");
+        assert!(s.contains("\\t"), "tab not escaped: {s}");
+    }
+
+    #[test]
+    fn serde_json_escape_null_byte_escaped() {
+        let s = serde_json_escape("a\0b");
+        assert!(s.contains("\\u0000"), "null byte not escaped: {s}");
+    }
+
+    #[test]
+    fn serde_json_escape_single_quote_unchanged() {
+        // Single quotes are valid JSON string content — must not be escaped.
+        let s = serde_json_escape("it's fine");
+        // The word must appear intact.
+        assert!(
+            s.contains("it's fine") || s.contains("it\\'s fine"),
+            "single quote mangled: {s}"
+        );
+    }
+
+    #[test]
+    fn serde_json_escape_unicode_passthrough() {
+        let s = serde_json_escape("日本語");
+        // Valid Unicode — serde_json either passes through or escapes; both are fine.
+        // Must be valid JSON when stripped of outer quotes.
+        assert!(s.starts_with('"') && s.ends_with('"'));
+        let inner: &str = &s[1..s.len() - 1];
+        // Round-trip via JSON parse.
+        let reparsed: serde_json::Value = serde_json::from_str(&format!(r#""{inner}""#))
+            .expect("escaped unicode must be valid JSON");
+        assert_eq!(reparsed.as_str().unwrap(), "日本語");
+    }
+
+    #[test]
+    fn serde_json_escape_control_chars_escaped() {
+        // U+001F (unit separator) is a control char — must be escaped.
+        let s = serde_json_escape("\x1F");
+        assert!(s.starts_with('"') && s.ends_with('"'));
+        // The raw byte 0x1F must not appear unescaped.
+        assert!(!s.contains('\x1F'), "control byte appears unescaped: {s}");
+    }
+
+    // ── InstallOutcome ────────────────────────────────────────────────────
+
+    #[test]
+    fn install_outcome_variants_are_distinguishable() {
+        assert_ne!(InstallOutcome::Installed, InstallOutcome::AlreadyInstalled);
+    }
+
+    // ── BridgeOutcome fields ──────────────────────────────────────────────
+
+    #[test]
+    fn bridge_outcome_cookie_header_format() {
+        // Anti-rig: cookie_header is `name=value`, not `name: value` or
+        // just `value`. If the format changes, every HTTP client that
+        // builds a Cookie header from it silently sends garbage.
+        let o = BridgeOutcome {
+            cookie_header: "cf_clearance=abc123".to_string(),
+            kind: wafrift_transport::challenge::ChallengeKind::CloudflareManaged,
+            elapsed_ms: 5000,
+        };
+        assert!(
+            o.cookie_header.contains('='),
+            "cookie_header must be name=value format"
+        );
+        assert!(
+            !o.cookie_header.contains(':'),
+            "cookie_header must not use HTTP header format"
+        );
+    }
+
+    // ── Global config concurrent safety ──────────────────────────────────
+
+    /// Global config lock must not deadlock under concurrent reads.
+    #[tokio::test]
+    async fn concurrent_current_config_reads_do_not_deadlock() {
+        use tokio::task;
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                task::spawn(async {
+                    let c = current_config().await;
+                    // Just reading — no assertion on specific value, just
+                    // that it returns without deadlock.
+                    assert!(c.solve_timeout_ms > 0);
+                })
+            })
+            .collect();
+        for h in handles {
+            h.await.expect("task must not panic");
+        }
     }
 }

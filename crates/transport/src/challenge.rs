@@ -938,8 +938,9 @@ pub fn dispatch(host: &str, kind: ChallengeKind, store: &ChallengeStore) -> Solv
 
 /// Apply ±25% pseudo-random jitter to `base` so concurrent callers
 /// scheduling the same backoff don't all retry at the same wall
-/// time. Uses `Instant::now()` nanos as the entropy source so we
-/// don't pull in a dedicated RNG dep on this hot path.
+/// time. Uses `SystemTime::now()` subsecond nanos as the entropy
+/// source so we don't pull in a dedicated RNG dep on this hot path
+/// (`Instant` is opaque and exposes no epoch-relative nanos).
 #[must_use]
 fn jittered_wait(base: Duration) -> Duration {
     use std::time::SystemTime;
