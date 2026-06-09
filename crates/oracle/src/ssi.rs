@@ -30,14 +30,7 @@ pub struct SsiOracle;
 /// Recognised SSI directive tokens per Apache mod_include
 /// documentation. Names are matched case-insensitively.
 const SSI_DIRECTIVES: &[&str] = &[
-    "exec",
-    "include",
-    "echo",
-    "set",
-    "config",
-    "fsize",
-    "flastmod",
-    "printenv",
+    "exec", "include", "echo", "set", "config", "fsize", "flastmod", "printenv",
 ];
 
 /// Extracts the directive name from an SSI payload, or `None` if the
@@ -93,19 +86,20 @@ mod tests {
     #[test]
     fn exec_directive_valid() {
         let oracle = SsiOracle;
-        assert!(oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#exec cmd="ls" -->"#,
-        ));
+        assert!(
+            oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#exec cmd="ls" -->"#,)
+        );
     }
 
     #[test]
     fn whitespace_reflow_preserved() {
         let oracle = SsiOracle;
-        assert!(oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#  exec  cmd="ls"  -->"#,
-        ));
+        assert!(
+            oracle.is_semantically_valid(
+                r#"<!--#exec cmd="ls" -->"#,
+                r#"<!--#  exec  cmd="ls"  -->"#,
+            )
+        );
         assert!(oracle.is_semantically_valid(
             r#"<!--#exec cmd="ls" -->"#,
             "<!--#\texec\tcmd=\"ls\"\t-->",
@@ -115,23 +109,20 @@ mod tests {
     #[test]
     fn case_change_preserved() {
         let oracle = SsiOracle;
-        assert!(oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#EXEC cmd="ls" -->"#,
-        ));
-        assert!(oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#Exec cmd="ls" -->"#,
-        ));
+        assert!(
+            oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#EXEC cmd="ls" -->"#,)
+        );
+        assert!(
+            oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#Exec cmd="ls" -->"#,)
+        );
     }
 
     #[test]
     fn quote_rotation_preserved() {
         let oracle = SsiOracle;
-        assert!(oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#exec cmd='ls' -->"#,
-        ));
+        assert!(
+            oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#exec cmd='ls' -->"#,)
+        );
     }
 
     /// LAW 12 anti-rig: directive identity matters. An `exec` that
@@ -140,10 +131,12 @@ mod tests {
     #[test]
     fn directive_substitution_rejected() {
         let oracle = SsiOracle;
-        assert!(!oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#include file="ls" -->"#,
-        ));
+        assert!(
+            !oracle.is_semantically_valid(
+                r#"<!--#exec cmd="ls" -->"#,
+                r#"<!--#include file="ls" -->"#,
+            )
+        );
     }
 
     /// LAW 1 anti-rig: a transform that destroys the SSI envelope
@@ -163,10 +156,9 @@ mod tests {
     #[test]
     fn unterminated_directive_rejected() {
         let oracle = SsiOracle;
-        assert!(!oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#exec cmd="ls""#,
-        ));
+        assert!(
+            !oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#exec cmd="ls""#,)
+        );
     }
 
     /// LAW 1 anti-rig: a misspelled directive (`exe` instead of
@@ -174,10 +166,9 @@ mod tests {
     #[test]
     fn unknown_directive_rejected() {
         let oracle = SsiOracle;
-        assert!(!oracle.is_semantically_valid(
-            r#"<!--#exec cmd="ls" -->"#,
-            r#"<!--#exe cmd="ls" -->"#,
-        ));
+        assert!(
+            !oracle.is_semantically_valid(r#"<!--#exec cmd="ls" -->"#, r#"<!--#exe cmd="ls" -->"#,)
+        );
     }
 
     #[test]
@@ -187,10 +178,7 @@ mod tests {
             "exec", "include", "echo", "set", "config", "fsize", "flastmod", "printenv",
         ] {
             let p = format!("<!--#{d} -->");
-            assert!(
-                oracle.is_semantically_valid(&p, &p),
-                "{d} must round-trip"
-            );
+            assert!(oracle.is_semantically_valid(&p, &p), "{d} must round-trip");
         }
     }
 

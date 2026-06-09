@@ -63,9 +63,9 @@ impl ReassemblyPolicy {
     #[must_use]
     pub fn overwrites(self, in_seq: u32, ex_seq: u32) -> bool {
         match self {
-            Self::First => false,         // never overwrite filled bytes
-            Self::Last => true,           // newer (incoming) always wins
-            Self::Bsd => in_seq < ex_seq, // strictly-lower left edge wins
+            Self::First => false,            // never overwrite filled bytes
+            Self::Last => true,              // newer (incoming) always wins
+            Self::Bsd => in_seq < ex_seq,    // strictly-lower left edge wins
             Self::Linux => in_seq <= ex_seq, // ≤ left edge wins (tie → newer)
         }
     }
@@ -93,14 +93,20 @@ mod tests {
     fn bsd_favors_strictly_lower_left_edge_keeps_on_tie() {
         assert!(ReassemblyPolicy::Bsd.overwrites(3, 7), "lower seq wins");
         assert!(!ReassemblyPolicy::Bsd.overwrites(7, 3), "higher seq loses");
-        assert!(!ReassemblyPolicy::Bsd.overwrites(5, 5), "tie keeps existing (older)");
+        assert!(
+            !ReassemblyPolicy::Bsd.overwrites(5, 5),
+            "tie keeps existing (older)"
+        );
     }
 
     #[test]
     fn linux_favors_le_left_edge_tie_goes_to_newer() {
         assert!(ReassemblyPolicy::Linux.overwrites(3, 7));
         assert!(!ReassemblyPolicy::Linux.overwrites(7, 3));
-        assert!(ReassemblyPolicy::Linux.overwrites(5, 5), "tie goes to newer");
+        assert!(
+            ReassemblyPolicy::Linux.overwrites(5, 5),
+            "tie goes to newer"
+        );
     }
 
     #[test]

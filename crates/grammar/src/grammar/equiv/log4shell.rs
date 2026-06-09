@@ -301,11 +301,9 @@ fn rw_obfuscate(payload: &str, rng: &mut Rng) -> Option<(String, Vec<&'static st
     let mut rules: Vec<&'static str> = Vec::new();
     // Scheme sits AFTER `jndi` (higher index); rewrite it first so the
     // `jndi` range stays valid for the second rewrite.
-    if do_scheme {
-        if let Some(r) = scheme {
-            out = obf_span(&out, r, rng);
-            rules.push("log4j_scheme_obf");
-        }
+    if do_scheme && let Some(r) = scheme {
+        out = obf_span(&out, r, rng);
+        rules.push("log4j_scheme_obf");
     }
     if do_jndi {
         out = obf_span(&out, jpos..jend, rng);
@@ -345,7 +343,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let Some((s, rules)) = rw_obfuscate(payload, &mut rng) else {
             continue;

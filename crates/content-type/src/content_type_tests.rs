@@ -574,10 +574,12 @@ mod tests {
     fn parse_form_body_lossy_returns_empty_for_oversized() {
         // parse_form_body_lossy must return Vec::new() for oversized bodies.
         #[allow(deprecated)]
-        let result = crate::content_type::parse_form_body_lossy(
-            &vec![b'z'; MAX_FORM_BODY_SIZE + 1]
+        let result =
+            crate::content_type::parse_form_body_lossy(&vec![b'z'; MAX_FORM_BODY_SIZE + 1]);
+        assert!(
+            result.is_empty(),
+            "lossy wrapper must return empty Vec on oversized"
         );
-        assert!(result.is_empty(), "lossy wrapper must return empty Vec on oversized");
     }
 
     #[test]
@@ -652,10 +654,13 @@ mod tests {
             let variants = generate_variants(&params);
             let json_var = variants
                 .iter()
-                .find(|v| v.technique == crate::content_type::ContentTypeTechnique::JsonUnicodeEscape)
+                .find(|v| {
+                    v.technique == crate::content_type::ContentTypeTechnique::JsonUnicodeEscape
+                })
                 .unwrap();
-            serde_json::from_slice::<serde_json::Value>(&json_var.body)
-                .unwrap_or_else(|e| panic!("JsonUnicodeEscape body is not valid JSON for val={val:?}: {e}"));
+            serde_json::from_slice::<serde_json::Value>(&json_var.body).unwrap_or_else(|e| {
+                panic!("JsonUnicodeEscape body is not valid JSON for val={val:?}: {e}")
+            });
         }
     }
 
@@ -685,7 +690,7 @@ mod tests {
             b"",
             b"plain text with no equals",
             b"\x80\x81\x82", // invalid UTF-8
-            b"a=b", // minimal valid
+            b"a=b",          // minimal valid
         ];
         for body in bodies {
             let _ = crate::content_type::generate_variants_from_body(body);
@@ -713,7 +718,11 @@ mod tests {
     fn generate_variants_from_body_valid_form_generates_all_techniques() {
         let body = b"user=admin&pass=secret";
         let variants = crate::content_type::generate_variants_from_body(body);
-        assert!(variants.len() >= 10, "expected >= 10 variants, got {}", variants.len());
+        assert!(
+            variants.len() >= 10,
+            "expected >= 10 variants, got {}",
+            variants.len()
+        );
         // Check all major techniques are present.
         use crate::content_type::ContentTypeTechnique;
         let techniques: Vec<_> = variants.iter().map(|v| &v.technique).collect();
@@ -738,7 +747,9 @@ mod tests {
     /// (8192)` → fixed code breaks; pre-fix emitted `(key, "")`.
     #[test]
     fn bound_params_skips_entry_when_key_alone_overflows_remaining_budget() {
-        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
+        use crate::content_type::{
+            MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants,
+        };
 
         // 7 params, each 8192 bytes → 57344 used, remaining = 8192.
         let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1); // 8191 bytes
@@ -821,14 +832,16 @@ mod tests {
             .expect("JsonDuplicateKey variant must be generated");
         let body_str = std::str::from_utf8(&dup.body).unwrap();
         // Must contain both "safe" and the payload value.
-        assert!(body_str.contains("safe"), "first (safe) key must be present: {body_str}");
+        assert!(
+            body_str.contains("safe"),
+            "first (safe) key must be present: {body_str}"
+        );
         // Value should appear (possibly escaped).
         assert!(
             body_str.contains("username"),
             "key must appear in body: {body_str}"
         );
-        serde_json::from_slice::<serde_json::Value>(&dup.body)
-            .expect("body must be valid JSON");
+        serde_json::from_slice::<serde_json::Value>(&dup.body).expect("body must be valid JSON");
     }
 
     /// The previous `remaining.saturating_sub(k.len())` would yield `0` when
@@ -839,7 +852,9 @@ mod tests {
     /// Key = 8192 bytes: `k.len() (8192) >= remaining (8192)` → break (post-fix).
     #[test]
     fn bound_params_skips_entry_when_key_len_equals_remaining() {
-        use crate::content_type::{MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants};
+        use crate::content_type::{
+            MAX_VARIANT_INPUT_BYTES, MAX_VARIANT_VALUE_BYTES, generate_variants,
+        };
 
         let chunk_value = "x".repeat(MAX_VARIANT_VALUE_BYTES - 1);
         let mut params: Vec<(String, String)> = (0..7)

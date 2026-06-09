@@ -45,8 +45,7 @@ const SQL_PAYLOAD: &str = "' OR 1=1 UNION SELECT NULL,NULL,NULL--";
 const XSS_PAYLOAD: &str = "<script>alert(document.cookie)</script>";
 
 /// Long payload with many spaces (stress-tests space-replacement paths, ≈200 bytes).
-const LONG_SPACED: &str =
-    "SELECT id, username, password FROM users WHERE username='admin' OR 1=1 \
+const LONG_SPACED: &str = "SELECT id, username, password FROM users WHERE username='admin' OR 1=1 \
      UNION SELECT table_name, column_name, NULL FROM information_schema.columns--";
 
 /// Short unreserved-heavy payload (most bytes pass through unchanged, ≈30 bytes).
@@ -102,32 +101,24 @@ fn bench_case_alternation(c: &mut Criterion) {
     let mut group = c.benchmark_group("case_alternation");
 
     for (name, payload) in &[("sql_40b", SQL_PAYLOAD), ("long_200b", LONG_SPACED)] {
-        group.bench_with_input(
-            BenchmarkId::new("case_alternate", name),
-            payload,
-            |b, p| {
-                b.iter(|| {
-                    let r = wafrift_encoding::encoding::strategy::encode(
-                        black_box(p.as_bytes()),
-                        black_box(Strategy::CaseAlternation),
-                    );
-                    black_box(r)
-                });
-            },
-        );
-        group.bench_with_input(
-            BenchmarkId::new("random_case", name),
-            payload,
-            |b, p| {
-                b.iter(|| {
-                    let r = wafrift_encoding::encoding::strategy::encode(
-                        black_box(p.as_bytes()),
-                        black_box(Strategy::RandomCase),
-                    );
-                    black_box(r)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("case_alternate", name), payload, |b, p| {
+            b.iter(|| {
+                let r = wafrift_encoding::encoding::strategy::encode(
+                    black_box(p.as_bytes()),
+                    black_box(Strategy::CaseAlternation),
+                );
+                black_box(r)
+            });
+        });
+        group.bench_with_input(BenchmarkId::new("random_case", name), payload, |b, p| {
+            b.iter(|| {
+                let r = wafrift_encoding::encoding::strategy::encode(
+                    black_box(p.as_bytes()),
+                    black_box(Strategy::RandomCase),
+                );
+                black_box(r)
+            });
+        });
     }
     group.finish();
 }

@@ -6,7 +6,7 @@
 //! `capsule::all_variants(payload)`, `multipart_smuggle::generate_smuggle_variants(params)`,
 //! etc. From an operator's perspective, **they're all probes** — the
 //! domain differences are noise once the
-//! [`SmuggleProbe`](wafrift_types::probe::SmuggleProbe) trait is in
+//! [`SmuggleProbe`] trait is in
 //! the picture.
 //!
 //! This module's [`all_probes`] returns a flat `Vec<Box<dyn SmuggleProbe>>`
@@ -92,9 +92,7 @@ pub fn all_probes(seeds: &ProbeSeeds) -> Vec<Box<dyn SmuggleProbe>> {
         out.push(Box::new(p));
     }
     // Authorization-header family.
-    for p in
-        auth_header_smuggle::all_variants("Authorization", "Bearer", seeds.credential_value)
-    {
+    for p in auth_header_smuggle::all_variants("Authorization", "Bearer", seeds.credential_value) {
         out.push(Box::new(p));
     }
     // Range-header family.
@@ -150,13 +148,7 @@ mod tests {
         // each `technique()`).
         let families: HashSet<String> = probes
             .iter()
-            .map(|p| {
-                p.technique()
-                    .split('.')
-                    .next()
-                    .unwrap_or("")
-                    .to_string()
-            })
+            .map(|p| p.technique().split('.').next().unwrap_or("").to_string())
             .collect();
 
         // Eleven distinct families: cookie, auth, range, path,
@@ -187,8 +179,7 @@ mod tests {
         // Every probe must carry an independent canary — uniqueness
         // is the whole point.
         let probes = all_probes(&ProbeSeeds::default());
-        let tokens: HashSet<String> =
-            probes.iter().map(|p| p.canary().token.clone()).collect();
+        let tokens: HashSet<String> = probes.iter().map(|p| p.canary().token.clone()).collect();
         assert_eq!(
             tokens.len(),
             probes.len(),
@@ -275,7 +266,9 @@ mod tests {
         for p in &probes {
             if p.technique().starts_with("host.")
                 && let wafrift_types::probe::SmuggleArtifact::Headers(hs) = p.artifact()
-                && hs.iter().any(|(_, v)| v.contains("secret-internal.example.io"))
+                && hs
+                    .iter()
+                    .any(|(_, v)| v.contains("secret-internal.example.io"))
             {
                 saw_target = true;
                 break;

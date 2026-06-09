@@ -11,9 +11,9 @@
 use super::error::ReconProbeError;
 use super::rules::HeaderRules;
 use super::{HttpHeaderProbeSnapshot, StackTag};
+use guise::http::default_browser_header_map_without_compression;
 use reqwest::header::HeaderMap;
 use std::collections::BTreeMap;
-use guise::http::default_browser_header_map_without_compression;
 
 use super::ActiveProbeConfig;
 

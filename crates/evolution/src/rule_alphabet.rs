@@ -260,20 +260,14 @@ mod tests {
     fn distinguished_excludes_filler_bytes() {
         // Space appears in every blocked payload but is HTTP filler —
         // must be filtered out even with discrimination=1.0.
-        let b = bucket_with(
-            vec!["a b", "c d", "e f"],
-            vec!["abcdef", "qwert", "zxcvb"],
-        );
+        let b = bucket_with(vec!["a b", "c d", "e f"], vec!["abcdef", "qwert", "zxcvb"]);
         let dist = distinguished_bytes(&b, 5);
         assert!(!dist.contains(&b' '), "filler byte ' ' must be excluded");
     }
 
     #[test]
     fn distinguished_count_capped_at_k() {
-        let b = bucket_with(
-            vec!["<svg onload=alert('xss')>"],
-            vec!["benign"],
-        );
+        let b = bucket_with(vec!["<svg onload=alert('xss')>"], vec!["benign"]);
         let dist = distinguished_bytes(&b, 3);
         assert!(
             dist.len() <= 3,
@@ -311,7 +305,10 @@ mod tests {
     fn pick_catch_all_falls_back_to_z_when_letters_exhausted() {
         // Payloads contain every ASCII letter — pick_catch_all
         // falls back to 'Z'.
-        let all_letters: String = (b'A'..=b'Z').chain(b'a'..=b'z').map(|b| b as char).collect();
+        let all_letters: String = (b'A'..=b'Z')
+            .chain(b'a'..=b'z')
+            .map(|b| b as char)
+            .collect();
         let b = bucket_with(vec![all_letters.as_str()], vec![]);
         let dist = vec![];
         let ca = pick_catch_all(&b, &dist);
@@ -321,7 +318,13 @@ mod tests {
     #[test]
     fn infer_alphabet_sql_bucket_includes_quote_or_dash() {
         let b = bucket_with(
-            vec!["' OR 1=1--", "1' AND 1=1#", "admin'--", "UNION SELECT", "SLEEP(5)"],
+            vec![
+                "' OR 1=1--",
+                "1' AND 1=1#",
+                "admin'--",
+                "UNION SELECT",
+                "SLEEP(5)",
+            ],
             vec!["normal_input", "search_term", "user_query"],
         );
         let alpha = infer_alphabet_default(&b).expect("alphabet");
@@ -359,10 +362,7 @@ mod tests {
     fn infer_alphabet_zero_discrimination_bucket_returns_none() {
         // Same payloads in both blocks and bypasses — no byte has any
         // discrimination signal.
-        let b = bucket_with(
-            vec!["abc", "abc", "abc"],
-            vec!["abc", "abc", "abc"],
-        );
+        let b = bucket_with(vec!["abc", "abc", "abc"], vec!["abc", "abc", "abc"]);
         // Either returns None (no discriminating bytes) or a fallback
         // alphabet. The contract: if discriminating bytes exist they're
         // used; if not, return None.
@@ -395,23 +395,14 @@ mod tests {
     fn infer_alphabet_only_bypasses_no_blocks_still_works() {
         // We've only seen bypasses (rare but possible on a permissive
         // rule). bypass_presence is the signal then.
-        let b = bucket_with(
-            vec![],
-            vec!["%27 OR 1%3d1", "<script>", "%3cscript%3e"],
-        );
+        let b = bucket_with(vec![], vec!["%27 OR 1%3d1", "<script>", "%3cscript%3e"]);
         let alpha = infer_alphabet_default(&b);
-        assert!(
-            alpha.is_some(),
-            "bypasses-only bucket must yield alphabet"
-        );
+        assert!(alpha.is_some(), "bypasses-only bucket must yield alphabet");
     }
 
     #[test]
     fn discrimination_ordering_is_monotone() {
-        let b = bucket_with(
-            vec!["abc", "abd", "abe"],
-            vec!["xyz"],
-        );
+        let b = bucket_with(vec!["abc", "abd", "abe"], vec!["xyz"]);
         let scored = score_bytes(&b);
         for i in 1..scored.len() {
             assert!(
@@ -467,10 +458,7 @@ mod tests {
     #[test]
     fn distinguished_payload_count_caps_at_k_even_with_many_unique_bytes() {
         // Many unique high-discrimination bytes; ensure we cap at k.
-        let b = bucket_with(
-            vec!["<>'\"(){}[]!@#$%^&*+-/=?:;,."],
-            vec!["plain"],
-        );
+        let b = bucket_with(vec!["<>'\"(){}[]!@#$%^&*+-/=?:;,."], vec!["plain"]);
         assert!(distinguished_bytes(&b, 5).len() <= 5);
         assert!(distinguished_bytes(&b, 10).len() <= 10);
         assert!(distinguished_bytes(&b, 20).len() <= 20);

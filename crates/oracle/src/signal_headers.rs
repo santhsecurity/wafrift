@@ -122,7 +122,10 @@ mod tests {
     #[test]
     fn empty_header_list_produces_no_signals() {
         let signals = classify_headers(&[]);
-        assert!(signals.is_empty(), "empty header list must produce no signals");
+        assert!(
+            signals.is_empty(),
+            "empty header list must produce no signals"
+        );
     }
 
     #[test]

@@ -36,7 +36,9 @@ fn reference(status: u16, body: &[u8], sigs: &[String]) -> LiveVerdict {
 
 /// A lowercase ASCII "word" signature (the shape `load_block_signatures` yields).
 fn sig_strategy() -> impl Strategy<Value = String> {
-    "[a-z0-9 ]{3,12}".prop_map(|s| s.trim().to_string()).prop_filter("non-empty", |s| s.len() >= 3)
+    "[a-z0-9 ]{3,12}"
+        .prop_map(|s| s.trim().to_string())
+        .prop_filter("non-empty", |s| s.len() >= 3)
 }
 
 proptest! {
@@ -197,7 +199,11 @@ proptest! {
 
 /// Build a baseline whose body echoes its control (a reflection).
 fn reflected(status: u16, control: &str) -> Baseline {
-    Baseline { status, body: format!("you searched for {control} results").into_bytes(), control: control.as_bytes().to_vec() }
+    Baseline {
+        status,
+        body: format!("you searched for {control} results").into_bytes(),
+        control: control.as_bytes().to_vec(),
+    }
 }
 
 proptest! {

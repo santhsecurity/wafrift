@@ -573,8 +573,7 @@ mod tests {
         // would then accept the cert for every matching subdomain
         // — widens the MITM blast radius beyond the specific host
         // the operator targeted.
-        let err = leaf_params_for("*.evil.example.com")
-            .expect_err("wildcard SNI must be rejected");
+        let err = leaf_params_for("*.evil.example.com").expect_err("wildcard SNI must be rejected");
         assert!(format!("{err}").contains("wildcard"));
     }
 
@@ -648,8 +647,7 @@ mod tests {
         // creates the file 0600 atomically (no write-then-chmod window);
         // here we pin the resulting mode bits.
         use std::os::unix::fs::PermissionsExt as _;
-        let dir = std::env::temp_dir()
-            .join(format!("wafrift_mitm_perms_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("wafrift_mitm_perms_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let ca = CertificateAuthority::generate().unwrap();
         ca.write_to_dir(&dir).unwrap();
@@ -671,8 +669,8 @@ mod tests {
         // perms (e.g. from an older buggy version), a re-write must tighten it
         // to 0600 BEFORE the new secret bytes are written.
         use std::os::unix::fs::PermissionsExt as _;
-        let dir = std::env::temp_dir()
-            .join(format!("wafrift_mitm_preexist_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("wafrift_mitm_preexist_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let key_path = dir.join(CA_KEY_FILE);
@@ -682,7 +680,12 @@ mod tests {
         let ca = CertificateAuthority::generate().unwrap();
         ca.write_to_dir(&dir).unwrap();
         let mode = std::fs::metadata(&key_path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "re-write must tighten to 0600, got {:o}", mode & 0o777);
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "re-write must tighten to 0600, got {:o}",
+            mode & 0o777
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

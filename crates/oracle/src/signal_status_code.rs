@@ -183,13 +183,19 @@ mod tests {
     #[test]
     fn boundary_exactly_500_is_server_error() {
         let (v, _) = classify_status_code(500);
-        assert!(matches!(v, Verdict::ServerError { .. }), "500 must be server_error");
+        assert!(
+            matches!(v, Verdict::ServerError { .. }),
+            "500 must be server_error"
+        );
     }
 
     #[test]
     fn boundary_exactly_599_is_server_error() {
         let (v, _) = classify_status_code(599);
-        assert!(matches!(v, Verdict::ServerError { .. }), "599 must be server_error");
+        assert!(
+            matches!(v, Verdict::ServerError { .. }),
+            "599 must be server_error"
+        );
     }
 
     #[test]

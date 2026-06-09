@@ -77,7 +77,11 @@ fn identical_bytes_overlap_is_policy_invariant() {
     // When overlapping bytes are equal, every policy yields the same stream.
     let segs = [seg(0, "HELLO"), seg(2, "LLO")];
     for p in [First, Last, Bsd, Linux] {
-        assert_eq!(reassemble(&segs, p), b"HELLO", "policy must not matter when bytes agree");
+        assert_eq!(
+            reassemble(&segs, p),
+            b"HELLO",
+            "policy must not matter when bytes agree"
+        );
     }
 }
 
@@ -92,5 +96,9 @@ fn a_single_segment_is_delivered_verbatim_under_every_policy() {
 fn a_later_segment_filling_an_earlier_hole_is_delivered() {
     // seg at 0 ("AB"), hole at 2,3, seg at 4 ("EF"); then a seg fills 2,3 ("CD").
     let segs = [seg(0, "AB"), seg(4, "EF"), seg(2, "CD")];
-    assert_eq!(reassemble(&segs, First), b"ABCDEF", "the gap-filler completes the stream");
+    assert_eq!(
+        reassemble(&segs, First),
+        b"ABCDEF",
+        "the gap-filler completes the stream"
+    );
 }

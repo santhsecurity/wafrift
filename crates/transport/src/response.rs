@@ -38,7 +38,7 @@ impl EvasionResponse {
     }
 
     /// Consume the response and return the body as bytes, **bounded**
-    /// against a decompression bomb at [`MAX_RESPONSE_BODY_BYTES`].
+    /// against a decompression bomb at `MAX_RESPONSE_BODY_BYTES`.
     ///
     /// reqwest auto-decompresses gzip/br with no size cap, so a raw
     /// `.bytes().await` lets a hostile target OOM the scanner with a tiny

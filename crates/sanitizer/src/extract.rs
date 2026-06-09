@@ -200,7 +200,9 @@ pub fn extract_with(source: &str, signatures: &[SanitizerSignature]) -> Sanitize
     // 4. Event-handler stripping.
     if detects_event_handler_stripping(source) {
         model.strips_event_handlers = true;
-        model.evidence.push("event-handler stripping detected".to_string());
+        model
+            .evidence
+            .push("event-handler stripping detected".to_string());
     }
 
     // 5. Blocked URL schemes.
@@ -289,12 +291,11 @@ fn extract_quoted_strings(fragment: &str) -> Vec<String> {
             while j < bytes.len() && bytes[j] != q {
                 j += 1;
             }
-            if j <= bytes.len() {
-                if let Ok(s) = std::str::from_utf8(&bytes[start..j.min(bytes.len())]) {
-                    if !s.is_empty() {
-                        out.push(s.to_string());
-                    }
-                }
+            if j <= bytes.len()
+                && let Ok(s) = std::str::from_utf8(&bytes[start..j.min(bytes.len())])
+                && !s.is_empty()
+            {
+                out.push(s.to_string());
             }
             i = j + 1;
         } else {
@@ -325,12 +326,10 @@ fn extract_object_keys(fragment: &str) -> Vec<String> {
             ',' if depth == 0 => at_key_pos = true,
             c if depth == 0 && at_key_pos && (c.is_ascii_alphabetic() || c == '_') => {
                 let start = i;
-                while i < bytes.len()
-                    && {
-                        let ch = bytes[i] as char;
-                        ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
-                    }
-                {
+                while i < bytes.len() && {
+                    let ch = bytes[i] as char;
+                    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
+                } {
                     i += 1;
                 }
                 out.push(fragment[start..i].to_string());
@@ -395,10 +394,8 @@ fn extract_strip_patterns(source: &str) -> Vec<String> {
                 .unwrap_or(source.len());
             let repl = source[after_flags..].trim_start();
             // Empty replacement ('' or "") ⇒ a strip.
-            if repl.starts_with("''") || repl.starts_with("\"\"") {
-                if !re_src.is_empty() {
-                    out.push(re_src.to_string());
-                }
+            if (repl.starts_with("''") || repl.starts_with("\"\"")) && !re_src.is_empty() {
+                out.push(re_src.to_string());
             }
             from = j + 1;
         } else {
@@ -484,7 +481,10 @@ mod tests {
         "#;
         let m = extract_sanitizer(src);
         assert_eq!(m.kind, SanitizerKind::DomPurify);
-        assert_eq!(m.allowed_tags.as_deref(), Some(["b", "i", "em", "a"].map(String::from).as_slice()));
+        assert_eq!(
+            m.allowed_tags.as_deref(),
+            Some(["b", "i", "em", "a"].map(String::from).as_slice())
+        );
         assert!(m.forbidden_tags.contains(&"script".to_string()));
         assert!(m.forbidden_attrs.contains(&"onerror".to_string()));
         assert!(!m.is_empty());
@@ -577,7 +577,11 @@ mod tests {
         let plain = "const data = fetchData();"; // incidental "data" — not a block
         assert!(extract_sanitizer(plain).blocked_schemes.is_empty());
         let html = r#"if (url.startsWith('data:text/html')) reject();"#;
-        assert!(extract_sanitizer(html).blocked_schemes.contains(&"data".to_string()));
+        assert!(
+            extract_sanitizer(html)
+                .blocked_schemes
+                .contains(&"data".to_string())
+        );
     }
 
     // ── Robustness ────────────────────────────────────────────────────────

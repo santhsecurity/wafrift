@@ -42,10 +42,18 @@ fn bypassable_source_map() -> String {
 #[test]
 fn decompiles_bypassable_dompurify_and_mines_a_surviving_vector() {
     let map = temp_file("bypassable_map", &bypassable_source_map());
-    let (code, stdout, stderr) =
-        wafrift(&["sanitizer-decompile", "--source-map", map.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, stderr) = wafrift(&[
+        "sanitizer-decompile",
+        "--source-map",
+        map.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&map);
-    assert_eq!(code, 0, "a bypassable sanitizer must exit 0; stderr={stderr}");
+    assert_eq!(
+        code, 0,
+        "a bypassable sanitizer must exit 0; stderr={stderr}"
+    );
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(v["schema"], "wafrift.sanitizer_decompile.v1");
     assert_eq!(v["sanitizer_detected"], true);
@@ -59,7 +67,10 @@ fn decompiles_bypassable_dompurify_and_mines_a_surviving_vector() {
         "FORBID_TAGS must be recovered: {stdout}"
     );
     let bypasses = v["bypasses"].as_array().expect("bypasses array");
-    assert!(!bypasses.is_empty(), "a handler-leaking config must yield a bypass: {stdout}");
+    assert!(
+        !bypasses.is_empty(),
+        "a handler-leaking config must yield a bypass: {stdout}"
+    );
     // Every reported bypass must be self-described as surviving + carry a vector.
     for b in bypasses {
         assert_eq!(b["survives_executable"], true);
@@ -77,17 +88,33 @@ fn bypassable_config_also_flags_reachable_mxss_candidates() {
     // check cannot prove) AND must never flag a pair touching the forbidden
     // `style` tag.
     let map = temp_file("mxss_map", &bypassable_source_map());
-    let (code, stdout, stderr) =
-        wafrift(&["sanitizer-decompile", "--source-map", map.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, stderr) = wafrift(&[
+        "sanitizer-decompile",
+        "--source-map",
+        map.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&map);
     assert_eq!(code, 0, "stderr={stderr}");
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    let mxss = v["mxss_candidates"].as_array().expect("mxss_candidates array");
-    assert!(!mxss.is_empty(), "a config forbidding only script/style is mXSS-exposed: {stdout}");
+    let mxss = v["mxss_candidates"]
+        .as_array()
+        .expect("mxss_candidates array");
+    assert!(
+        !mxss.is_empty(),
+        "a config forbidding only script/style is mXSS-exposed: {stdout}"
+    );
     for c in mxss {
         assert!(c["root"].is_string() && c["child"].is_string() && c["class"].is_string());
-        assert_ne!(c["root"], "style", "a forbidden tag must not be a reachable mXSS root");
-        assert_ne!(c["child"], "style", "a forbidden tag must not be a reachable mXSS child");
+        assert_ne!(
+            c["root"], "style",
+            "a forbidden tag must not be a reachable mXSS root"
+        );
+        assert_ne!(
+            c["child"], "style",
+            "a forbidden tag must not be a reachable mXSS child"
+        );
     }
 }
 
@@ -100,8 +127,13 @@ fn strict_config_has_no_mxss_candidates() {
         "mxss_strict_js",
         r#"DOMPurify.sanitize(x, { ALLOWED_TAGS: ['b','i','em','p'] });"#,
     );
-    let (code, stdout, _e) =
-        wafrift(&["sanitizer-decompile", "--js", js.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, _e) = wafrift(&[
+        "sanitizer-decompile",
+        "--js",
+        js.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&js);
     // Exit may be 0 or 4 depending on handler-strip; we only assert the mXSS set.
     assert!(code == 0 || code == 4, "unexpected exit {code}: {stdout}");
@@ -118,8 +150,13 @@ fn raw_js_input_path_works_too() {
         "raw_js",
         "const s = DOMPurify.sanitize(x, { FORBID_TAGS: ['script'] });",
     );
-    let (code, stdout, _stderr) =
-        wafrift(&["sanitizer-decompile", "--js", js.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, _stderr) = wafrift(&[
+        "sanitizer-decompile",
+        "--js",
+        js.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&js);
     assert_eq!(code, 0);
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -135,10 +172,18 @@ fn strict_sanitizer_reports_no_bypass_with_exit_4() {
            DOMPurify.sanitize(x, { FORBID_TAGS: ['script','svg','img','iframe','math','a'] });
            html = html.replace(/\son\w+=("[^"]*"|'[^']*'|[^\s>]*)/gi, '');"#,
     );
-    let (code, stdout, _stderr) =
-        wafrift(&["sanitizer-decompile", "--js", js.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, _stderr) = wafrift(&[
+        "sanitizer-decompile",
+        "--js",
+        js.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&js);
-    assert_eq!(code, 4, "a strict sanitizer with no bypass must exit 4: {stdout}");
+    assert_eq!(
+        code, 4,
+        "a strict sanitizer with no bypass must exit 4: {stdout}"
+    );
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert!(v["bypasses"].as_array().unwrap().is_empty());
 }
@@ -146,8 +191,13 @@ fn strict_sanitizer_reports_no_bypass_with_exit_4() {
 #[test]
 fn no_sanitizer_in_source_exits_6() {
     let js = temp_file("nosan_js", "function add(a, b) { return a + b; }");
-    let (code, stdout, _stderr) =
-        wafrift(&["sanitizer-decompile", "--js", js.to_str().unwrap(), "--format", "json"]);
+    let (code, stdout, _stderr) = wafrift(&[
+        "sanitizer-decompile",
+        "--js",
+        js.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
     let _ = std::fs::remove_file(&js);
     assert_eq!(code, 6, "no sanitizer must exit 6 (nothing to decompile)");
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");

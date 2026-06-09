@@ -99,11 +99,7 @@ pub fn dilution_adjusted_fitness(
 ///   clamped to `[0.0, 0.99]`. The `0.99` cap prevents a score exactly at
 ///   threshold from falsely claiming full credit.
 #[must_use]
-pub fn compute_dilution_score(
-    payload: &str,
-    estimator: &SubScoreEstimator,
-    threshold: f64,
-) -> f64 {
+pub fn compute_dilution_score(payload: &str, estimator: &SubScoreEstimator, threshold: f64) -> f64 {
     let Some(result) = dilute(payload, estimator, threshold) else {
         // Benign payload: no active attack group → neutral score.
         return 0.5;
@@ -180,7 +176,10 @@ mod tests {
         // A well-known SQLi payload should classify to at least one group
         // and return a defined score.
         let score = compute_dilution_score("' UNION SELECT--", &estimator(), 40.0);
-        assert!((0.0..=1.0).contains(&score), "score must be in [0,1]: {score}");
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "score must be in [0,1]: {score}"
+        );
     }
 
     #[test]
@@ -188,7 +187,10 @@ mod tests {
         let score = compute_dilution_score("hello world", &estimator(), 40.0);
         // "hello world" classifies to ProtocolViolation (single group) — dilute()
         // returns Some (one group → one strategy).  Score depends on coefficients.
-        assert!((0.0..=1.0).contains(&score), "score must be in [0,1]: {score}");
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "score must be in [0,1]: {score}"
+        );
     }
 
     // ── dilution_adjusted_fitness ─────────────────────────────────────
@@ -196,7 +198,10 @@ mod tests {
     #[test]
     fn dilution_weight_zero_returns_oracle_fitness() {
         // With weight=0.0, dilution has no effect regardless of payload or WAF.
-        let config = EvasionConfig { dilution_weight: 0.0, ..Default::default() };
+        let config = EvasionConfig {
+            dilution_weight: 0.0,
+            ..Default::default()
+        };
         let adj = dilution_adjusted_fitness(
             0.7,
             "' UNION SELECT--",
@@ -205,13 +210,19 @@ mod tests {
             &config,
             "Cloudflare WAF",
         );
-        assert!((adj - 0.7).abs() < 1e-9, "must equal oracle_fitness exactly");
+        assert!(
+            (adj - 0.7).abs() < 1e-9,
+            "must equal oracle_fitness exactly"
+        );
     }
 
     #[test]
     fn dilution_weight_one_returns_pure_dilution() {
         // With weight=1.0, the oracle score is ignored — only dilution matters.
-        let config = EvasionConfig { dilution_weight: 1.0, ..Default::default() };
+        let config = EvasionConfig {
+            dilution_weight: 1.0,
+            ..Default::default()
+        };
         let dilution_only = compute_dilution_score("' UNION SELECT--", &estimator(), 40.0);
         let adj = dilution_adjusted_fitness(
             0.0, // oracle says "blocked"
@@ -231,7 +242,10 @@ mod tests {
     fn dilution_gating_no_effect_on_non_ensemble_waf() {
         // PlainModSec without anomaly scoring is not ensemble — dilution
         // must have zero effect regardless of weight.
-        let config = EvasionConfig { dilution_weight: 1.0, ..Default::default() }; // maximum weight
+        let config = EvasionConfig {
+            dilution_weight: 1.0,
+            ..Default::default()
+        }; // maximum weight
         let adj = dilution_adjusted_fitness(
             0.55,
             "' UNION SELECT--",
@@ -249,7 +263,10 @@ mod tests {
     #[test]
     fn dilution_adjusted_clamps_to_unit_interval() {
         // Even with extreme weights, the result must stay in [0.0, 1.0].
-        let config = EvasionConfig { dilution_weight: 0.3, ..Default::default() };
+        let config = EvasionConfig {
+            dilution_weight: 0.3,
+            ..Default::default()
+        };
         let adj = dilution_adjusted_fitness(
             1.0,
             "' UNION SELECT<script>alert(1)</script>",
@@ -267,7 +284,10 @@ mod tests {
         let est = estimator();
         let s1 = compute_dilution_score("' UNION SELECT--", &est, 40.0);
         let s2 = compute_dilution_score("' UNION SELECT--", &est, 40.0);
-        assert!((s1 - s2).abs() < 1e-12, "dilution scoring must be deterministic");
+        assert!(
+            (s1 - s2).abs() < 1e-12,
+            "dilution scoring must be deterministic"
+        );
     }
 
     #[test]

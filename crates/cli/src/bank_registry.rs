@@ -292,7 +292,7 @@ fn warn_if_world_readable(_path: &std::path::Path) {
     }
 }
 
-/// Atomic create-or-error sibling of [`write_secret_hex`]. Uses
+/// Atomic create-or-error sibling of `write_secret_hex`. Uses
 /// `O_CREAT | O_EXCL` so a concurrent writer cannot win the race
 /// between an `exists()` check and the write. AlreadyExists returns
 /// the same "refuse to overwrite a key file" message as before so

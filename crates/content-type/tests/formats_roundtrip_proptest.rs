@@ -82,7 +82,10 @@ fn all_codecs_round_trip_multibyte_across_boundaries() {
     // str8/str16 boundaries even though the char count is far smaller.
     for char_count in [11usize, 85, 86, 21_845] {
         let payload = "✓".repeat(char_count);
-        assert!(payload.len() >= char_count, "sanity: multibyte expands bytes");
+        assert!(
+            payload.len() >= char_count,
+            "sanity: multibyte expands bytes"
+        );
 
         assert_eq!(
             protobuf::deserialize(&protobuf::serialize(&payload)),

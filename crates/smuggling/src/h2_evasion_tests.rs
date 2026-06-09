@@ -473,7 +473,11 @@ mod tests {
         assert!(topo.frames.iter().all(|f| f.depends_on == 0));
         // Even-indexed frames have weight=0.
         assert!(topo.frames.iter().enumerate().all(|(i, f)| {
-            if i % 2 == 0 { f.weight == 0 } else { f.weight == 255 }
+            if i % 2 == 0 {
+                f.weight == 0
+            } else {
+                f.weight == 255
+            }
         }));
     }
 
@@ -553,7 +557,10 @@ mod tests {
         let payload = &frame[payload_start..];
         let payload_str = std::str::from_utf8(payload).expect("ascii payload");
         assert!(payload_str.contains("u=3"), "urgency must be embedded");
-        assert!(payload_str.contains(",i"), "incremental flag must be present");
+        assert!(
+            payload_str.contains(",i"),
+            "incremental flag must be present"
+        );
     }
 
     #[test]
@@ -580,11 +587,7 @@ mod tests {
 
     #[test]
     fn continuation_split_preserves_ascii_payload_round_trip() {
-        let s = split_payload_across_n_continuations(
-            "x-payload",
-            "abcdefghij",
-            5,
-        );
+        let s = split_payload_across_n_continuations("x-payload", "abcdefghij", 5);
         let mut rebuilt = String::new();
         for frame in &s.continuation_frames {
             for (_, v) in frame {

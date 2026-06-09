@@ -680,7 +680,10 @@ mod tests {
 
     #[test]
     fn extract_authority_basic_host() {
-        assert_eq!(extract_authority("http://example.com/"), Some("example.com"));
+        assert_eq!(
+            extract_authority("http://example.com/"),
+            Some("example.com")
+        );
         assert_eq!(
             extract_authority("http://example.com/path?q=1"),
             Some("example.com")
@@ -718,10 +721,8 @@ mod tests {
         // scan full payload (separate concern from F130).
         let oracle = SsrfOracle;
         assert!(
-            !oracle.is_semantically_valid(
-                "http://127.0.0.1/wiki",
-                "http://example.com/wiki/v10.txt",
-            ),
+            !oracle
+                .is_semantically_valid("http://127.0.0.1/wiki", "http://example.com/wiki/v10.txt",),
             "F130: public host with '10.' in path is NOT SSRF"
         );
     }
@@ -732,10 +733,8 @@ mod tests {
         // request go to localhost.
         let oracle = SsrfOracle;
         assert!(
-            !oracle.is_semantically_valid(
-                "http://127.0.0.1/",
-                "http://example.com/?ref=127.0.0.1",
-            ),
+            !oracle
+                .is_semantically_valid("http://127.0.0.1/", "http://example.com/?ref=127.0.0.1",),
             "F130: public host with '127.0.0.1' in query is NOT SSRF"
         );
     }
@@ -756,10 +755,8 @@ mod tests {
     fn public_url_with_localhost_in_query_rejected() {
         let oracle = SsrfOracle;
         assert!(
-            !oracle.is_semantically_valid(
-                "http://localhost/",
-                "http://example.com/?host=localhost",
-            ),
+            !oracle
+                .is_semantically_valid("http://localhost/", "http://example.com/?host=localhost",),
             "F130: public host with 'localhost' in query is NOT SSRF"
         );
     }

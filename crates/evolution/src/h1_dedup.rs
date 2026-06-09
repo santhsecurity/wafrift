@@ -2,7 +2,7 @@
 //!
 //! A bypass we find that someone already filed is worth **$0**. To
 //! avoid burning submission budget on duplicates, every confirmed
-//! bypass from [`super::rule_corpus`] should pass through this
+//! bypass from `super::rule_corpus` should pass through this
 //! module before reaching the H1 submission queue:
 //!
 //! ```text
@@ -41,9 +41,9 @@
 //! ## What this DOESN'T do
 //!
 //! - Doesn't hit HackerOne's API. Operator preloads the archive
-//!   from public CumulusFire writeups via [`H1Archive::add_report`].
+//!   from public CumulusFire writeups via `H1Archive::add_report`.
 //! - Doesn't decide submission eligibility on its own — only flags
-//!   `Duplicate` so the corpus's [`super::rule_corpus::SubmissionStatus`]
+//!   `Duplicate` so the corpus's `super::rule_corpus::SubmissionStatus`
 //!   lifecycle can record the verdict.
 
 use serde::{Deserialize, Serialize};
@@ -161,21 +161,86 @@ fn skeletonize(payload: &str) -> String {
 /// of attack-payload tokens (that's `wafrift_grammar`'s job).
 const KNOWN_KEYWORDS: &[&str] = &[
     // SQL
-    "select", "union", "where", "from", "or", "and", "drop", "insert", "update", "delete",
-    "exec", "execute", "load_file", "into", "outfile", "concat", "sleep", "benchmark",
-    "version", "user", "true", "false", "null", "limit", "having", "group", "by", "order",
+    "select",
+    "union",
+    "where",
+    "from",
+    "or",
+    "and",
+    "drop",
+    "insert",
+    "update",
+    "delete",
+    "exec",
+    "execute",
+    "load_file",
+    "into",
+    "outfile",
+    "concat",
+    "sleep",
+    "benchmark",
+    "version",
+    "user",
+    "true",
+    "false",
+    "null",
+    "limit",
+    "having",
+    "group",
+    "by",
+    "order",
     // XSS
-    "script", "alert", "prompt", "confirm", "onerror", "onload", "onclick", "onfocus",
-    "img", "svg", "iframe", "onmouseover", "onkeyup", "javascript", "eval", "fromcharcode",
+    "script",
+    "alert",
+    "prompt",
+    "confirm",
+    "onerror",
+    "onload",
+    "onclick",
+    "onfocus",
+    "img",
+    "svg",
+    "iframe",
+    "onmouseover",
+    "onkeyup",
+    "javascript",
+    "eval",
+    "fromcharcode",
     // Command-injection / Log4Shell / JNDI
-    "cat", "ls", "id", "whoami", "curl", "wget", "nc", "bash", "sh", "ping", "nslookup",
-    "jndi", "ldap", "rmi", "dns", "log4j",
+    "cat",
+    "ls",
+    "id",
+    "whoami",
+    "curl",
+    "wget",
+    "nc",
+    "bash",
+    "sh",
+    "ping",
+    "nslookup",
+    "jndi",
+    "ldap",
+    "rmi",
+    "dns",
+    "log4j",
     // Path traversal
-    "etc", "passwd", "windows", "system32", "boot",
+    "etc",
+    "passwd",
+    "windows",
+    "system32",
+    "boot",
     // SSTI
-    "class", "mro", "subclasses", "globals", "import", "getattr",
+    "class",
+    "mro",
+    "subclasses",
+    "globals",
+    "import",
+    "getattr",
     // generic
-    "http", "https", "file", "data",
+    "http",
+    "https",
+    "file",
+    "data",
 ];
 
 fn is_known_keyword(token: &str) -> bool {
@@ -186,7 +251,9 @@ fn is_known_keyword(token: &str) -> bool {
 // canonical single home for this primitive. Pre-pass-21 each of three
 // crates carried byte-for-byte identical copies of these constants and
 // loop, ripe for silent drift. R57 §7 DEDUP.
-use wafrift_types::hash::{FNV_OFFSET_64 as FNV_OFFSET, fnv1a_64_extend as fnv1a_bytes, fnv1a_64_step as fnv1a_byte};
+use wafrift_types::hash::{
+    FNV_OFFSET_64 as FNV_OFFSET, fnv1a_64_extend as fnv1a_bytes, fnv1a_64_step as fnv1a_byte,
+};
 
 /// Local cache of known HackerOne reports + their structural
 /// fingerprints. Operator preloads from public CumulusFire writeups.

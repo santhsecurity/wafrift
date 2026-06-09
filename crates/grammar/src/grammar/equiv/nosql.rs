@@ -244,10 +244,7 @@ fn rw_to_bracket(s: &str) -> Option<String> {
         // expressing a different query than the original and
         // failing `still_injects`. Percent-encode so any operand
         // byte parses back to a single value.
-        q.push_str(&format!(
-            "{param}[{op}]={}",
-            urlencoding::encode(val)
-        ));
+        q.push_str(&format!("{param}[{op}]={}", urlencoding::encode(val)));
     }
     Some(q)
 }
@@ -290,7 +287,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::with_capacity(8);
@@ -421,7 +420,10 @@ mod tests {
         // rewrite (which carries one `field[...]` param) cannot map a
         // second field's operator onto the first. No member may be a
         // bracket form for a two-field document.
-        assert_eq!(single_field(r#"{"username":{"$ne":"x"}}"#).as_deref(), Some("username"));
+        assert_eq!(
+            single_field(r#"{"username":{"$ne":"x"}}"#).as_deref(),
+            Some("username")
+        );
         assert_eq!(single_field(r#"{"$where":"sleep(1)"}"#), None);
         assert_eq!(single_field(r#"{"a":{"$gt":1},"b":{"$lt":9}}"#), None);
         let atk = r#"{"username":{"$ne":null},"pw":{"$regex":".*"}}"#;

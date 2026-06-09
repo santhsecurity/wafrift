@@ -111,7 +111,9 @@ impl LearningCache {
             let f = fs::File::open(path).map_err(LearningCacheError::Io)?;
             let mut limited = f.take(MAX_CACHE_FILE_BYTES + 1);
             let mut raw = Vec::new();
-            limited.read_to_end(&mut raw).map_err(LearningCacheError::Io)?;
+            limited
+                .read_to_end(&mut raw)
+                .map_err(LearningCacheError::Io)?;
             if raw.len() as u64 > MAX_CACHE_FILE_BYTES {
                 tracing::warn!(
                     path = %path.display(),
@@ -125,12 +127,14 @@ impl LearningCache {
                     entries: HashMap::new(),
                 });
             }
-            let contents = String::from_utf8(raw).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("{}: learning cache is not valid UTF-8: {e}", path.display()),
-                )
-            }).map_err(LearningCacheError::Io)?;
+            let contents = String::from_utf8(raw)
+                .map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("{}: learning cache is not valid UTF-8: {e}", path.display()),
+                    )
+                })
+                .map_err(LearningCacheError::Io)?;
             match serde_json::from_str::<LearningCache>(&contents) {
                 Ok(mut cache) => {
                     cache.path = Some(path.to_path_buf());

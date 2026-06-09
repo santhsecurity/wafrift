@@ -88,7 +88,10 @@ pub fn mxss_candidates(model: &SanitizerModel) -> Vec<MxssCandidate> {
 /// [`mxss_candidates`] against a caller-supplied combination table (Tier-B
 /// override / tests).
 #[must_use]
-pub fn mxss_candidates_with(model: &SanitizerModel, combos: &[MxssCombination]) -> Vec<MxssCandidate> {
+pub fn mxss_candidates_with(
+    model: &SanitizerModel,
+    combos: &[MxssCombination],
+) -> Vec<MxssCandidate> {
     combos
         .iter()
         .filter(|c| model.tag_reachable(&c.root) && model.tag_reachable(&c.child))
@@ -122,7 +125,11 @@ mod tests {
     #[test]
     fn embedded_table_loads_and_is_nonempty() {
         let combos = mxss_combinations();
-        assert!(combos.len() >= 5, "ship a real mXSS table, got {}", combos.len());
+        assert!(
+            combos.len() >= 5,
+            "ship a real mXSS table, got {}",
+            combos.len()
+        );
         assert!(combos.iter().any(|c| c.root == "svg" && c.child == "style"));
         assert!(combos.iter().any(|c| c.root == "math"));
     }
@@ -165,7 +172,10 @@ mod tests {
     fn a_tight_inert_allowlist_has_no_mxss_candidates() {
         // Only inert formatting tags allowed → no foreign-content root reachable.
         let m = model(&[], Some(&["b", "i", "em", "p"]));
-        assert!(mxss_candidates(&m).is_empty(), "a tight allowlist must be mXSS-clean");
+        assert!(
+            mxss_candidates(&m).is_empty(),
+            "a tight allowlist must be mXSS-clean"
+        );
     }
 
     #[test]
@@ -186,7 +196,9 @@ mod tests {
         let combos = mxss_combinations();
         // MathML text integration point — the Bentkowski annotation-xml element.
         assert!(
-            combos.iter().any(|c| c.root == "math" && c.child == "annotation-xml"),
+            combos
+                .iter()
+                .any(|c| c.root == "math" && c.child == "annotation-xml"),
             "math+annotation-xml (the canonical DOMPurify mXSS element) must be listed"
         );
         // All three SVG HTML-integration-point elements.
@@ -210,7 +222,10 @@ mod tests {
             .find(|c| c.root == "math" && c.child == "annotation-xml")
             .expect("annotation-xml must be flagged when math is reachable");
         assert_eq!(hit.class, "mathml-html-integration-point");
-        assert!(hit.note.contains("integration point"), "note must explain the mechanism");
+        assert!(
+            hit.note.contains("integration point"),
+            "note must explain the mechanism"
+        );
     }
 
     #[test]
@@ -229,7 +244,9 @@ mod tests {
     fn candidates_carry_the_class_and_note_for_the_operator() {
         let m = model(&["script"], None);
         let cands = mxss_candidates(&m);
-        let first = cands.first().expect("forbid-script leaves combinations reachable");
+        let first = cands
+            .first()
+            .expect("forbid-script leaves combinations reachable");
         assert!(!first.class.is_empty() && !first.note.is_empty());
     }
 }

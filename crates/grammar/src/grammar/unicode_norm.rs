@@ -89,7 +89,11 @@ pub(crate) fn reachable_keywords<'a>(payload: &str, keywords: &[&'a str]) -> Vec
     let folded = nfkc_fold_ascii(payload);
     keywords
         .iter()
-        .filter(|&&kw| folded.to_ascii_lowercase().contains(&kw.to_ascii_lowercase()))
+        .filter(|&&kw| {
+            folded
+                .to_ascii_lowercase()
+                .contains(&kw.to_ascii_lowercase())
+        })
         .copied()
         .collect()
 }
@@ -114,8 +118,8 @@ pub(crate) fn nfkc_fold_ascii(s: &str) -> String {
             // table form survives a future block addition without
             // editing branching logic.
             const RANGES: &[(char, char, u8)] = &[
-                ('\u{FF21}', '\u{FF3A}', b'A'), // Fullwidth uppercase
-                ('\u{FF41}', '\u{FF5A}', b'a'), // Fullwidth lowercase
+                ('\u{FF21}', '\u{FF3A}', b'A'),   // Fullwidth uppercase
+                ('\u{FF41}', '\u{FF5A}', b'a'),   // Fullwidth lowercase
                 ('\u{1D400}', '\u{1D419}', b'A'), // Math Bold uppercase
                 ('\u{1D41A}', '\u{1D433}', b'a'), // Math Bold lowercase
                 ('\u{1D670}', '\u{1D689}', b'A'), // Math Monospace uppercase
@@ -246,7 +250,10 @@ mod tests {
     fn reachable_keywords_case_insensitive() {
         let fw = fullwidth("ALERT").unwrap();
         let hits = reachable_keywords(&fw, &["alert"]);
-        assert!(hits.contains(&"alert"), "must find keyword case-insensitively");
+        assert!(
+            hits.contains(&"alert"),
+            "must find keyword case-insensitively"
+        );
     }
 
     // ── nfkc_fold_ascii ───────────────────────────────────────────────────
@@ -267,9 +274,11 @@ mod tests {
         let mono_upper = '\u{1D670}'; // 𝙰
         let mono_lower = '\u{1D68A}'; // 𝚊
 
-        let s: String = [fw_upper, fw_lower, bold_upper, bold_lower, mono_upper, mono_lower]
-            .iter()
-            .collect();
+        let s: String = [
+            fw_upper, fw_lower, bold_upper, bold_lower, mono_upper, mono_lower,
+        ]
+        .iter()
+        .collect();
         let folded = nfkc_fold_ascii(&s);
         assert_eq!(folded, "AaAaAa", "fold must produce ASCII: {folded}");
     }

@@ -6,13 +6,13 @@
 //!
 //! Any field left unset in the config file uses compiled defaults.
 
+use guise::fingerprint::{StealthProfile, default_profile_user_agent, profile_user_agent};
+use guise::http::browser_header_map_without_compression;
+use guise::rotation::named_profile;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use guise::fingerprint::{StealthProfile, default_profile_user_agent, profile_user_agent};
-use guise::http::browser_header_map_without_compression;
-use guise::rotation::named_profile;
 
 /// Default User-Agent used by every wafrift HTTP client when the
 /// operator hasn't set one in `.wafrift.toml`. Browser-shaped because

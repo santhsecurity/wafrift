@@ -99,21 +99,13 @@ impl JsonSmuggleTechnique {
             Self::DuplicateKeyLastWins => {
                 "Duplicate-key — last-wins vs first-wins resolution differential"
             }
-            Self::DuplicateKeyNullByteSplit => {
-                "NUL byte in key — parser truncation differential"
-            }
-            Self::TrailingComma => {
-                "Trailing comma — strict RFC 8259 vs JSON5 tolerance"
-            }
+            Self::DuplicateKeyNullByteSplit => "NUL byte in key — parser truncation differential",
+            Self::TrailingComma => "Trailing comma — strict RFC 8259 vs JSON5 tolerance",
             Self::UnescapedNewlineInString => {
                 "Literal LF in string value — escape-requirement differential"
             }
-            Self::CommentJsonc => {
-                "Block-comment tolerance — JSONC vs strict-RFC parsers"
-            }
-            Self::HexNumberLiteral => {
-                "Hex-prefixed integer literal — non-RFC numeric tolerance"
-            }
+            Self::CommentJsonc => "Block-comment tolerance — JSONC vs strict-RFC parsers",
+            Self::HexNumberLiteral => "Hex-prefixed integer literal — non-RFC numeric tolerance",
             Self::NanInfinity => "NaN/Infinity literal — IEEE-754 vs RFC-pure",
             Self::BomPrefix => "UTF-8 BOM prefix — strip-vs-reject differential",
             Self::EmptyKey => "Empty-string key — accept-vs-reject differential",
@@ -186,9 +178,7 @@ impl JsonSmuggleProbe {
                 )
                 .into_bytes()
             }
-            JsonSmuggleTechnique::TrailingComma => {
-                format!("{{{},}}", json_pair(k, v)).into_bytes()
-            }
+            JsonSmuggleTechnique::TrailingComma => format!("{{{},}}", json_pair(k, v)).into_bytes(),
             JsonSmuggleTechnique::UnescapedNewlineInString => {
                 // The differential is a LITERAL LF inside the value string.
                 // Escape the key and the value's OWN quotes/backslashes first
@@ -231,9 +221,7 @@ impl JsonSmuggleProbe {
             JsonSmuggleTechnique::JsonInString => {
                 let inner = json_pair(k, v);
                 let inner_object = format!("{{{inner}}}");
-                let escaped_inner = inner_object
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"");
+                let escaped_inner = inner_object.replace('\\', "\\\\").replace('"', "\\\"");
                 format!("{{\"data\":\"{escaped_inner}\"}}").into_bytes()
             }
         };
@@ -316,7 +304,8 @@ mod tests {
             (JsonSmuggleTechnique::NanInfinity, "NaN"),
             (JsonSmuggleTechnique::CommentJsonc, "/*c*/"),
         ] {
-            let body = String::from_utf8_lossy(&JsonSmuggleProbe::new(t, &params).body).into_owned();
+            let body =
+                String::from_utf8_lossy(&JsonSmuggleProbe::new(t, &params).body).into_owned();
             assert!(
                 body.contains("a\\\"b"),
                 "{}: focal value quote must be escaped, got {body}",
@@ -333,8 +322,14 @@ mod tests {
             &JsonSmuggleProbe::new(JsonSmuggleTechnique::UnescapedNewlineInString, &params).body,
         )
         .into_owned();
-        assert!(nl.contains("a\\\"b"), "newline probe must escape value quote: {nl}");
-        assert!(nl.contains('\n'), "newline probe must keep the raw LF differential: {nl}");
+        assert!(
+            nl.contains("a\\\"b"),
+            "newline probe must escape value quote: {nl}"
+        );
+        assert!(
+            nl.contains('\n'),
+            "newline probe must keep the raw LF differential: {nl}"
+        );
     }
 
     #[test]
@@ -372,10 +367,7 @@ mod tests {
 
     #[test]
     fn nul_split_variant_contains_actual_nul_byte() {
-        let p = JsonSmuggleProbe::new(
-            JsonSmuggleTechnique::DuplicateKeyNullByteSplit,
-            &params(),
-        );
+        let p = JsonSmuggleProbe::new(JsonSmuggleTechnique::DuplicateKeyNullByteSplit, &params());
         assert!(p.body.contains(&0x00), "body must contain raw NUL byte");
     }
 
@@ -388,10 +380,7 @@ mod tests {
 
     #[test]
     fn unescaped_newline_variant_contains_raw_lf_in_value() {
-        let p = JsonSmuggleProbe::new(
-            JsonSmuggleTechnique::UnescapedNewlineInString,
-            &params(),
-        );
+        let p = JsonSmuggleProbe::new(JsonSmuggleTechnique::UnescapedNewlineInString, &params());
         assert!(p.body.contains(&b'\n'), "body must contain raw LF byte");
     }
 
@@ -446,8 +435,7 @@ mod tests {
     #[test]
     fn canaries_are_unique_per_probe() {
         let probes = all_variants(&params());
-        let tokens: HashSet<String> =
-            probes.iter().map(|p| p.canary().token.clone()).collect();
+        let tokens: HashSet<String> = probes.iter().map(|p| p.canary().token.clone()).collect();
         assert_eq!(tokens.len(), probes.len());
     }
 
@@ -465,7 +453,11 @@ mod tests {
     fn technique_names_are_distinct() {
         let probes = all_variants(&params());
         let techs: HashSet<String> = probes.iter().map(|p| p.technique()).collect();
-        assert_eq!(techs.len(), probes.len(), "technique names must be distinct");
+        assert_eq!(
+            techs.len(),
+            probes.len(),
+            "technique names must be distinct"
+        );
     }
 
     #[test]

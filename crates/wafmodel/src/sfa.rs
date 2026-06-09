@@ -259,9 +259,7 @@ impl Sfa {
         // silently producing wrong acceptance — a wrong "accepts"
         // verdict is a false-negative bypass (the model "missed" a
         // hole) and is worse than crashing.
-        panic!(
-            "SFA totality invariant broken: no transition for byte {b} in state {s}"
-        );
+        panic!("SFA totality invariant broken: no transition for byte {b} in state {s}");
     }
 
     /// Does the automaton accept `word`?
@@ -388,7 +386,7 @@ impl Sfa {
     /// `shortest_accepted` — we WANT to find multiple distinct words
     /// that end at the same state (`out.len() == max_words` is the
     /// only stopping rule). So instead the queue is hard-capped at
-    /// [`Self::ENUMERATE_QUEUE_CAP`]; when it would overflow, we
+    /// `Self::ENUMERATE_QUEUE_CAP`; when it would overflow, we
     /// return whatever words have already been collected.
     ///
     /// Pre-cap, intersecting a learned automaton with a cyclic

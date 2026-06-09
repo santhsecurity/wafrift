@@ -65,8 +65,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
-
-
 #[derive(Args, Debug)]
 pub(crate) struct ListenerArgs {
     /// Address to bind the callback receiver to. Defaults to
@@ -348,15 +346,7 @@ pub(crate) fn run_listener(args: ListenerArgs) -> ExitCode {
             let registry_c = registry.clone();
             let format_c = format.clone();
             tokio::spawn(async move {
-                let cb = match handle_conn(
-                    sock,
-                    peer,
-                    &registry_c,
-                    max_body,
-                    read_timeout,
-                )
-                .await
-                {
+                let cb = match handle_conn(sock, peer, &registry_c, max_body, read_timeout).await {
                     Ok(Some(cb)) => cb,
                     Ok(None) | Err(_) => return,
                 };
@@ -575,8 +565,6 @@ async fn handle_conn(
         let body_str = String::from_utf8_lossy(&body);
         matched_token = registry.match_token_in(&body_str).await;
     }
-
-
 
     Ok(Some(Callback {
         received_at,

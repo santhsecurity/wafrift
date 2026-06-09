@@ -825,12 +825,8 @@ mod tests {
         // The bandit dedups by technique label; collapsing two distinct
         // HPP shapes into one label would silently merge their
         // success-rate histories.
-        let s1 = HppStrategy::DuplicateFirst {
-            decoy: "x".into(),
-        };
-        let s2 = HppStrategy::DuplicateLast {
-            decoy: "x".into(),
-        };
+        let s1 = HppStrategy::DuplicateFirst { decoy: "x".into() };
+        let s2 = HppStrategy::DuplicateLast { decoy: "x".into() };
         let s3 = HppStrategy::ArrBracket;
         assert_ne!(s1.label(), s2.label());
         assert_ne!(s2.label(), s3.label());

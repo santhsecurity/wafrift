@@ -59,9 +59,34 @@ fn whitespace_tokens(payload: &str) -> impl Iterator<Item = String> + '_ {
             c.is_ascii_whitespace()
                 || matches!(
                     c,
-                    '\'' | '"' | '`' | ';' | ',' | '(' | ')' | '[' | ']' | '{' | '}' | '<'
-                        | '>' | '=' | '!' | '&' | '|' | '+' | '-' | '*' | '/' | '\\' | '?'
-                        | '@' | '#' | '$' | '%' | '^' | '~'
+                    '\'' | '"'
+                        | '`'
+                        | ';'
+                        | ','
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '='
+                        | '!'
+                        | '&'
+                        | '|'
+                        | '+'
+                        | '-'
+                        | '*'
+                        | '/'
+                        | '\\'
+                        | '?'
+                        | '@'
+                        | '#'
+                        | '$'
+                        | '%'
+                        | '^'
+                        | '~'
                 )
         })
         .filter(|s| !s.is_empty())
@@ -248,7 +273,10 @@ mod tests {
     #[test]
     fn feature_extraction_non_empty_for_attack_payload() {
         let feats = extract_features("' UNION SELECT 1,2--");
-        assert!(!feats.is_empty(), "must extract features from a non-empty payload");
+        assert!(
+            !feats.is_empty(),
+            "must extract features from a non-empty payload"
+        );
     }
 
     #[test]
@@ -428,7 +456,10 @@ mod tests {
         let ranked = scorer.rank_candidates(&candidates);
         // All scores are 0.0; order must be preserved.
         let ranked_names: Vec<_> = ranked.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(ranked_names, candidates, "stable sort must preserve order on ties");
+        assert_eq!(
+            ranked_names, candidates,
+            "stable sort must preserve order on ties"
+        );
     }
 
     #[test]
@@ -452,7 +483,10 @@ mod tests {
         scorer.observe_block(payload, None);
         let score = scorer.score_candidate(payload);
         // Three block observations → score should be clearly positive.
-        assert!(score > 0.0, "after 3 block observations score must be positive");
+        assert!(
+            score > 0.0,
+            "after 3 block observations score must be positive"
+        );
     }
 
     #[test]

@@ -57,11 +57,7 @@ const HOLES_ENUM_CAP: usize = 4096;
 /// whose members are ALL blocked after hardening can be exhaustively
 /// checked without setting `truncated`, so `proven_closed` remains
 /// accurate even when the grammar has millions of members.
-fn holes(
-    waf: &SimRegexWaf,
-    attack: &Sfa,
-    max_len: usize,
-) -> (Vec<Vec<u8>>, bool) {
+fn holes(waf: &SimRegexWaf, attack: &Sfa, max_len: usize) -> (Vec<Vec<u8>>, bool) {
     // Enumerate a large prefix of the attack grammar. We examine up to
     // HOLES_ENUM_CAP × 16 attack strings so we don't stop searching too
     // early when most strings are blocked. Increasing this multiplier
@@ -169,8 +165,6 @@ pub fn synthesize_closure(
         // A defender deploys the synthesized rules trusting a proof
         // that doesn't hold. Require the enumeration to have been
         // exhaustive (`!after_truncated`) before claiming closure.
-        proven_closed: after.is_empty()
-            && benign_fp == 0
-            && !after_truncated,
+        proven_closed: after.is_empty() && benign_fp == 0 && !after_truncated,
     }
 }

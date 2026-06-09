@@ -147,8 +147,7 @@ pub(super) fn contains_token(haystack: &str, needle: &str) -> bool {
         if &h[start..start + n.len()] == n {
             let left_ok = !left_is_alnum || start == 0 || !h[start - 1].is_ascii_alphanumeric();
             let end = start + n.len();
-            let right_ok =
-                !right_is_alnum || end == h.len() || !h[end].is_ascii_alphanumeric();
+            let right_ok = !right_is_alnum || end == h.len() || !h[end].is_ascii_alphanumeric();
             if left_ok && right_ok {
                 return true;
             }
@@ -728,8 +727,12 @@ impl DeliveryShape {
                 let name = strip_unsafe(name, &['"', '\\']);
                 let filename = strip_unsafe(filename, &['"', '\\']);
                 let part_ct = strip_unsafe(part_ct, &[]);
-                let bnd =
-                    effective_boundary(&[payload, name.as_str(), filename.as_str(), part_ct.as_str()]);
+                let bnd = effective_boundary(&[
+                    payload,
+                    name.as_str(),
+                    filename.as_str(),
+                    part_ct.as_str(),
+                ]);
                 let body = format!(
                     "--{bnd}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {part_ct}\r\n\r\n{payload}\r\n--{bnd}--\r\n"
                 );
@@ -1063,7 +1066,10 @@ mod delivery_api_tests {
         let all = [
             DeliveryShape::Query { param: "q".into() },
             DeliveryShape::FormBody { param: "f".into() },
-            DeliveryShape::JsonBody { param: "j".into(), content_type: None },
+            DeliveryShape::JsonBody {
+                param: "j".into(),
+                content_type: None,
+            },
             DeliveryShape::JsonBody {
                 param: "j2".into(),
                 content_type: Some("application/json".into()),
@@ -1075,12 +1081,26 @@ mod delivery_api_tests {
                 part_ct: "text/plain".into(),
             },
             DeliveryShape::PathSegment,
-            DeliveryShape::HppSplit { param: "p".into(), parts: 3 },
-            DeliveryShape::HeaderValue { name: "X-Forwarded-Host".into() },
+            DeliveryShape::HppSplit {
+                param: "p".into(),
+                parts: 3,
+            },
+            DeliveryShape::HeaderValue {
+                name: "X-Forwarded-Host".into(),
+            },
             DeliveryShape::Cookie { name: "sid".into() },
-            DeliveryShape::XmlBody { root: "request".into(), field: "param".into() },
-            DeliveryShape::JsonNestedDeep { param: "deep".into(), depth: 7 },
-            DeliveryShape::GraphQLQuery { field: "search".into(), var: "v".into() },
+            DeliveryShape::XmlBody {
+                root: "request".into(),
+                field: "param".into(),
+            },
+            DeliveryShape::JsonNestedDeep {
+                param: "deep".into(),
+                depth: 7,
+            },
+            DeliveryShape::GraphQLQuery {
+                field: "search".into(),
+                var: "v".into(),
+            },
             DeliveryShape::JsonUnicodeBody { param: "ju".into() },
             DeliveryShape::Utf7MultipartField { name: "u7".into() },
         ];
@@ -1090,7 +1110,10 @@ mod delivery_api_tests {
             assert_eq!(&back, shape, "round-trip mismatch for {shape:?} via {json}");
         }
         // Unit variant is a bare string (compact, stable on disk).
-        assert_eq!(serde_json::to_string(&DeliveryShape::PathSegment).unwrap(), "\"PathSegment\"");
+        assert_eq!(
+            serde_json::to_string(&DeliveryShape::PathSegment).unwrap(),
+            "\"PathSegment\""
+        );
     }
 
     #[test]
@@ -1117,7 +1140,10 @@ mod delivery_api_tests {
             1,
             "name field forged a second part header line: {body}"
         );
-        assert!(!body.contains("name=\"evil"), "quote-break out of the param survived: {body}");
+        assert!(
+            !body.contains("name=\"evil"),
+            "quote-break out of the param survived: {body}"
+        );
         assert!(body.contains(p), "payload must still be delivered: {body}");
 
         let evil_file = DeliveryShape::MultipartFile {
@@ -1127,13 +1153,19 @@ mod delivery_api_tests {
         }
         .to_request(t, p);
         let fbody = String::from_utf8_lossy(evil_file.body.as_deref().unwrap_or(&[]));
-        assert!(!fbody.contains("\r\nX-Injected"), "part_ct forged a header line: {fbody}");
+        assert!(
+            !fbody.contains("\r\nX-Injected"),
+            "part_ct forged a header line: {fbody}"
+        );
         assert_eq!(
             fbody.matches("\r\nContent-Type").count(),
             1,
             "filename/part_ct forged an extra header line: {fbody}"
         );
-        assert!(!fbody.contains("filename=\"a\""), "quote-break out of filename survived: {fbody}");
+        assert!(
+            !fbody.contains("filename=\"a\""),
+            "quote-break out of filename survived: {fbody}"
+        );
     }
 
     #[test]
@@ -1873,8 +1905,8 @@ mod delivery_roundtrip_tests {
         // from the fully `\uXXXX`-escaped value — for EVERY corpus member,
         // including multibyte/astral ones (surrogate-pair path).
         for &p in PAYLOADS {
-            let r = DeliveryShape::JsonUnicodeBody { param: "q".into() }
-                .to_request("http://h/post", p);
+            let r =
+                DeliveryShape::JsonUnicodeBody { param: "q".into() }.to_request("http://h/post", p);
             assert!(
                 ct(&r).contains("application/json"),
                 "JsonUnicodeBody MUST force application/json (soundness): {p:?}"
@@ -1882,7 +1914,10 @@ mod delivery_roundtrip_tests {
             let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
             let v: serde_json::Value = serde_json::from_str(&body)
                 .unwrap_or_else(|e| panic!("rendered body is not valid JSON: {e}\n{body}"));
-            let got = v.get("q").and_then(serde_json::Value::as_str).expect("param q");
+            let got = v
+                .get("q")
+                .and_then(serde_json::Value::as_str)
+                .expect("param q");
             assert_eq!(got, p, "JsonUnicodeBody mangled {p:?} → body {body}");
         }
     }
@@ -1894,8 +1929,8 @@ mod delivery_roundtrip_tests {
         // matches nothing — yet the parser above proves the backend recovers
         // the exact attack.
         let atk = "1 UNION SELECT password FROM users-- ";
-        let r = DeliveryShape::JsonUnicodeBody { param: "q".into() }
-            .to_request("http://h/post", atk);
+        let r =
+            DeliveryShape::JsonUnicodeBody { param: "q".into() }.to_request("http://h/post", atk);
         let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
         let lc = body.to_ascii_lowercase();
         for kw in ["union", "select", "password", "from", "users"] {
@@ -1950,25 +1985,28 @@ mod delivery_roundtrip_tests {
         // `script`/`alert` may remain — UTF-7 defeats syntax-anchored rules,
         // not bare-word rules. That honest scoping is the point.
         let atk = "<script>alert(1)</script>";
-        let r = DeliveryShape::Utf7MultipartField { name: "q".into() }
-            .to_request("http://h/post", atk);
+        let r =
+            DeliveryShape::Utf7MultipartField { name: "q".into() }.to_request("http://h/post", atk);
         let body = String::from_utf8(r.body.clone().unwrap_or_default()).unwrap();
         let part = body
             .split_once("charset=utf-7\r\n\r\n")
             .and_then(|(_, rest)| rest.split_once("\r\n--"))
             .map(|(b, _)| b)
             .expect("part body");
-        assert!(!part.contains('<'), "literal `<` survived on the wire: {part}");
-        assert!(!part.contains('>'), "literal `>` survived on the wire: {part}");
+        assert!(
+            !part.contains('<'),
+            "literal `<` survived on the wire: {part}"
+        );
+        assert!(
+            !part.contains('>'),
+            "literal `>` survived on the wire: {part}"
+        );
         assert!(
             !part.contains("<script"),
             "the tag-open signature survived: {part}"
         );
         // ...and it still round-trips to the exact attack.
-        assert_eq!(
-            wafrift_types::utf7::utf7_decode(part).as_deref(),
-            Some(atk)
-        );
+        assert_eq!(wafrift_types::utf7::utf7_decode(part).as_deref(), Some(atk));
     }
 
     #[test]

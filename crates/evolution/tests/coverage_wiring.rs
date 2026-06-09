@@ -6,12 +6,12 @@
 //!  2. `OracleVerdict::rule_id` round-trips correctly through serde.
 //!  3. `EvolutionEngine::rule_coverage` is populated after `submit_batch`.
 
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 use wafrift_evolution::coverage_feedback::{
     PayloadClass, RuleCoverage, RuleId, map_elites_descriptor,
 };
 use wafrift_evolution::types::OracleVerdict;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ── Helper: build a fake ModSec 403 body with a rule_id marker ───────────────
 
@@ -58,7 +58,10 @@ async fn coverage_records_rule_id_from_block_response() {
     // Verify the rule was recorded.
     assert_eq!(cov.rule_count(), 1);
     let rid = RuleId::new("942100");
-    assert!(cov.by_rule.contains_key(&rid), "rule 942100 must be in by_rule");
+    assert!(
+        cov.by_rule.contains_key(&rid),
+        "rule 942100 must be in by_rule"
+    );
 
     // Verify wiremock actually served the response (endpoint was hit).
     let reqs = server.received_requests().await.unwrap_or_default();
@@ -108,36 +111,30 @@ async fn coverage_map_accumulates_across_multiple_rule_ids() {
     // SQL rule
     Mock::given(method("POST"))
         .and(path("/sql"))
-        .respond_with(
-            ResponseTemplate::new(403).set_body_string(modsec_block_body("942100")),
-        )
+        .respond_with(ResponseTemplate::new(403).set_body_string(modsec_block_body("942100")))
         .mount(&server)
         .await;
 
     // XSS rule
     Mock::given(method("POST"))
         .and(path("/xss"))
-        .respond_with(
-            ResponseTemplate::new(403).set_body_string(modsec_block_body("941100")),
-        )
+        .respond_with(ResponseTemplate::new(403).set_body_string(modsec_block_body("941100")))
         .mount(&server)
         .await;
 
     // Path traversal rule
     Mock::given(method("POST"))
         .and(path("/path"))
-        .respond_with(
-            ResponseTemplate::new(403).set_body_string(modsec_block_body("930100")),
-        )
+        .respond_with(ResponseTemplate::new(403).set_body_string(modsec_block_body("930100")))
         .mount(&server)
         .await;
 
     // Simulate the bench parsing each blocked response.
     let observations: Vec<(&str, &str)> = vec![
         // (grammar_rule gene signal used as payload proxy, rule_id)
-        ("tautology_swap", "942100"),  // sql-ish grammar rule
-        ("tag_event_swap", "941100"),  // xss-ish grammar rule
-        ("path_obfuscate", "930100"),  // path-ish grammar rule
+        ("tautology_swap", "942100"), // sql-ish grammar rule
+        ("tag_event_swap", "941100"), // xss-ish grammar rule
+        ("path_obfuscate", "930100"), // path-ish grammar rule
     ];
 
     let mut cov = RuleCoverage::new();

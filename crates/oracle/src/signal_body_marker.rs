@@ -49,10 +49,8 @@ pub(crate) fn contains_word_bounded(haystack: &str, needle: &str) -> bool {
     while let Some(rel) = haystack[from..].find(needle) {
         let start = from + rel;
         let end = start + nb.len();
-        let left_ok =
-            !needle_starts_alnum || start == 0 || !hb[start - 1].is_ascii_alphanumeric();
-        let right_ok =
-            !needle_ends_alnum || end == hb.len() || !hb[end].is_ascii_alphanumeric();
+        let left_ok = !needle_starts_alnum || start == 0 || !hb[start - 1].is_ascii_alphanumeric();
+        let right_ok = !needle_ends_alnum || end == hb.len() || !hb[end].is_ascii_alphanumeric();
         if left_ok && right_ok {
             return true;
         }
@@ -290,7 +288,10 @@ mod tests {
 
     #[test]
     fn unmarked_body_produces_no_signals() {
-        let signals = extract_body_signals(b"HTTP/1.1 200 OK\nContent-Type: text/plain\n\nHello!", false);
+        let signals = extract_body_signals(
+            b"HTTP/1.1 200 OK\nContent-Type: text/plain\n\nHello!",
+            false,
+        );
         // The body has no WAF markers -- the oracle must stay silent.
         assert!(
             signals.is_empty(),
@@ -312,8 +313,8 @@ mod tests {
 
     #[test]
     fn extract_block_reason_gzip_bomb_does_not_panic() {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
         let big = vec![0u8; 5 * 1024 * 1024];
         let mut enc = GzEncoder::new(Vec::new(), Compression::best());
@@ -339,9 +340,9 @@ mod tests {
     fn rate_limit_marker_detected() {
         let body = b"Rate limit exceeded. Too many requests.";
         let signals = extract_body_signals(body, false);
-        let has_rate_limit = signals.iter().any(|s| {
-            matches!(s, Signal::BodyMarker(m) if m.starts_with("rate-limit:"))
-        });
+        let has_rate_limit = signals
+            .iter()
+            .any(|s| matches!(s, Signal::BodyMarker(m) if m.starts_with("rate-limit:")));
         assert!(
             has_rate_limit,
             "rate-limit body marker must produce a rate-limit: signal; got: {signals:?}"
@@ -375,7 +376,9 @@ mod tests {
         ] {
             let signals = extract_body_signals(body, false);
             assert!(
-                !signals.iter().any(|s| matches!(s, Signal::SuccessMarker(_))),
+                !signals
+                    .iter()
+                    .any(|s| matches!(s, Signal::SuccessMarker(_))),
                 "no SuccessMarker may fire on failure/block wording; body={:?} got={:?}",
                 String::from_utf8_lossy(body),
                 signals
@@ -394,7 +397,9 @@ mod tests {
         ] {
             let signals = extract_body_signals(body, false);
             assert!(
-                signals.iter().any(|s| matches!(s, Signal::SuccessMarker(_))),
+                signals
+                    .iter()
+                    .any(|s| matches!(s, Signal::SuccessMarker(_))),
                 "genuine success page must yield a SuccessMarker; body={:?} got={:?}",
                 String::from_utf8_lossy(body),
                 signals
@@ -426,8 +431,8 @@ mod tests {
     fn gzip_bomb_exactly_at_cap_boundary_is_accepted() {
         // A body that decompresses to EXACTLY DECOMPRESS_MAX_BYTES must be
         // accepted (not rejected as a bomb). The cap check is `> cap`, not `>= cap`.
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
         let exactly_cap = vec![0u8; super::DECOMPRESS_MAX_BYTES as usize];
         let mut enc = GzEncoder::new(Vec::new(), Compression::best());
@@ -508,16 +513,40 @@ mod tests {
     /// multibyte neighbours, and a non-alnum-edged needle.
     #[test]
     fn word_bounded_boundary_cases() {
-        assert!(contains_word_bounded("blocked", "blocked"), "exact equality");
-        assert!(contains_word_bounded("blocked.", "blocked"), "trailing punct");
-        assert!(contains_word_bounded(".blocked", "blocked"), "leading punct");
-        assert!(!contains_word_bounded("xblocked", "blocked"), "leading alnum is not a boundary");
-        assert!(!contains_word_bounded("blockedx", "blocked"), "trailing alnum is not a boundary");
-        assert!(!contains_word_bounded("anything", ""), "empty needle never matches");
-        assert!(!contains_word_bounded("", "blocked"), "empty haystack never matches");
+        assert!(
+            contains_word_bounded("blocked", "blocked"),
+            "exact equality"
+        );
+        assert!(
+            contains_word_bounded("blocked.", "blocked"),
+            "trailing punct"
+        );
+        assert!(
+            contains_word_bounded(".blocked", "blocked"),
+            "leading punct"
+        );
+        assert!(
+            !contains_word_bounded("xblocked", "blocked"),
+            "leading alnum is not a boundary"
+        );
+        assert!(
+            !contains_word_bounded("blockedx", "blocked"),
+            "trailing alnum is not a boundary"
+        );
+        assert!(
+            !contains_word_bounded("anything", ""),
+            "empty needle never matches"
+        );
+        assert!(
+            !contains_word_bounded("", "blocked"),
+            "empty haystack never matches"
+        );
         // A multibyte char as the neighbour counts as a boundary (markers are ASCII).
         assert!(contains_word_bounded("café blocked señor", "blocked"));
-        assert!(contains_word_bounded("→blocked←", "blocked"), "multibyte both sides");
+        assert!(
+            contains_word_bounded("→blocked←", "blocked"),
+            "multibyte both sides"
+        );
         // A needle that itself starts/ends with non-alnum is unaffected by
         // alnum neighbours on that side (no boundary required there).
         assert!(contains_word_bounded("xx-attack-x", "-attack-"));
@@ -535,7 +564,12 @@ mod tests {
     use proptest::prelude::*;
 
     fn any_marker() -> impl Strategy<Value = String> {
-        prop::sample::select(all_markers().iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
+        prop::sample::select(
+            all_markers()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
+        )
     }
 
     fn alnum_edged_markers() -> impl Strategy<Value = String> {

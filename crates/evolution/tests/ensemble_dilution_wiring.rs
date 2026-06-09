@@ -12,7 +12,10 @@ use wafrift_types::EvasionConfig;
 use wafrift_wafmodel::ensemble_dilution::{RuleGroup, SubScoreEstimator};
 
 fn config_with_weight(w: f64) -> EvasionConfig {
-    EvasionConfig { dilution_weight: w, ..Default::default() }
+    EvasionConfig {
+        dilution_weight: w,
+        ..Default::default()
+    }
 }
 
 // ── Test 1: dilution_weight=0.0 leaves oracle fitness unchanged ──────────────
@@ -45,11 +48,8 @@ fn dilution_weight_one_pure_dilution_score() {
     let cfg = config_with_weight(1.0);
 
     // Pre-compute the pure dilution score for this payload.
-    let dilution_only = compute_dilution_score(
-        "' UNION SELECT 1,2--",
-        &est,
-        DEFAULT_DILUTION_THRESHOLD,
-    );
+    let dilution_only =
+        compute_dilution_score("' UNION SELECT 1,2--", &est, DEFAULT_DILUTION_THRESHOLD);
 
     // With weight=1.0, oracle fitness (0.0 = fully blocked) should not matter.
     let adj = dilution_adjusted_fitness(
@@ -109,7 +109,7 @@ fn non_ensemble_waf_dilution_has_no_effect() {
     for non_ensemble in &[
         "SomeRandomVendor",
         "F5 AWAF",
-        "AWS Bot Control",   // ML-backed, not ensemble
+        "AWS Bot Control",           // ML-backed, not ensemble
         "Cloudflare Bot Management", // ML-backed, not ensemble
     ] {
         let adj = dilution_adjusted_fitness(
@@ -136,22 +136,8 @@ fn deterministic_same_inputs_same_score() {
     let payload = "' UNION SELECT 1,2,3--";
     let waf = "Cloudflare WAF";
 
-    let s1 = dilution_adjusted_fitness(
-        0.5,
-        payload,
-        &est,
-        DEFAULT_DILUTION_THRESHOLD,
-        &cfg,
-        waf,
-    );
-    let s2 = dilution_adjusted_fitness(
-        0.5,
-        payload,
-        &est,
-        DEFAULT_DILUTION_THRESHOLD,
-        &cfg,
-        waf,
-    );
+    let s1 = dilution_adjusted_fitness(0.5, payload, &est, DEFAULT_DILUTION_THRESHOLD, &cfg, waf);
+    let s2 = dilution_adjusted_fitness(0.5, payload, &est, DEFAULT_DILUTION_THRESHOLD, &cfg, waf);
 
     assert_eq!(s1, s2, "same inputs must produce same score (determinism)");
 }
@@ -198,7 +184,10 @@ fn adjusted_fitness_always_in_unit_interval() {
     for payload in payloads {
         for &w in &weights {
             for &oracle in &oracles {
-                let cfg = EvasionConfig { dilution_weight: w, ..Default::default() };
+                let cfg = EvasionConfig {
+                    dilution_weight: w,
+                    ..Default::default()
+                };
                 let adj = dilution_adjusted_fitness(
                     oracle,
                     payload,

@@ -86,7 +86,7 @@ pub const MAX_BOMB_EXPANSION: usize = 100;
 pub(crate) const BOMB_FILL_POOL: &[u8] = b"AB0X\x00 \tNZ?";
 
 /// Pick a fill byte for a compression-bomb input. RNG draws from
-/// [`BOMB_FILL_POOL`]. Empty pool returns `b'A'` (defensive fallback
+/// `BOMB_FILL_POOL`. Empty pool returns `b'A'` (defensive fallback
 /// — the const has entries, but the centralized
 /// [`wafrift_types::pick::pick_from`] primitive enforces this contract
 /// uniformly across every wafrift pool sampler).
@@ -180,7 +180,7 @@ pub struct CompressionBomb {
 
 impl CompressionBomb {
     /// Build a bomb that decompresses to `target_size` bytes. Fill
-    /// byte is drawn from [`BOMB_FILL_POOL`] per call. Both
+    /// byte is drawn from `BOMB_FILL_POOL` per call. Both
     /// `target_size` and the resulting ratio are clamped to the
     /// module-level caps.
     #[must_use]
@@ -803,8 +803,7 @@ mod tests {
             "65536 bytes must use the 127 sentinel (64-bit length)"
         );
         let extended = u64::from_be_bytes([
-            frame[2], frame[3], frame[4], frame[5],
-            frame[6], frame[7], frame[8], frame[9],
+            frame[2], frame[3], frame[4], frame[5], frame[6], frame[7], frame[8], frame[9],
         ]);
         assert_eq!(extended, 65536, "64-bit extended length must be 65536");
     }

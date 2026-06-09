@@ -136,7 +136,6 @@ struct InterceptInner {
     next_id: u64,
 }
 
-
 /// Default intercept timeout — after which the request defaults
 /// to `Release` so the proxy never wedges if the operator walks
 /// away.
@@ -468,6 +467,10 @@ mod tests {
         assert_eq!(id, 1);
         // resolve(0) must not affect the real id=1 entry.
         assert!(!s.resolve(0, InterceptDecision::Kill));
-        assert_eq!(s.pending_count(), 1, "id=1 must still be pending after resolve(0)");
+        assert_eq!(
+            s.pending_count(),
+            1,
+            "id=1 must still be pending after resolve(0)"
+        );
     }
 }

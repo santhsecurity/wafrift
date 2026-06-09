@@ -8,11 +8,14 @@
 //! The parser must NEVER panic on any of them — corrupted input
 //! falls back to `BlockClass::Unknown` and we keep going.
 
-use wafrift_oracle::cloudflare::{parse_cf_block, BlockClass};
+use wafrift_oracle::cloudflare::{BlockClass, parse_cf_block};
 
 // Compact helper so each fixture reads as one block.
 fn hdr(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-    pairs.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect()
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -66,7 +69,10 @@ fn cf_mitigated_empty_value() {
 #[test]
 fn case_variations_in_header_names() {
     // Some proxies normalize header case to upper or mixed.
-    let h = hdr(&[("CF-RAY", "abcdef0123456789-SJC"), ("CF-Mitigated", "block")]);
+    let h = hdr(&[
+        ("CF-RAY", "abcdef0123456789-SJC"),
+        ("CF-Mitigated", "block"),
+    ]);
     let signal = parse_cf_block(&h, b"");
     // Parser should be case-insensitive on header names.
     assert!(
@@ -77,10 +83,7 @@ fn case_variations_in_header_names() {
 
 #[test]
 fn duplicate_cf_ray_headers_does_not_panic() {
-    let h = hdr(&[
-        ("cf-ray", "first-SJC"),
-        ("cf-ray", "second-LHR"),
-    ]);
+    let h = hdr(&[("cf-ray", "first-SJC"), ("cf-ray", "second-LHR")]);
     let _ = parse_cf_block(&h, b"");
 }
 
@@ -155,8 +158,7 @@ fn cve_id_in_body_attributes_correctly() {
     let body = b"Error 1020 - Access denied. Pattern matched: CVE-2021-44228";
     let signal = parse_cf_block(&[], body);
     assert!(
-        signal.ruleset_hint.as_deref() == Some("log4shell")
-            || signal.ruleset_hint.is_some(),
+        signal.ruleset_hint.as_deref() == Some("log4shell") || signal.ruleset_hint.is_some(),
         "CVE-2021-44228 should map to log4shell or some ruleset hint"
     );
 }

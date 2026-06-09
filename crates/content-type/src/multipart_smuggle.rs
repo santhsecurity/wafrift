@@ -149,8 +149,7 @@ impl Default for SmuggleProbeConfig {
 /// Default XSS-shaped preamble signature. Public so callers that want
 /// to compose around it (prepend their own bytes, etc.) don't have to
 /// reconstruct the canonical shape from the documentation.
-pub const DEFAULT_PREAMBLE_SIGNATURE: &[u8] =
-    b"<!doctype html>\r\n\
+pub const DEFAULT_PREAMBLE_SIGNATURE: &[u8] = b"<!doctype html>\r\n\
       <form action=\"/login\"><script>alert(1)</script></form>\r\n\
       This text precedes the first boundary per RFC 2046 \xC2\xA75.1.1 \
       and MUST be ignored by conforming multipart parsers.\r\n";
@@ -228,8 +227,7 @@ pub fn generate_smuggle_variants_with_config(
             content_type: format!("multipart/form-data; boundary={boundary}"),
             body,
             technique: ContentTypeTechnique::MultipartPreambleSmuggle,
-            description: "Preamble before first boundary — WAF flat-scans, origin discards"
-                .into(),
+            description: "Preamble before first boundary — WAF flat-scans, origin discards".into(),
             canary: wafrift_types::canary::Canary::generate(),
         });
     }
@@ -247,8 +245,8 @@ pub fn generate_smuggle_variants_with_config(
             content_type: format!("multipart/form-data; boundary={boundary}"),
             body,
             technique: ContentTypeTechnique::MultipartEpilogueSmuggle,
-            description: "Epilogue after closing boundary — RFC says discard; lenient parsers don't"
-                .into(),
+            description:
+                "Epilogue after closing boundary — RFC says discard; lenient parsers don't".into(),
             canary: wafrift_types::canary::Canary::generate(),
         });
     }
@@ -269,10 +267,8 @@ pub fn generate_smuggle_variants_with_config(
         // (NEUTRAL_FIELD_NAME_POOL) so a WAF rule keyed on
         // `name="_wafrift_*"` cannot pin this smuggle as a wafrift
         // fingerprint.
-        let second = build_multipart_body(
-            &[(random_field_name(), random_field_value())],
-            &boundary,
-        );
+        let second =
+            build_multipart_body(&[(random_field_name(), random_field_value())], &boundary);
         body.extend_from_slice(b"\r\n");
         body.extend_from_slice(&second);
         variants.push(ContentTypeVariant {
@@ -382,9 +378,8 @@ pub fn generate_smuggle_variants_with_config(
             content_type: "multipart/form-data; boundary=".into(),
             body,
             technique: ContentTypeTechnique::MultipartEmptyBoundaryParam,
-            description:
-                "Empty boundary parameter — WAF fails parse, lenient origin auto-detects"
-                    .into(),
+            description: "Empty boundary parameter — WAF fails parse, lenient origin auto-detects"
+                .into(),
             canary: wafrift_types::canary::Canary::generate(),
         });
     }
@@ -547,9 +542,16 @@ mod tests {
     fn empty_param_list_does_not_panic() {
         // Boundary: empty input. RFC §12 — every behaviour gets a test.
         let v = generate_smuggle_variants(&[]);
-        assert_eq!(v.len(), 6, "shape count is independent of input cardinality");
+        assert_eq!(
+            v.len(),
+            6,
+            "shape count is independent of input cardinality"
+        );
         for x in &v {
-            assert!(!x.body.is_empty(), "even empty params produce a framed body");
+            assert!(
+                !x.body.is_empty(),
+                "even empty params produce a framed body"
+            );
         }
     }
 
@@ -789,14 +791,8 @@ mod tests {
         // regression where someone hardcodes a fixed boundary string
         // would be silently exploitable.
         let params = vec![
-            (
-                "evil".to_string(),
-                "----WafriftBoundary000000".to_string(),
-            ),
-            (
-                "again".to_string(),
-                "WafriftBoundarydeadbeef".to_string(),
-            ),
+            ("evil".to_string(), "----WafriftBoundary000000".to_string()),
+            ("again".to_string(), "WafriftBoundarydeadbeef".to_string()),
         ];
         let v = generate_smuggle_variants(&params);
         for variant in &v {
@@ -812,9 +808,7 @@ mod tests {
                     }
                     let needle = format!("--{b}");
                     assert!(
-                        !params
-                            .iter()
-                            .any(|(_, v)| v.contains(&needle)),
+                        !params.iter().any(|(_, v)| v.contains(&needle)),
                         "boundary {b:?} collides with attacker-supplied value"
                     );
                 }
@@ -884,9 +878,7 @@ mod tests {
         use std::thread;
 
         let bodies: Arc<Mutex<HashSet<Vec<u8>>>> = Arc::new(Mutex::new(HashSet::new()));
-        let params = vec![
-            ("u".to_string(), "admin' OR 1=1--".to_string()),
-        ];
+        let params = vec![("u".to_string(), "admin' OR 1=1--".to_string())];
         let params = Arc::new(params);
         let threads: Vec<_> = (0..50)
             .map(|_| {
@@ -1010,9 +1002,7 @@ mod tests {
         // The sanitisation removes CR and LF chars from values — it does NOT
         // blank non-CRLF characters. What must not survive is a header-injection
         // sequence: the CRLF prefix needed to inject an extra header line.
-        let params = vec![
-            ("k".to_string(), "val\r\nevil_header: injected".to_string()),
-        ];
+        let params = vec![("k".to_string(), "val\r\nevil_header: injected".to_string())];
         let v = generate_smuggle_variants(&params);
         let lf = v
             .iter()

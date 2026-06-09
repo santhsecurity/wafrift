@@ -685,7 +685,7 @@ where
     let differential = crate::config::differential_enabled();
     let base_blocked: Vec<bool> = if differential {
         let mut bb = vec![false; arms];
-        for arm in 0..arms {
+        for (arm, bb_slot) in bb.iter_mut().enumerate() {
             let Some((m, _)) = pool.iter().find(|(_, a)| *a == arm) else {
                 continue;
             };
@@ -694,7 +694,7 @@ where
             }
             let req = build(&m.delivery, payload); // BASE (un-evaded) payload
             match send_with_envelope(client, &req, timeout_secs).await {
-                Ok(env) => bb[arm] = env.blocked,
+                Ok(env) => *bb_slot = env.blocked,
                 Err(e) => {
                     *error_tally
                         .entry(format!("equiv differential base-probe: {e}"))
@@ -797,7 +797,7 @@ where
     let mut model = prior
         .clone()
         .unwrap_or_else(|| WafModel::learn(&samples, 30));
-    while sends < budget && !phase_fire_cap.is_some_and(|cap| sends >= cap) {
+    while sends < budget && phase_fire_cap.is_none_or(|cap| sends < cap) {
         let Some((pp, aa)) = synthesize(&keyed, &model, &tried).cloned() else {
             break;
         };
@@ -1281,7 +1281,10 @@ mod tests {
             !oracle_valid("cmdi", read_passwd, probe),
             "swapping the executed command changes the attack — must be rejected"
         );
-        assert!(oracle_valid("cmdi", read_passwd, read_passwd), "identity must hold");
+        assert!(
+            oracle_valid("cmdi", read_passwd, read_passwd),
+            "identity must hold"
+        );
     }
 
     // ── is_valid_xxe / is_valid_log4shell / is_valid_nosql ────

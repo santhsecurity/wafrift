@@ -11,14 +11,14 @@
 //!
 //! Three backend strategies implement [`EgressRouter`]:
 //!
-//! - [`TailscaleEgress`] — round-robins through Tailscale exit-nodes the
+//! - `TailscaleEgress` — round-robins through Tailscale exit-nodes the
 //!   operator configures. Constructs a SOCKS5 proxy URL pointing at the
 //!   Tailscale SOCKS listener (`127.0.0.1:1055` by default) and sets the
 //!   `Tailscale-Exit-Node` request header to select the node.
-//! - [`SocksPool`] — operator supplies one or more SOCKS5 URLs
+//! - `SocksPool` — operator supplies one or more SOCKS5 URLs
 //!   (`socks5://user:pass@host:port`). Rotates round-robin or by
 //!   least-recently-blocked.
-//! - [`HttpProxyPool`] — operator supplies one or more HTTP proxy URLs.
+//! - `HttpProxyPool` — operator supplies one or more HTTP proxy URLs.
 //!   Same rotation logic.
 //!
 //! # Per-target blacklisting
@@ -103,10 +103,11 @@ pub fn parse_socks5_url(raw: &str) -> Result<String, EgressError> {
     // schemes, embedded paths/queries, missing host/port). Then confirm the
     // SOCKS5 family. The original credential-bearing string is returned so
     // `reqwest::Proxy::all` keeps any `user:pass@` userinfo.
-    let endpoint = proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
-        url: raw.to_owned(),
-        reason: e.to_string(),
-    })?;
+    let endpoint =
+        proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: e.to_string(),
+        })?;
     match endpoint.protocol {
         proxywire::ProxyProtocol::Socks5 | proxywire::ProxyProtocol::Socks5LocalDns => {
             Ok(raw.to_owned())
@@ -123,10 +124,11 @@ pub fn parse_http_proxy_url(raw: &str) -> Result<String, EgressError> {
     // Validate through proxywire's canonical strict parser (see
     // [`parse_socks5_url`]) and confirm the HTTP(S) family. proxywire maps both
     // `http://` and `https://` to `ProxyProtocol::HttpConnect`.
-    let endpoint = proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
-        url: raw.to_owned(),
-        reason: e.to_string(),
-    })?;
+    let endpoint =
+        proxywire::ProxyEndpoint::from_url(raw).map_err(|e| EgressError::InvalidUrl {
+            url: raw.to_owned(),
+            reason: e.to_string(),
+        })?;
     match endpoint.protocol {
         proxywire::ProxyProtocol::HttpConnect => Ok(raw.to_owned()),
         _ => Err(EgressError::InvalidUrl {
@@ -477,7 +479,7 @@ impl EgressPoolBuilder {
     }
 
     /// Add raw SOCKS5 URL strings, collecting validation errors to be
-    /// surfaced at [`build`] time. Use when you want to batch-validate.
+    /// surfaced at `build` time. Use when you want to batch-validate.
     pub fn socks5_str_raw(mut self, urls: Vec<String>) -> Self {
         for u in urls {
             match parse_socks5_url(&u) {

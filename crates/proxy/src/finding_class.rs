@@ -42,7 +42,11 @@ impl FindingClass {
                 "REFLECTED — input(s) {} echoed in the response (review for XSS)",
                 params.join(", ")
             )),
-            FindingClass::ExploitConfirmed { params, sink, message } => Some(format!(
+            FindingClass::ExploitConfirmed {
+                params,
+                sink,
+                message,
+            } => Some(format!(
                 "EXPLOIT CONFIRMED — input(s) {} reflect and EXECUTE `{sink}({message})` in a sandbox (client-side exploit)",
                 params.join(", ")
             )),
@@ -118,16 +122,16 @@ pub fn classify(
     if params.is_empty() {
         return FindingClass::None;
     }
-    if prove && is_html_like(content_type) {
-        if let Some(v) = detonate(body)
-            && v.executed
-        {
-            return FindingClass::ExploitConfirmed {
-                params,
-                sink: v.sink,
-                message: v.message,
-            };
-        }
+    if prove
+        && is_html_like(content_type)
+        && let Some(v) = detonate(body)
+        && v.executed
+    {
+        return FindingClass::ExploitConfirmed {
+            params,
+            sink: v.sink,
+            message: v.message,
+        };
     }
     FindingClass::Reflected { params }
 }
@@ -146,7 +150,11 @@ pub struct DetonationVerdict {
 /// are the injection points reflection-XSS turns on; passing them to
 /// [`reflected_inputs`] answers "did the tool's payload come back unmodified".
 #[must_use]
-pub fn extract_request_inputs(uri: &str, body: Option<&[u8]>, req_content_type: &str) -> Vec<String> {
+pub fn extract_request_inputs(
+    uri: &str,
+    body: Option<&[u8]>,
+    req_content_type: &str,
+) -> Vec<String> {
     let mut out = Vec::new();
     if let Some((_, q)) = uri.split_once('?') {
         collect_pairs(q.as_bytes(), &mut out);
@@ -222,10 +230,10 @@ mod tests {
     fn reflected_inputs_finds_long_values_only() {
         let body = b"<html>q=hello and payload <script>alert(1)</script> here</html>";
         let inputs = vec![
-            "q".to_string(),                       // too short
-            "hello".to_string(),                   // 5 < MIN
+            "q".to_string(),                         // too short
+            "hello".to_string(),                     // 5 < MIN
             "<script>alert(1)</script>".to_string(), // reflected
-            "notpresent-longvalue".to_string(),    // not in body
+            "notpresent-longvalue".to_string(),      // not in body
         ];
         let hits = reflected_inputs(&inputs, body);
         assert_eq!(hits, vec!["<script>alert(1)</script>".to_string()]);
@@ -310,7 +318,10 @@ mod tests {
             None,
             "",
         );
-        assert!(q.contains(&"<script>alert(1)</script>".to_string()), "{q:?}");
+        assert!(
+            q.contains(&"<script>alert(1)</script>".to_string()),
+            "{q:?}"
+        );
 
         // Form body decoded only for form-urlencoded content type.
         let f = extract_request_inputs(
@@ -328,11 +339,8 @@ mod tests {
     #[test]
     fn extract_then_reflect_end_to_end() {
         // The decoded query value reflects verbatim in an HTML response.
-        let inputs = extract_request_inputs(
-            "http://t/r?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E",
-            None,
-            "",
-        );
+        let inputs =
+            extract_request_inputs("http://t/r?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", None, "");
         let body = b"<html>you searched: <script>alert(1)</script></html>";
         assert_eq!(
             reflected_inputs(&inputs, body),
@@ -414,7 +422,9 @@ mod tests {
     #[test]
     fn reflect_value_longer_than_body_not_reflected() {
         // needle longer than haystack — contains() must short-circuit false.
-        assert!(reflected_inputs(&inv(&["this-needle-is-way-longer-than-body"]), b"short").is_empty());
+        assert!(
+            reflected_inputs(&inv(&["this-needle-is-way-longer-than-body"]), b"short").is_empty()
+        );
     }
 
     // ---- dedup / multiplicity ----------------------------------------------
@@ -423,7 +433,11 @@ mod tests {
     fn reflect_dedups_duplicate_inputs() {
         let body = b"<p>repeated-payload appears repeated-payload twice</p>";
         let hits = reflected_inputs(&inv(&["repeated-payload", "repeated-payload"]), body);
-        assert_eq!(hits, inv(&["repeated-payload"]), "duplicates must collapse to one");
+        assert_eq!(
+            hits,
+            inv(&["repeated-payload"]),
+            "duplicates must collapse to one"
+        );
     }
 
     #[test]
@@ -482,7 +496,7 @@ mod tests {
     // ---- percent / plus decode edge cases ----------------------------------
 
     #[test]
-    fn decode_percent_41_becomes_A() {
+    fn decode_percent_41_becomes_a() {
         let out = extract_request_inputs("h://t?x=%41%41%41%41%41%41", None, "");
         assert_eq!(out, inv(&["AAAAAA"]));
     }
@@ -703,7 +717,13 @@ mod tests {
     #[test]
     fn classify_short_input_in_html_never_detonates() {
         // Value below MIN_REFLECT_LEN -> no reflection -> None, hook untouched.
-        let c = classify(&inv(&["abc"]), b"<html>abc</html>", "text/html", true, no_detonate);
+        let c = classify(
+            &inv(&["abc"]),
+            b"<html>abc</html>",
+            "text/html",
+            true,
+            no_detonate,
+        );
         assert_eq!(c, FindingClass::None);
     }
 
@@ -809,7 +829,11 @@ mod tests {
             },
         );
         match &c {
-            FindingClass::ExploitConfirmed { params, sink, message } => {
+            FindingClass::ExploitConfirmed {
+                params,
+                sink,
+                message,
+            } => {
                 assert_eq!(params, &inv(&["<script>document.cookie</script>"]));
                 assert_eq!(sink, "eval");
                 assert_eq!(message, "document.cookie");
@@ -889,7 +913,7 @@ mod tests {
         // Exhaustive over short ASCII-ish needles 0..MIN_REFLECT_LEN bytes,
         // each embedded in a body that DOES contain it. None may reflect.
         for len in 0..MIN_REFLECT_LEN {
-            let needle: String = std::iter::repeat('Z').take(len).collect();
+            let needle: String = std::iter::repeat_n('Z', len).collect();
             let mut body = b"head".to_vec();
             body.extend_from_slice(needle.as_bytes());
             body.extend_from_slice(b"tail");
@@ -903,7 +927,7 @@ mod tests {
     #[test]
     fn property_value_at_or_over_min_present_always_reflects() {
         for len in MIN_REFLECT_LEN..MIN_REFLECT_LEN + 8 {
-            let needle: String = std::iter::repeat('Q').take(len).collect();
+            let needle: String = std::iter::repeat_n('Q', len).collect();
             let mut body = b"head".to_vec();
             body.extend_from_slice(needle.as_bytes());
             body.extend_from_slice(b"tail");

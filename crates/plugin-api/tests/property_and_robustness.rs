@@ -19,18 +19,11 @@ use std::path::Path;
 
 use proptest::prelude::*;
 use tempfile::TempDir;
-use wafrift_plugin_api::{
-    PluginError, TamperManifest, TamperRegistry, load_from,
-};
+use wafrift_plugin_api::{PluginError, TamperManifest, TamperRegistry, load_from};
 
 // ── Test helpers ──────────────────────────────────────────────
 
-fn manifest_with(
-    name: &str,
-    version: &str,
-    author: &str,
-    description: &str,
-) -> TamperManifest {
+fn manifest_with(name: &str, version: &str, author: &str, description: &str) -> TamperManifest {
     TamperManifest {
         name: name.to_string(),
         version: version.to_string(),
@@ -71,9 +64,7 @@ fn oversized_toml_rejected() {
     let huge = "x".repeat(300 * 1024);
     let content = minimal_toml_with_rules(
         "huge",
-        &format!(
-            "[[rules]]\npattern = \"x\"\nreplacement = \"y\"\n# pad: {huge}"
-        ),
+        &format!("[[rules]]\npattern = \"x\"\nreplacement = \"y\"\n# pad: {huge}"),
     );
     write_plugin(&dir, "huge.toml", &content);
 
@@ -107,7 +98,10 @@ description = "Manifest-only identity tamper"
 
     let mut reg = TamperRegistry::new();
     let errors = reg.load_dir(dir.path());
-    assert!(errors.is_empty(), "manifest-only TOML must load: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "manifest-only TOML must load: {errors:?}"
+    );
     assert_eq!(reg.len(), 1);
     // Empty rules → input passes through unchanged.
     let result = reg.get("passthrough").unwrap().apply("hello world");
@@ -119,19 +113,28 @@ description = "Manifest-only identity tamper"
 #[test]
 fn empty_name_rejected() {
     let mf = manifest_with("", "1.0.0", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
 fn empty_version_rejected() {
     let mf = manifest_with("name", "", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
 fn empty_author_rejected() {
     let mf = manifest_with("name", "1.0.0", "", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
@@ -144,7 +147,10 @@ fn description_exactly_512_chars_accepted() {
 #[test]
 fn description_513_chars_rejected() {
     let mf = manifest_with("n", "1.0.0", "A", &"x".repeat(513));
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
@@ -152,7 +158,10 @@ fn name_with_unicode_rejected() {
     // Names are ASCII-alphanumeric + underscore only — a unicode name
     // would break the plugin URL / dispatch table contract.
     let mf = manifest_with("naïve_name", "1.0.0", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
@@ -160,20 +169,29 @@ fn name_with_dash_rejected() {
     // Underscore is allowed, dash is not — this is a deliberate
     // ergonomic choice (snake_case in Rust dispatch).
     let mf = manifest_with("dash-name", "1.0.0", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
 fn name_with_dot_rejected() {
     let mf = manifest_with("dotted.name", "1.0.0", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
 fn name_with_slash_rejected() {
     // Slash in name is a path-traversal hazard.
     let mf = manifest_with("../etc/passwd", "1.0.0", "A", "desc");
-    assert!(matches!(mf.validate(), Err(PluginError::InvalidManifest(_))));
+    assert!(matches!(
+        mf.validate(),
+        Err(PluginError::InvalidManifest(_))
+    ));
 }
 
 #[test]
@@ -273,7 +291,10 @@ replacement = "b"
     write_plugin(&dir, "unicode.toml", content);
     let mut reg = TamperRegistry::new();
     let errors = reg.load_dir(dir.path());
-    assert!(errors.is_empty(), "unicode in author/description allowed: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "unicode in author/description allowed: {errors:?}"
+    );
     assert_eq!(reg.len(), 1);
 }
 
@@ -350,7 +371,10 @@ fn load_dir_with_mixed_valid_and_invalid_partial_success() {
     write_plugin(
         &dir,
         "ok.toml",
-        &minimal_toml_with_rules("ok_plugin", "[[rules]]\npattern = \"x\"\nreplacement = \"y\""),
+        &minimal_toml_with_rules(
+            "ok_plugin",
+            "[[rules]]\npattern = \"x\"\nreplacement = \"y\"",
+        ),
     );
     write_plugin(&dir, "bad.toml", "not valid toml [[[!!");
     write_plugin(&dir, "ignored.txt", "ignored");
@@ -391,7 +415,10 @@ fn tamper_apply_long_input_no_panic() {
     write_plugin(
         &dir,
         "wide.toml",
-        &minimal_toml_with_rules("wide_input", "[[rules]]\npattern = \"a\"\nreplacement = \"b\""),
+        &minimal_toml_with_rules(
+            "wide_input",
+            "[[rules]]\npattern = \"a\"\nreplacement = \"b\"",
+        ),
     );
     let mut reg = TamperRegistry::new();
     reg.load_dir(dir.path());
@@ -412,7 +439,10 @@ fn high_concurrency_registry_read() {
     write_plugin(
         &dir,
         "shared.toml",
-        &minimal_toml_with_rules("shared_t", "[[rules]]\npattern = \"0\"\nreplacement = \"X\""),
+        &minimal_toml_with_rules(
+            "shared_t",
+            "[[rules]]\npattern = \"0\"\nreplacement = \"X\"",
+        ),
     );
     let mut reg = TamperRegistry::new();
     reg.load_dir(dir.path());
@@ -462,7 +492,9 @@ fn name_collision_first_wins() {
     let errors = reg.load_dir(dir.path());
     assert_eq!(reg.len(), 1, "exactly one same-name plugin registered");
     assert!(
-        errors.iter().any(|e| matches!(e, PluginError::NameCollision(_))),
+        errors
+            .iter()
+            .any(|e| matches!(e, PluginError::NameCollision(_))),
         "second registration must report NameCollision"
     );
 }

@@ -21,10 +21,8 @@ fn bundled_default_genome_parses_with_proven_keys() {
 /// knowledge). This is the warm-start pentesters want on the first scan.
 #[test]
 fn load_or_default_seeds_cold_bank_then_preserves_existing() {
-    let dir = std::env::temp_dir().join(format!(
-        "wafrift-gb-load-or-default-{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("wafrift-gb-load-or-default-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
 
     {
@@ -73,8 +71,7 @@ fn load_or_default_seeds_cold_bank_then_preserves_existing() {
 /// one of these two assertions.
 #[test]
 fn load_or_default_routes_cloudflare_to_delivery_vectors() {
-    let cf_dir =
-        std::env::temp_dir().join(format!("wafrift-gb-route-cf-{}", std::process::id()));
+    let cf_dir = std::env::temp_dir().join(format!("wafrift-gb-route-cf-{}", std::process::id()));
     let _ = fs::remove_dir_all(&cf_dir);
     {
         let mut bank = GeneBank::open(&cf_dir).expect("open cf bank");
@@ -107,8 +104,7 @@ fn load_or_default_routes_cloudflare_to_delivery_vectors() {
     }
     let _ = fs::remove_dir_all(&bot_dir);
 
-    let ms_dir =
-        std::env::temp_dir().join(format!("wafrift-gb-route-ms-{}", std::process::id()));
+    let ms_dir = std::env::temp_dir().join(format!("wafrift-gb-route-ms-{}", std::process::id()));
     let _ = fs::remove_dir_all(&ms_dir);
     {
         let mut bank = GeneBank::open(&ms_dir).expect("open modsec bank");
@@ -1120,7 +1116,9 @@ fn oversized_genome_is_quarantined_on_merge_and_save() {
 
     // The genome must now be loadable with the session data.
     let mut bank2 = GeneBank::open(tmp.clone()).unwrap();
-    let loaded = bank2.load("cloudflare").expect("post-merge genome must load");
+    let loaded = bank2
+        .load("cloudflare")
+        .expect("post-merge genome must load");
     assert_eq!(loaded.techniques.len(), 1);
     assert_eq!(loaded.techniques[0].name, "TestTech");
 

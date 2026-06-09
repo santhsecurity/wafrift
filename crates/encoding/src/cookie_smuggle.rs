@@ -190,8 +190,7 @@ impl CookieSmuggleProbe {
         Self::finalise(
             CookieSmuggleVariant::QuotedSemicolonValue,
             header,
-            "Quoted-string value with embedded ';' — RFC 6265 vs 6265bis differential"
-                .into(),
+            "Quoted-string value with embedded ';' — RFC 6265 vs 6265bis differential".into(),
         )
     }
 
@@ -203,13 +202,12 @@ impl CookieSmuggleProbe {
         Self::finalise(
             CookieSmuggleVariant::EmptyNamePair,
             header,
-            "Empty-name cookie pair — RFC violation, lax parsers accept under empty key"
-                .into(),
+            "Empty-name cookie pair — RFC violation, lax parsers accept under empty key".into(),
         )
     }
 
     /// `name=a<CTL>b` — control byte in value. The CTL is drawn from
-    /// [`CONTROL_BYTE_POOL`] per-call so signature WAFs that pin a
+    /// `CONTROL_BYTE_POOL` per-call so signature WAFs that pin a
     /// specific byte don't catch every probe.
     #[must_use]
     pub fn control_byte_in_value(name: &str, value: &str) -> Self {
@@ -231,7 +229,9 @@ impl CookieSmuggleProbe {
         Self::finalise(
             CookieSmuggleVariant::ControlByteInValue,
             header,
-            format!("Control byte 0x{ctl:02x} inside cookie value — strict CTL-reject vs lax-strip"),
+            format!(
+                "Control byte 0x{ctl:02x} inside cookie value — strict CTL-reject vs lax-strip"
+            ),
         )
     }
 
@@ -306,7 +306,9 @@ pub(crate) const CONTROL_BYTE_POOL: &[u8] = &[
 /// downstream probes can exercise the actual parser-differential
 /// surface.
 fn sanitise_cookie_token(s: &str) -> String {
-    s.chars().filter(|&c| c != '\r' && c != '\n' && c != '\0').collect()
+    s.chars()
+        .filter(|&c| c != '\r' && c != '\n' && c != '\0')
+        .collect()
 }
 
 /// Enumerate one probe per variant, seeded with `name` / `value`.
@@ -362,10 +364,7 @@ mod tests {
         // resolve to the smuggle; "first wins" parsers resolve to
         // benign.
         let first = p.header_value.find("role=guest").expect("benign present");
-        let second = p
-            .header_value
-            .find("role=admin")
-            .expect("smuggle present");
+        let second = p.header_value.find("role=admin").expect("smuggle present");
         assert!(
             first < second,
             "benign pair must precede smuggle pair on the wire"
@@ -436,8 +435,7 @@ mod tests {
         // Anti-rig: CR/LF/NUL would break the header-line on every
         // HTTP stack. Even probes that intentionally violate RFC
         // 6265 must not break the OVER-the-wire framing.
-        let p =
-            CookieSmuggleProbe::secure_prefix_without_https("na\rme\n", "val\0ue");
+        let p = CookieSmuggleProbe::secure_prefix_without_https("na\rme\n", "val\0ue");
         assert!(!p.header_value.contains('\r'));
         assert!(!p.header_value.contains('\n'));
         assert!(!p.header_value.contains('\0'));

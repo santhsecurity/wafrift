@@ -21,7 +21,10 @@ impl Segment {
     /// Construct a segment.
     #[must_use]
     pub fn new(seq: u32, data: impl Into<Vec<u8>>) -> Self {
-        Self { seq, data: data.into() }
+        Self {
+            seq,
+            data: data.into(),
+        }
     }
 
     /// Sequence number one past the last byte (exclusive end). Saturating: a

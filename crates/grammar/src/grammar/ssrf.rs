@@ -265,7 +265,10 @@ pub fn mutate(payload: &str) -> Vec<String> {
 
     // Templated variant lists are Tier-B data (rules/ssrf/mutate_variants.toml);
     // `{scheme}` and `{oob_domain}` are substituted per-payload here.
-    let subst = |t: &str| t.replace("{scheme}", scheme).replace("{oob_domain}", oob_domain);
+    let subst = |t: &str| {
+        t.replace("{scheme}", scheme)
+            .replace("{oob_domain}", oob_domain)
+    };
     let v = variants();
 
     // Address encoding variants
@@ -701,11 +704,26 @@ mod tests {
         let fallback = MutateVariants::default();
         let tpls = |s: &[VariantTemplate]| s.iter().map(|t| t.template.clone()).collect::<Vec<_>>();
         let hosts = |s: &[ConfusionTarget]| s.iter().map(|t| t.host.clone()).collect::<Vec<_>>();
-        assert_eq!(tpls(&shipped.address_encoding), tpls(&fallback.address_encoding));
-        assert_eq!(tpls(&shipped.userinfo_bypass), tpls(&fallback.userinfo_bypass));
-        assert_eq!(tpls(&shipped.percent_encoded), tpls(&fallback.percent_encoded));
-        assert_eq!(hosts(&shipped.confusion_target), hosts(&fallback.confusion_target));
-        assert_eq!(tpls(&shipped.suffixed_address), tpls(&fallback.suffixed_address));
+        assert_eq!(
+            tpls(&shipped.address_encoding),
+            tpls(&fallback.address_encoding)
+        );
+        assert_eq!(
+            tpls(&shipped.userinfo_bypass),
+            tpls(&fallback.userinfo_bypass)
+        );
+        assert_eq!(
+            tpls(&shipped.percent_encoded),
+            tpls(&fallback.percent_encoded)
+        );
+        assert_eq!(
+            hosts(&shipped.confusion_target),
+            hosts(&fallback.confusion_target)
+        );
+        assert_eq!(
+            tpls(&shipped.suffixed_address),
+            tpls(&fallback.suffixed_address)
+        );
     }
 
     /// A malformed data file must degrade to the built-in set without panic —

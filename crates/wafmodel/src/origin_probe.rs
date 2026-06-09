@@ -2,7 +2,7 @@
 //! stages a target's origin applies, so the P2 solver TARGETS its preimage to
 //! the real pipeline instead of speculatively trying every canonical sink.
 //!
-//! [`solve`](crate::solve) inverts a *given* sink [`Pipeline`]. The open
+//! [`solve`](crate::solve) inverts a *given* sink `Pipeline`. The open
 //! question on a real target is *which* pipeline the origin is. This module
 //! answers it from behaviour: send a marker that carries exactly one reversible
 //! transform, observe the value that reaches the sink (the reflection), and
@@ -63,7 +63,7 @@ where
 const MARKER: &str = "wz7qx4k9mfp2r8td";
 
 /// A second neutral token used only for the baseline control request in
-/// [`scan_origin`]: distinct from [`MARKER`] (neither is a substring of the
+/// [`scan_origin`]: distinct from `MARKER` (neither is a substring of the
 /// other) so a baseline that reflects `CONTROL` proves the channel echoes,
 /// while the absence of `MARKER` in that same baseline proves the marker is not
 /// ambient page content. Lowercase alphanumerics ⇒ normalization-neutral.
@@ -108,7 +108,9 @@ fn probes() -> Vec<Probe> {
     // URL-decode: `%2D` → `-`. `-` is the only literal here (it is the
     // definition of percent-encoding, not a confusables list).
     out.push(Probe {
-        stage: Stage::UrlDecode { plus_is_space: false },
+        stage: Stage::UrlDecode {
+            plus_is_space: false,
+        },
         sent: format!("{MARKER}%2D").into_bytes(),
         folded: format!("{MARKER}-").into_bytes(),
     });
@@ -129,7 +131,9 @@ fn probes() -> Vec<Probe> {
         use base64::Engine;
         out.push(Probe {
             stage: Stage::Base64Decode,
-            sent: base64::engine::general_purpose::STANDARD.encode(&marker).into_bytes(),
+            sent: base64::engine::general_purpose::STANDARD
+                .encode(&marker)
+                .into_bytes(),
             folded: marker.clone(),
         });
     }
@@ -151,7 +155,11 @@ fn probes() -> Vec<Probe> {
     // NUL-strip: a marker with an embedded NUL the origin drops.
     let mut nul_sent = marker.clone();
     nul_sent.insert(2, 0);
-    out.push(Probe { stage: Stage::StripNulls, sent: nul_sent, folded: marker.clone() });
+    out.push(Probe {
+        stage: Stage::StripNulls,
+        sent: nul_sent,
+        folded: marker.clone(),
+    });
 
     // ── Framework string decodes (after byte decodes, before normalize) ──
 
@@ -179,7 +187,11 @@ fn probes() -> Vec<Probe> {
     // solver inverts. `normalize(sent) == MARKER` holds by the engine's gate.
     if let Some(h) = nfkc_preimage::variants(MARKER, 1).into_iter().next() {
         debug_assert_eq!(nfkc_preimage::normalize(&h), MARKER);
-        out.push(Probe { stage: Stage::NfkcNormalize, sent: h.into_bytes(), folded: marker.clone() });
+        out.push(Probe {
+            stage: Stage::NfkcNormalize,
+            sent: h.into_bytes(),
+            folded: marker.clone(),
+        });
     }
 
     // Best-fit: a marker carrying a curly quote the engine coerces to `'`.
@@ -276,8 +288,8 @@ pub struct OriginScan {
 /// Live origin scan with a **differential baseline** that makes the result
 /// trustworthy on a real target — the production entry point the CLI uses.
 ///
-/// One control request is sent first (a neutral [`CONTROL`] token that is not a
-/// carrier for any probe): if [`MARKER`] appears in that baseline it is ambient
+/// One control request is sent first (a neutral `CONTROL` token that is not a
+/// carrier for any probe): if `MARKER` appears in that baseline it is ambient
 /// page content, not a fold, so the byte/whole-value probes are suppressed
 /// (`marker_collision`). The probe battery then runs and `reflection_observed`
 /// is taken from whether any probe's content (folded or raw) actually came
@@ -323,19 +335,29 @@ mod tests {
 
     #[test]
     fn nfkc_origin_is_detected() {
-        assert_eq!(detect(vec![Stage::NfkcNormalize]), vec![Stage::NfkcNormalize]);
+        assert_eq!(
+            detect(vec![Stage::NfkcNormalize]),
+            vec![Stage::NfkcNormalize]
+        );
     }
 
     #[test]
     fn bestfit_origin_is_detected() {
-        assert_eq!(detect(vec![Stage::BestFitDownconvert]), vec![Stage::BestFitDownconvert]);
+        assert_eq!(
+            detect(vec![Stage::BestFitDownconvert]),
+            vec![Stage::BestFitDownconvert]
+        );
     }
 
     #[test]
     fn url_decoding_origin_is_detected() {
         assert_eq!(
-            detect(vec![Stage::UrlDecode { plus_is_space: false }]),
-            vec![Stage::UrlDecode { plus_is_space: false }]
+            detect(vec![Stage::UrlDecode {
+                plus_is_space: false
+            }]),
+            vec![Stage::UrlDecode {
+                plus_is_space: false
+            }]
         );
     }
 
@@ -346,7 +368,10 @@ mod tests {
 
     #[test]
     fn overlong_utf8_decoding_origin_is_detected() {
-        assert_eq!(detect(vec![Stage::OverlongUtf8Decode]), vec![Stage::OverlongUtf8Decode]);
+        assert_eq!(
+            detect(vec![Stage::OverlongUtf8Decode]),
+            vec![Stage::OverlongUtf8Decode]
+        );
     }
 
     #[test]
@@ -380,7 +405,10 @@ mod tests {
         // Precision: a NUL-stripping origin must NOT report overlong-decode (or
         // url/normalize), and vice versa — the probes are mutually exclusive.
         assert_eq!(detect(vec![Stage::StripNulls]), vec![Stage::StripNulls]);
-        assert_eq!(detect(vec![Stage::OverlongUtf8Decode]), vec![Stage::OverlongUtf8Decode]);
+        assert_eq!(
+            detect(vec![Stage::OverlongUtf8Decode]),
+            vec![Stage::OverlongUtf8Decode]
+        );
     }
 
     #[test]
@@ -390,7 +418,10 @@ mod tests {
 
     #[test]
     fn html_entity_decoding_origin_is_detected() {
-        assert_eq!(detect(vec![Stage::HtmlEntityDecode]), vec![Stage::HtmlEntityDecode]);
+        assert_eq!(
+            detect(vec![Stage::HtmlEntityDecode]),
+            vec![Stage::HtmlEntityDecode]
+        );
     }
 
     #[test]
@@ -400,15 +431,24 @@ mod tests {
         // over-decode the solver's preimage with a spurious third pass.
         let d = detect(vec![Stage::DoubleUrlDecode]);
         assert_eq!(d, vec![Stage::DoubleUrlDecode], "got {d:?}");
-        assert!(!d.contains(&Stage::UrlDecode { plus_is_space: false }));
+        assert!(!d.contains(&Stage::UrlDecode {
+            plus_is_space: false
+        }));
     }
 
     #[test]
     fn single_url_decode_is_not_reported_as_double() {
         // Precision twin: a single-decoding origin must NOT trip the double
         // probe — `%252D` survives one pass as `%2D` and never folds to `-`.
-        let d = detect(vec![Stage::UrlDecode { plus_is_space: false }]);
-        assert_eq!(d, vec![Stage::UrlDecode { plus_is_space: false }]);
+        let d = detect(vec![Stage::UrlDecode {
+            plus_is_space: false,
+        }]);
+        assert_eq!(
+            d,
+            vec![Stage::UrlDecode {
+                plus_is_space: false
+            }]
+        );
         assert!(!d.contains(&Stage::DoubleUrlDecode));
     }
 
@@ -447,7 +487,9 @@ mod tests {
         use std::mem::discriminant;
         let probed: HashSet<_> = probes().iter().map(|p| discriminant(&p.stage)).collect();
         let invertible = [
-            Stage::UrlDecode { plus_is_space: false },
+            Stage::UrlDecode {
+                plus_is_space: false,
+            },
             Stage::DoubleUrlDecode,
             Stage::JsonUnescape,
             Stage::HtmlEntityDecode,
@@ -471,10 +513,20 @@ mod tests {
     fn composite_url_then_nfkc_origin_detects_both_in_order() {
         // A framework that url-decodes then NFKC-normalizes: both probes fold,
         // and the canonical order (decode before normalize) is returned.
-        let detected = detect(vec![Stage::UrlDecode { plus_is_space: false }, Stage::NfkcNormalize]);
+        let detected = detect(vec![
+            Stage::UrlDecode {
+                plus_is_space: false,
+            },
+            Stage::NfkcNormalize,
+        ]);
         assert_eq!(
             detected,
-            vec![Stage::UrlDecode { plus_is_space: false }, Stage::NfkcNormalize]
+            vec![
+                Stage::UrlDecode {
+                    plus_is_space: false
+                },
+                Stage::NfkcNormalize
+            ]
         );
     }
 
@@ -494,7 +546,7 @@ mod tests {
         use crate::canon::Channel;
         use crate::normalize::Transform;
         use crate::oracle::{ChannelSet, Rule, SimRegexWaf};
-        use crate::{solve_bypass, Outcome, WafOracle};
+        use crate::{Outcome, WafOracle, solve_bypass};
         use wafrift_types::Request;
 
         let detected = detect(vec![Stage::NfkcNormalize]);
@@ -543,7 +595,7 @@ mod tests {
         use crate::canon::Channel;
         use crate::normalize::Transform;
         use crate::oracle::{ChannelSet, Rule, SimRegexWaf};
-        use crate::{solve_bypass, Outcome, WafOracle};
+        use crate::{Outcome, WafOracle, solve_bypass};
         use wafrift_types::Request;
 
         let detected = detect(vec![Stage::DoubleUrlDecode]);
@@ -569,10 +621,17 @@ mod tests {
             .expect("a fingerprinted double-decoding origin must yield a double-encoded bypass");
         // The solved input carries no raw `<` (the WAF would catch it); the
         // bypass lives entirely in the second percent layer.
-        assert!(!sol.input.contains(&b'<'), "solved input must not contain raw '<': {:?}",
-            String::from_utf8_lossy(&sol.input));
+        assert!(
+            !sol.input.contains(&b'<'),
+            "solved input must not contain raw '<': {:?}",
+            String::from_utf8_lossy(&sol.input)
+        );
         // The origin's pipeline reconstructs the literal attack.
-        assert!(sink.apply(&sol.input).windows(attack.len()).any(|w| w == attack));
+        assert!(
+            sink.apply(&sol.input)
+                .windows(attack.len())
+                .any(|w| w == attack)
+        );
         let mut replay = SimRegexWaf::new(vec![rule()], 5);
         assert_eq!(replay.classify(&build(&sol.input)).unwrap(), Outcome::Pass);
     }
@@ -671,7 +730,8 @@ mod tests {
         // moves them — otherwise the baseline itself could fold.
         for tok in [MARKER, CONTROL] {
             assert!(
-                tok.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
+                tok.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
                 "{tok} must be lowercase-alnum (normalization-neutral)"
             );
         }

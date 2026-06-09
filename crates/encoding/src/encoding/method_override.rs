@@ -72,7 +72,13 @@ pub fn override_header_case_mix(method: &str) -> String {
     let mixed: String = method
         .chars()
         .enumerate()
-        .map(|(i, c)| if i % 2 == 0 { c.to_ascii_lowercase() } else { c.to_ascii_uppercase() })
+        .map(|(i, c)| {
+            if i % 2 == 0 {
+                c.to_ascii_lowercase()
+            } else {
+                c.to_ascii_uppercase()
+            }
+        })
         .collect();
     format!("X-HTTP-Method-Override: {mixed}")
 }
@@ -88,9 +94,7 @@ pub fn override_header_padded(method: &str) -> String {
 /// method values — front-end and back-end disagree on which wins.
 #[must_use]
 pub fn override_header_duplicate(method_a: &str, method_b: &str) -> String {
-    format!(
-        "X-HTTP-Method-Override: {method_a}\r\nX-HTTP-Method-Override: {method_b}"
-    )
+    format!("X-HTTP-Method-Override: {method_a}\r\nX-HTTP-Method-Override: {method_b}")
 }
 
 /// Form-field `_method` override (urlencoded body). Used by Rails
@@ -159,10 +163,7 @@ pub fn all_override_variants(method: &str) -> Vec<(&'static str, String)> {
             "chunked-trailer",
             chunked_trailer_override(method, "name=value"),
         ),
-        (
-            "header-plus-form",
-            header_plus_form_disagree("GET", method),
-        ),
+        ("header-plus-form", header_plus_form_disagree("GET", method)),
     ]
 }
 

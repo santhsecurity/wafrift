@@ -88,7 +88,8 @@ pub fn analyze_calibration(status: u16, body: &[u8]) -> CalibrationResult {
         return CalibrationResult::Uncertain;
     }
 
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(crate::BLOCK_SCAN_BODY_WINDOW)]).to_ascii_lowercase();
+    let body_str = String::from_utf8_lossy(&body[..body.len().min(crate::BLOCK_SCAN_BODY_WINDOW)])
+        .to_ascii_lowercase();
     let waf_indicators = [
         "blocked",
         "firewall",

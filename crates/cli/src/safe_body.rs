@@ -955,8 +955,7 @@ mod round19_bounded_input_audit {
         // legitimate). The two banned-pattern checks below still reject any
         // unbounded regression.
         assert!(
-            src.contains("read_bounded_text_file")
-                && src.contains("GENE_BANK_FILE_MAX_BYTES"),
+            src.contains("read_bounded_text_file") && src.contains("GENE_BANK_FILE_MAX_BYTES"),
             "replay.rs proxy gene-bank read must be bounded via read_bounded_text_file(GENE_BANK_FILE_MAX_BYTES)"
         );
         let banned = concat!("\n    let raw = fs::", "read_to_", "string(&path)");

@@ -486,10 +486,11 @@ fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
     // Extract the manifest from the custom section before compiling.
     let manifest = extract_wasm_manifest(&wasm_bytes, path)?;
 
-    let module = wasmtime::Module::new(&engine, &wasm_bytes).map_err(|e| PluginError::WasmLoad {
-        file: path.to_owned(),
-        cause: format!("module compilation failed: {e}"),
-    })?;
+    let module =
+        wasmtime::Module::new(&engine, &wasm_bytes).map_err(|e| PluginError::WasmLoad {
+            file: path.to_owned(),
+            cause: format!("module compilation failed: {e}"),
+        })?;
 
     // Linker with NO imports — no WASI, no host functions.
     let linker: wasmtime::Linker<()> = wasmtime::Linker::new(&engine);
@@ -504,12 +505,13 @@ fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
             cause: format!("instantiation failed (module may import disallowed symbols): {e}"),
         })?;
 
-    let memory = instance
-        .get_memory(&mut store, "memory")
-        .ok_or_else(|| PluginError::WasmLoad {
-            file: path.to_owned(),
-            cause: "module must export a 'memory' with name 'memory'".into(),
-        })?;
+    let memory =
+        instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| PluginError::WasmLoad {
+                file: path.to_owned(),
+                cause: "module must export a 'memory' with name 'memory'".into(),
+            })?;
 
     let tamper_fn: wasmtime::TypedFunc<(i32, i32), i64> = instance
         .get_typed_func(&mut store, "tamper")
@@ -525,9 +527,8 @@ fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Tamper>, PluginError> {
             cause: format!("missing export 'alloc(i32)->i32': {e}"),
         })?;
 
-    let dealloc_fn: Option<wasmtime::TypedFunc<(i32, i32), ()>> = instance
-        .get_typed_func(&mut store, "dealloc")
-        .ok();
+    let dealloc_fn: Option<wasmtime::TypedFunc<(i32, i32), ()>> =
+        instance.get_typed_func(&mut store, "dealloc").ok();
 
     let runtime = WasmRuntime {
         store,
@@ -586,12 +587,11 @@ fn extract_wasm_manifest(wasm_bytes: &[u8], path: &Path) -> Result<TamperManifes
                 let section_name = &wasm_bytes[name_start..name_finish];
                 if section_name == b"wafrift_manifest" {
                     let payload = &wasm_bytes[name_finish..section_end];
-                    let toml_str = std::str::from_utf8(payload).map_err(|_| {
-                        PluginError::WasmLoad {
+                    let toml_str =
+                        std::str::from_utf8(payload).map_err(|_| PluginError::WasmLoad {
                             file: path.to_owned(),
                             cause: "wafrift_manifest custom section is not valid UTF-8".into(),
-                        }
-                    })?;
+                        })?;
                     let em: WasmEmbeddedManifest =
                         toml::from_str(toml_str).map_err(|e| PluginError::TomlParse {
                             file: path.to_owned(),
@@ -1020,11 +1020,7 @@ replacement = "x"
         let dir = TempDir::new().unwrap();
         // Use a literal character (not a regex meta) to avoid TOML
         // backslash-escape issues in the minimal_toml template.
-        write_file(
-            &dir,
-            "par.toml",
-            &minimal_toml("par_tamper", "0", "N"),
-        );
+        write_file(&dir, "par.toml", &minimal_toml("par_tamper", "0", "N"));
 
         let mut registry = TamperRegistry::new();
         registry.load_dir(dir.path());

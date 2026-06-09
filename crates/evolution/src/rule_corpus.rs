@@ -1,6 +1,6 @@
 //! Per-rule WAF-bypass corpus — persistent {rule_id → bucket} store.
 //!
-//! [`super::coverage_feedback`] tracks rule_id observations in process
+//! `super::coverage_feedback` tracks rule_id observations in process
 //! memory for the current bench run. This module persists the
 //! richer corpus across runs:
 //!
@@ -14,7 +14,7 @@
 //!   Submitted → Accepted / Duplicate / Rejected) so `wafrift harvest`
 //!   skips already-handled bypasses. wafrift never auto-files — filing is
 //!   a deliberate, one-at-a-time `wafrift submit` step.
-//! - **Drift timestamps** so [`super::dilution`] / [`super::coverage_feedback`]
+//! - **Drift timestamps** so `super::dilution` / `super::coverage_feedback`
 //!   can re-fire bypasses around CF Auto-Tune retrain windows.
 //!
 //! ## Why a separate module
@@ -37,12 +37,12 @@
 //!
 //! JSON, schema-versioned. Field additions are backwards-compatible
 //! via serde defaults. Schema bumps require an explicit migration in
-//! [`RuleBypassCorpus::load_or_default`].
+//! `RuleBypassCorpus::load_or_default`.
 //!
 //! ## Concurrency
 //!
 //! Mid-hunt, multiple async workers may want to write the corpus.
-//! [`RuleBypassCorpus::save_atomic`] writes to a tempfile in the
+//! `RuleBypassCorpus::save_atomic` writes to a tempfile in the
 //! same directory then renames — POSIX rename is atomic on the same
 //! filesystem. Callers serialize their writes with a `Mutex` at the
 //! orchestrator level; the file itself is not a synchronization
@@ -230,10 +230,7 @@ impl RuleBypassCorpus {
     /// had to be preserved-and-rebuilt — when the file IS valid its
     /// embedded fingerprint wins (callers should verify the fingerprint
     /// matches what they expect via [`Self::target_fingerprint`]).
-    pub fn load_or_default(
-        path: &Path,
-        target_fingerprint: impl Into<String>,
-    ) -> Self {
+    pub fn load_or_default(path: &Path, target_fingerprint: impl Into<String>) -> Self {
         // A genuinely missing file is a legitimate fresh start.
         if !path.exists() {
             return Self::new(target_fingerprint);
@@ -361,9 +358,11 @@ impl RuleBypassCorpus {
         }
         // Dedup by (response_hash, payload) so re-running the same
         // bench doesn't bloat the file.
-        if !bucket.blocked.iter().any(|a| {
-            a.response_hash == entry.response_hash && a.payload == entry.payload
-        }) {
+        if !bucket
+            .blocked
+            .iter()
+            .any(|a| a.response_hash == entry.response_hash && a.payload == entry.payload)
+        {
             bucket.blocked.push(entry);
         }
     }
@@ -395,9 +394,11 @@ impl RuleBypassCorpus {
         if bucket.bypassed.len() >= Self::MAX_BYPASSED_PER_BUCKET {
             return;
         }
-        if !bucket.bypassed.iter().any(|b| {
-            b.response_hash == entry.response_hash && b.payload == entry.payload
-        }) {
+        if !bucket
+            .bypassed
+            .iter()
+            .any(|b| b.response_hash == entry.response_hash && b.payload == entry.payload)
+        {
             bucket.bypassed.push(entry);
         }
     }
@@ -552,11 +553,15 @@ impl RuleBypassCorpus {
         let mut per_class: BTreeMap<String, ClassStats> = BTreeMap::new();
         for bucket in self.buckets.values() {
             for b in &bucket.blocked {
-                let entry = per_class.entry(b.payload_class.as_str().to_string()).or_default();
+                let entry = per_class
+                    .entry(b.payload_class.as_str().to_string())
+                    .or_default();
                 entry.blocks += 1;
             }
             for b in &bucket.bypassed {
-                let entry = per_class.entry(b.payload_class.as_str().to_string()).or_default();
+                let entry = per_class
+                    .entry(b.payload_class.as_str().to_string())
+                    .or_default();
                 entry.bypasses += 1;
             }
         }
@@ -595,7 +600,10 @@ pub struct CoverageSummary {
 pub fn default_corpus_path(target_fingerprint: &str) -> PathBuf {
     let safe = sanitize_fingerprint_for_filename(target_fingerprint);
     if let Some(home) = dirs_home() {
-        return home.join(".wafrift").join("corpus").join(format!("{safe}.json"));
+        return home
+            .join(".wafrift")
+            .join("corpus")
+            .join(format!("{safe}.json"));
     }
     PathBuf::from("wafrift-bench/results/corpus").join(format!("{safe}.json"))
 }
@@ -672,7 +680,7 @@ fn preserve_unreadable_corpus(path: &Path, reason: &str) {
 }
 
 /// Snapshot an existing non-empty corpus to `<path>.bak` before it is
-/// overwritten by [`RuleBypassCorpus::save_atomic`]. Best-effort; never
+/// overwritten by `RuleBypassCorpus::save_atomic`. Best-effort; never
 /// blocks or fails the save. Empty/absent prior files are skipped (nothing
 /// to protect). This is the save-side half of the durability guarantee.
 fn backup_before_overwrite(path: &Path) {
@@ -717,16 +725,37 @@ mod tests {
         assert_eq!(c.rules_seen(), 0);
         assert_eq!(c.total_blocks(), 0);
         assert_eq!(c.total_bypasses(), 0);
-        assert_eq!(c.target_fingerprint, "cf:managed-ruleset:cumulusfire.cloudflare.com");
+        assert_eq!(
+            c.target_fingerprint,
+            "cf:managed-ruleset:cumulusfire.cloudflare.com"
+        );
         assert_eq!(c.schema_version, CORPUS_SCHEMA_VERSION);
     }
 
     #[test]
     fn record_block_dedups_by_payload_and_hash() {
         let mut c = RuleBypassCorpus::new("t");
-        c.record_block("942100", "' OR 1=1--", cls("sql"), vec!["url".into()], 0xCAFE);
-        c.record_block("942100", "' OR 1=1--", cls("sql"), vec!["url".into()], 0xCAFE);
-        c.record_block("942100", "' OR 1=1--", cls("sql"), vec!["url".into()], 0xCAFE);
+        c.record_block(
+            "942100",
+            "' OR 1=1--",
+            cls("sql"),
+            vec!["url".into()],
+            0xCAFE,
+        );
+        c.record_block(
+            "942100",
+            "' OR 1=1--",
+            cls("sql"),
+            vec!["url".into()],
+            0xCAFE,
+        );
+        c.record_block(
+            "942100",
+            "' OR 1=1--",
+            cls("sql"),
+            vec!["url".into()],
+            0xCAFE,
+        );
         assert_eq!(c.blocked_for_rule("942100").len(), 1);
     }
 
@@ -760,7 +789,13 @@ mod tests {
         // Bypasses have a generous cap (4096). Push well under it — all persist.
         let n_bypass = RuleBypassCorpus::MAX_BLOCKED_PER_BUCKET + 50;
         for i in 0..n_bypass {
-            c.record_bypass("r", &format!("b{i}"), cls("sql"), vec![], 1_000_000 + i as u64);
+            c.record_bypass(
+                "r",
+                &format!("b{i}"),
+                cls("sql"),
+                vec![],
+                1_000_000 + i as u64,
+            );
         }
         assert_eq!(
             c.total_bypasses(),
@@ -860,8 +895,10 @@ mod tests {
         // Also confirm a blocked entry survives the heal.
         c.record_block("r", "blocker", cls("sql"), vec![], 1);
 
-        let path =
-            temp_dir().join(format!("wafrift-corpus-bypass-heal-{}.json", std::process::id()));
+        let path = temp_dir().join(format!(
+            "wafrift-corpus-bypass-heal-{}.json",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&path);
         c.save_atomic(&path).expect("save oversized bypass corpus");
         let healed = RuleBypassCorpus::load_or_default(&path, "bypass-heal-test");
@@ -935,7 +972,10 @@ mod tests {
         c.record_bypass("R1", "p", cls("sql"), vec![], 1);
         let ok = c.set_delivery("R1", "p", "{\"Query\":{\"param\":\"q\"}}".into());
         assert!(ok);
-        assert_eq!(c.bypasses_for_rule("R1")[0].delivery, "{\"Query\":{\"param\":\"q\"}}");
+        assert_eq!(
+            c.bypasses_for_rule("R1")[0].delivery,
+            "{\"Query\":{\"param\":\"q\"}}"
+        );
     }
 
     #[test]
@@ -960,7 +1000,11 @@ mod tests {
         let path = dir.path().join("c.json");
         let mut c = RuleBypassCorpus::new("cf:mr:cumulus");
         c.record_bypass("942100", "1 OR 1=1 --", cls("sql"), vec![], 9);
-        c.set_delivery("942100", "1 OR 1=1 --", "{\"HppSplit\":{\"param\":\"q\",\"parts\":3}}".into());
+        c.set_delivery(
+            "942100",
+            "1 OR 1=1 --",
+            "{\"HppSplit\":{\"param\":\"q\",\"parts\":3}}".into(),
+        );
         c.save_atomic(&path).expect("save");
         let r = RuleBypassCorpus::load_or_default(&path, "ignored");
         assert_eq!(
@@ -1079,7 +1123,10 @@ mod tests {
         assert_eq!(reloaded.total_bypasses(), 1);
         let bp = &reloaded.bypasses_for_rule("942100")[0];
         assert_eq!(bp.payload, "payload-2");
-        assert_eq!(bp.encoding_chain, vec!["unicode".to_string(), "case".to_string()]);
+        assert_eq!(
+            bp.encoding_chain,
+            vec!["unicode".to_string(), "case".to_string()]
+        );
     }
 
     #[test]
@@ -1121,7 +1168,10 @@ mod tests {
             .collect();
         assert_eq!(aside.len(), 1, "exactly one preserved sidecar must exist");
         let preserved = std::fs::read(aside[0].path()).expect("read sidecar");
-        assert_eq!(preserved, original, "preserved bytes must be byte-identical");
+        assert_eq!(
+            preserved, original,
+            "preserved bytes must be byte-identical"
+        );
     }
 
     #[test]
@@ -1158,7 +1208,10 @@ mod tests {
         empty.save_atomic(&path).expect("save empty over A");
 
         let bak = dir.path().join("corpus.json.bak");
-        assert!(bak.exists(), "a .bak snapshot of the prior corpus must exist");
+        assert!(
+            bak.exists(),
+            "a .bak snapshot of the prior corpus must exist"
+        );
         let recovered = RuleBypassCorpus::load_or_default(&bak, "ignored");
         assert_eq!(
             recovered.total_bypasses(),
@@ -1228,7 +1281,11 @@ mod tests {
         c.save_atomic(&path).expect("save");
         let bytes = std::fs::read(&path).expect("read");
         // Should NOT contain the prior garbage.
-        assert!(!std::str::from_utf8(&bytes).unwrap().contains("prior-garbage"));
+        assert!(
+            !std::str::from_utf8(&bytes)
+                .unwrap()
+                .contains("prior-garbage")
+        );
     }
 
     #[test]
@@ -1334,7 +1391,13 @@ mod tests {
         // corpus twice must produce identical bytes.
         let mut c = RuleBypassCorpus::new("t");
         for i in (0..50).rev() {
-            c.record_block(&format!("R{i}"), &format!("p{i}"), cls("sql"), vec![], i as u64);
+            c.record_block(
+                &format!("R{i}"),
+                &format!("p{i}"),
+                cls("sql"),
+                vec![],
+                i as u64,
+            );
         }
         let a = serde_json::to_string(&c).unwrap();
         let b = serde_json::to_string(&c).unwrap();
@@ -1350,7 +1413,10 @@ mod tests {
         let path = dir.path().join("c.json");
         c.save_atomic(&path).expect("save");
         let r = RuleBypassCorpus::load_or_default(&path, "ignored");
-        let desc = r.buckets.get("942100").and_then(|b| b.description.as_deref());
+        let desc = r
+            .buckets
+            .get("942100")
+            .and_then(|b| b.description.as_deref());
         assert_eq!(desc, Some("SQL injection — OWASP CRS 942100"));
     }
 
@@ -1392,7 +1458,13 @@ mod tests {
     #[test]
     fn unicode_in_payload_round_trips() {
         let mut c = RuleBypassCorpus::new("t");
-        c.record_bypass("R1", "ＳＥＬＥＣＴ Ω 中文 \u{200B} \u{E0041}", cls("sql"), vec![], 1);
+        c.record_bypass(
+            "R1",
+            "ＳＥＬＥＣＴ Ω 中文 \u{200B} \u{E0041}",
+            cls("sql"),
+            vec![],
+            1,
+        );
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("c.json");
         c.save_atomic(&path).expect("save");
@@ -1450,11 +1522,17 @@ mod tests {
         fingerprint: &str,
     ) {
         let c = RuleBypassCorpus::load_or_default(path, fingerprint);
-        assert_eq!(c.target_fingerprint, fingerprint, "fresh corpus uses fallback fp");
+        assert_eq!(
+            c.target_fingerprint, fingerprint,
+            "fresh corpus uses fallback fp"
+        );
         assert_eq!(c.rules_seen(), 0, "returned corpus must be fresh/empty");
         assert_eq!(c.total_bypasses(), 0);
         assert_eq!(c.total_blocks(), 0);
-        assert!(!path.exists(), "the unreadable original must be moved aside");
+        assert!(
+            !path.exists(),
+            "the unreadable original must be moved aside"
+        );
         let aside = corrupt_sidecars(dir, base);
         assert_eq!(aside.len(), 1, "exactly one preserved sidecar must exist");
         let preserved = std::fs::read(&aside[0]).expect("read sidecar");
@@ -1548,13 +1626,19 @@ mod tests {
         std::fs::write(&path, first).expect("write 1");
         let c1 = RuleBypassCorpus::load_or_default(&path, "fb");
         assert_eq!(c1.rules_seen(), 0, "fresh corpus after first corruption");
-        assert!(!path.exists(), "original moved aside after first corruption");
+        assert!(
+            !path.exists(),
+            "original moved aside after first corruption"
+        );
 
         let second = b"SECOND corrupt corpus bytes ???";
         std::fs::write(&path, second).expect("write 2");
         let c2 = RuleBypassCorpus::load_or_default(&path, "fb");
         assert_eq!(c2.rules_seen(), 0, "fresh corpus after second corruption");
-        assert!(!path.exists(), "original moved aside after second corruption");
+        assert!(
+            !path.exists(),
+            "original moved aside after second corruption"
+        );
 
         // The latest corruption's exact bytes are always recoverable.
         let bytes: Vec<Vec<u8>> = corrupt_sidecars(dir.path(), "multi.json")
@@ -1615,17 +1699,30 @@ mod tests {
         empty.save_atomic(&path).expect("save empty");
 
         let bak = dir.path().join("c.json.bak");
-        assert!(bak.exists(), ".bak must exist after overwriting a non-empty corpus");
+        assert!(
+            bak.exists(),
+            ".bak must exist after overwriting a non-empty corpus"
+        );
         let recovered = RuleBypassCorpus::load_or_default(&bak, "ignored");
-        assert_eq!(recovered.total_bypasses(), 2, "both prior bypasses recoverable");
+        assert_eq!(
+            recovered.total_bypasses(),
+            2,
+            "both prior bypasses recoverable"
+        );
         assert_eq!(recovered.total_blocks(), 1, "prior block recoverable");
         let payloads: Vec<_> = recovered
             .bypasses_for_rule("942100")
             .iter()
             .map(|b| b.payload.clone())
             .collect();
-        assert_eq!(payloads, vec!["winner-A".to_string(), "winner-B".to_string()]);
-        assert_eq!(recovered.bypasses_for_rule("942100")[0].encoding_chain, vec!["b64".to_string()]);
+        assert_eq!(
+            payloads,
+            vec!["winner-A".to_string(), "winner-B".to_string()]
+        );
+        assert_eq!(
+            recovered.bypasses_for_rule("942100")[0].encoding_chain,
+            vec!["b64".to_string()]
+        );
     }
 
     #[test]
@@ -1674,7 +1771,10 @@ mod tests {
         second.save_atomic(&path).expect("save second");
 
         let bak_bytes = std::fs::read(dir.path().join("c.json.bak")).expect("read bak");
-        assert_eq!(bak_bytes, prior_bytes, ".bak must be a byte-exact snapshot of the prior file");
+        assert_eq!(
+            bak_bytes, prior_bytes,
+            ".bak must be a byte-exact snapshot of the prior file"
+        );
     }
 
     #[test]
@@ -1686,7 +1786,9 @@ mod tests {
         let mut good = RuleBypassCorpus::new("cf:mr:x");
         good.record_bypass("R1", "keep-me", cls("sql"), vec![], 1);
         good.save_atomic(&path).expect("save good");
-        RuleBypassCorpus::new("cf:mr:x").save_atomic(&path).expect("save empty");
+        RuleBypassCorpus::new("cf:mr:x")
+            .save_atomic(&path)
+            .expect("save empty");
 
         let bak = dir.path().join("c.json.bak");
         let recovered = RuleBypassCorpus::load_or_default(&bak, "x");
@@ -1758,7 +1860,14 @@ mod tests {
                 delivery: String::new(),
             })
             .collect();
-        c.buckets.insert("r".into(), RuleBucket { blocked, bypassed, ..RuleBucket::default() });
+        c.buckets.insert(
+            "r".into(),
+            RuleBucket {
+                blocked,
+                bypassed,
+                ..RuleBucket::default()
+            },
+        );
         c.save_atomic(&path).expect("save");
 
         let healed = RuleBypassCorpus::load_or_default(&path, "heal");
@@ -1768,7 +1877,11 @@ mod tests {
         );
         // The earliest blocked sample is kept (truncate keeps the prefix).
         assert_eq!(healed.blocked_for_rule("r")[0].payload, "blk0");
-        assert_eq!(healed.bypasses_for_rule("r").len(), 10, "under-cap bypasses untouched");
+        assert_eq!(
+            healed.bypasses_for_rule("r").len(),
+            10,
+            "under-cap bypasses untouched"
+        );
         assert_eq!(healed.bypasses_for_rule("r")[9].payload, "by9");
     }
 
@@ -1807,7 +1920,13 @@ mod tests {
                 delivery: String::new(),
             })
             .collect();
-        c.buckets.insert("r".into(), RuleBucket { bypassed, ..RuleBucket::default() });
+        c.buckets.insert(
+            "r".into(),
+            RuleBucket {
+                bypassed,
+                ..RuleBucket::default()
+            },
+        );
         c.bucket_mut("r").blocked.push(RecordedAttempt {
             payload: "survivor".into(),
             payload_class: cls("sql"),
@@ -1821,7 +1940,11 @@ mod tests {
             healed.bypasses_for_rule("r").len(),
             RuleBypassCorpus::MAX_BYPASSED_PER_BUCKET
         );
-        assert_eq!(healed.bypasses_for_rule("r")[0].payload, "by0", "kept prefix");
+        assert_eq!(
+            healed.bypasses_for_rule("r")[0].payload,
+            "by0",
+            "kept prefix"
+        );
         assert_eq!(healed.blocked_for_rule("r").len(), 1);
         assert_eq!(healed.blocked_for_rule("r")[0].payload, "survivor");
     }
@@ -1838,7 +1961,10 @@ mod tests {
         std::fs::write(&path, raw).expect("write");
         let c = RuleBypassCorpus::load_or_default(&path, "ignored");
         assert_eq!(c.schema_version, CORPUS_SCHEMA_VERSION);
-        assert_eq!(c.target_fingerprint, "t", "embedded fingerprint wins for valid file");
+        assert_eq!(
+            c.target_fingerprint, "t",
+            "embedded fingerprint wins for valid file"
+        );
     }
 
     #[test]
@@ -1877,7 +2003,8 @@ mod tests {
         let mut c = RuleBypassCorpus::new("t");
         c.record_bypass("R1", "a", cls("sql"), vec!["x".into()], 1);
         c.record_bypass("R1", "b", cls("xss"), vec![], 2);
-        let mut v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        let mut v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         for bucket in v["buckets"].as_object_mut().unwrap().values_mut() {
             for bp in bucket["bypassed"].as_array_mut().unwrap() {
                 bp.as_object_mut().unwrap().remove("delivery");
@@ -1919,11 +2046,20 @@ mod tests {
         let mut c = RuleBypassCorpus::new("t");
         c.record_bypass("R1", "present", cls("sql"), vec![], 1);
         assert!(
-            !c.set_submission("R1", "absent", SubmissionStatus::Accepted { report_id: "X".into() }),
+            !c.set_submission(
+                "R1",
+                "absent",
+                SubmissionStatus::Accepted {
+                    report_id: "X".into()
+                }
+            ),
             "wrong payload in an existing bucket must not match"
         );
         // The real bypass is untouched.
-        assert!(matches!(c.bypasses_for_rule("R1")[0].submission, SubmissionStatus::Queued));
+        assert!(matches!(
+            c.bypasses_for_rule("R1")[0].submission,
+            SubmissionStatus::Queued
+        ));
     }
 
     #[test]
@@ -1935,11 +2071,36 @@ mod tests {
         let mut c = RuleBypassCorpus::new("t");
         let variants = [
             ("p0", SubmissionStatus::Queued),
-            ("p1", SubmissionStatus::DryRunHold { release_at_secs: 1234 }),
-            ("p2", SubmissionStatus::Submitted { report_id: "H1-1".into() }),
-            ("p3", SubmissionStatus::Accepted { report_id: "H1-2".into() }),
-            ("p4", SubmissionStatus::Duplicate { duplicate_of: "H1-3".into() }),
-            ("p5", SubmissionStatus::Rejected { reason: "informative".into() }),
+            (
+                "p1",
+                SubmissionStatus::DryRunHold {
+                    release_at_secs: 1234,
+                },
+            ),
+            (
+                "p2",
+                SubmissionStatus::Submitted {
+                    report_id: "H1-1".into(),
+                },
+            ),
+            (
+                "p3",
+                SubmissionStatus::Accepted {
+                    report_id: "H1-2".into(),
+                },
+            ),
+            (
+                "p4",
+                SubmissionStatus::Duplicate {
+                    duplicate_of: "H1-3".into(),
+                },
+            ),
+            (
+                "p5",
+                SubmissionStatus::Rejected {
+                    reason: "informative".into(),
+                },
+            ),
         ];
         for (p, _) in &variants {
             c.record_bypass("R1", p, cls("sql"), vec![], 0);
@@ -1954,10 +2115,30 @@ mod tests {
             .iter()
             .map(|b| (b.payload.clone(), b.submission.clone()))
             .collect();
-        assert_eq!(by_payload["p1"], SubmissionStatus::DryRunHold { release_at_secs: 1234 });
-        assert_eq!(by_payload["p2"], SubmissionStatus::Submitted { report_id: "H1-1".into() });
-        assert_eq!(by_payload["p4"], SubmissionStatus::Duplicate { duplicate_of: "H1-3".into() });
-        assert_eq!(by_payload["p5"], SubmissionStatus::Rejected { reason: "informative".into() });
+        assert_eq!(
+            by_payload["p1"],
+            SubmissionStatus::DryRunHold {
+                release_at_secs: 1234
+            }
+        );
+        assert_eq!(
+            by_payload["p2"],
+            SubmissionStatus::Submitted {
+                report_id: "H1-1".into()
+            }
+        );
+        assert_eq!(
+            by_payload["p4"],
+            SubmissionStatus::Duplicate {
+                duplicate_of: "H1-3".into()
+            }
+        );
+        assert_eq!(
+            by_payload["p5"],
+            SubmissionStatus::Rejected {
+                reason: "informative".into()
+            }
+        );
     }
 
     // ---- Determinism / property tests ----------------------------------
@@ -2013,7 +2194,11 @@ mod tests {
         c.record_bypass("R1", payload, cls("sql"), vec![], 1);
         c.save_atomic(&path).expect("save");
         let r = RuleBypassCorpus::load_or_default(&path, "ignored");
-        assert_eq!(r.bypasses_for_rule("R1")[0].payload, payload, "unicode payload exact");
+        assert_eq!(
+            r.bypasses_for_rule("R1")[0].payload,
+            payload,
+            "unicode payload exact"
+        );
     }
 
     #[test]
@@ -2026,7 +2211,12 @@ mod tests {
         c.save_atomic(&path).expect("save");
         let r = RuleBypassCorpus::load_or_default(&path, "ignored");
         assert_eq!(r.bypasses_for_rule("R1")[0].payload.len(), 1_200_000);
-        assert!(r.bypasses_for_rule("R1")[0].payload.bytes().all(|b| b == b'A'));
+        assert!(
+            r.bypasses_for_rule("R1")[0]
+                .payload
+                .bytes()
+                .all(|b| b == b'A')
+        );
     }
 
     #[test]
@@ -2051,12 +2241,22 @@ mod tests {
         let mut c = RuleBypassCorpus::new("t");
         // 3 distinct pairs, each recorded several times in interleaved order.
         let inputs = [
-            ("p", 1u64), ("q", 1), ("p", 2), ("p", 1), ("q", 1), ("p", 2), ("p", 2),
+            ("p", 1u64),
+            ("q", 1),
+            ("p", 2),
+            ("p", 1),
+            ("q", 1),
+            ("p", 2),
+            ("p", 2),
         ];
         for (p, h) in inputs {
             c.record_bypass("R1", p, cls("sql"), vec![], h);
         }
-        assert_eq!(c.bypasses_for_rule("R1").len(), 3, "only distinct (hash,payload) survive");
+        assert_eq!(
+            c.bypasses_for_rule("R1").len(),
+            3,
+            "only distinct (hash,payload) survive"
+        );
         // Same payload different hash are distinct entries.
         let pairs: std::collections::BTreeSet<(String, u64)> = c
             .bypasses_for_rule("R1")
@@ -2093,7 +2293,10 @@ mod tests {
         c.save_atomic(&path).expect("save");
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(v["schema_version"].as_u64().unwrap(), u64::from(CORPUS_SCHEMA_VERSION));
+        assert_eq!(
+            v["schema_version"].as_u64().unwrap(),
+            u64::from(CORPUS_SCHEMA_VERSION)
+        );
     }
 
     #[test]
@@ -2104,7 +2307,10 @@ mod tests {
         assert_eq!(c.last_saved_at_secs, 0);
         c.save_atomic(&path).expect("save");
         let r = RuleBypassCorpus::load_or_default(&path, "t");
-        assert!(r.last_saved_at_secs > 0, "save must stamp a real epoch second");
+        assert!(
+            r.last_saved_at_secs > 0,
+            "save must stamp a real epoch second"
+        );
     }
 
     #[test]
@@ -2130,8 +2336,15 @@ mod tests {
         let on_disk = std::fs::metadata(&path).unwrap().len();
         assert!(on_disk > 1_000_000, "test corpus should be multi-MB");
         let r = RuleBypassCorpus::load_or_default(&path, "ignored");
-        assert_eq!(r.total_bypasses(), 30 * 50, "all valid bypasses load intact");
-        assert!(corrupt_sidecars(dir.path(), "c.json").is_empty(), "valid file never preserved-aside");
+        assert_eq!(
+            r.total_bypasses(),
+            30 * 50,
+            "all valid bypasses load intact"
+        );
+        assert!(
+            corrupt_sidecars(dir.path(), "c.json").is_empty(),
+            "valid file never preserved-aside"
+        );
     }
 
     #[test]

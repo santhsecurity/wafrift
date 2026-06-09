@@ -180,9 +180,8 @@ impl QuicDatagramAttack {
         Self {
             variant: QuicDatagramVariant::StreamlessPayload,
             datagrams: vec![frame],
-            description:
-                "DATAGRAM frame outside any HTTP/3 stream — WAF sees no HTTP semantic"
-                    .into(),
+            description: "DATAGRAM frame outside any HTTP/3 stream — WAF sees no HTTP semantic"
+                .into(),
             canary: Canary::generate(),
         }
     }
@@ -293,7 +292,10 @@ impl SmuggleProbe for QuicDatagramAttack {
 
     fn artifact(&self) -> SmuggleArtifact {
         SmuggleArtifact::Frames(
-            self.datagrams.iter().map(QuicDatagramFrame::to_bytes).collect(),
+            self.datagrams
+                .iter()
+                .map(QuicDatagramFrame::to_bytes)
+                .collect(),
         )
     }
 }
@@ -379,7 +381,10 @@ mod tests {
     #[test]
     fn at_boundary_size_emits_max_size_payload() {
         let attack = QuicDatagramAttack::at_boundary_size();
-        assert_eq!(attack.datagrams[0].payload.len(), MAX_DATAGRAM_PAYLOAD_BYTES);
+        assert_eq!(
+            attack.datagrams[0].payload.len(),
+            MAX_DATAGRAM_PAYLOAD_BYTES
+        );
     }
 
     #[test]
@@ -391,7 +396,11 @@ mod tests {
             seen.insert(a.variant);
         }
         assert_eq!(seen.len(), v.len(), "no duplicate variants in sweep");
-        assert_eq!(v.len(), 4, "sweep must emit exactly 4 datagram smuggle shapes");
+        assert_eq!(
+            v.len(),
+            4,
+            "sweep must emit exactly 4 datagram smuggle shapes"
+        );
     }
 
     #[test]
@@ -541,8 +550,7 @@ mod tests {
         // must not overflow or panic — quic_varint handles up to 62-bit
         // values in the 8-byte form. u64::MAX (63-bit set) saturates to
         // the QUIC 8-byte varint ceiling 0x3FFF_FFFF_FFFF_FFFF.
-        let attack =
-            QuicDatagramAttack::unregistered_quarter_stream(u64::MAX, b"x".to_vec());
+        let attack = QuicDatagramAttack::unregistered_quarter_stream(u64::MAX, b"x".to_vec());
         let frame = &attack.datagrams[0];
         // 8-byte varint + 1 payload byte = 9 bytes total — well under cap.
         let (decoded_id, n) = quic_varint_decode(&frame.payload, 0).expect("large qs-id varint");

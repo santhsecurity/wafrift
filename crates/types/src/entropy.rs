@@ -171,10 +171,7 @@ mod tests {
         for step in 0..=1000 {
             let p = step as f64 / 1000.0;
             let h = binary_shannon(p);
-            assert!(
-                (0.0..=1.0).contains(&h),
-                "H({p})={h} escaped [0,1]"
-            );
+            assert!((0.0..=1.0).contains(&h), "H({p})={h} escaped [0,1]");
         }
     }
 

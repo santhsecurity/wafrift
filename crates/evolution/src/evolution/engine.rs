@@ -59,7 +59,7 @@ pub struct EvolutionEngine {
     /// Saved bypass corpus.
     pub corpus: BypassCorpus,
     /// WAF rule-coverage accumulator.  Tracks (payload_class × rule_id) cells
-    /// observed during the run.  Populated by [`submit_batch`] when the oracle
+    /// observed during the run.  Populated by `submit_batch` when the oracle
     /// result carries a `rule_id` (via `OracleVerdict::rule_id`).
     pub rule_coverage: RuleCoverage,
     /// WAFBooster importance scorer.  Updated on every oracle result and used
@@ -371,11 +371,11 @@ impl EvolutionEngine {
                     (eval_id, chrom, score)
                 })
                 .collect();
-            scored.sort_by(|a, b| {
-                a.2.partial_cmp(&b.2)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            result = scored.into_iter().map(|(id, chrom, _)| (id, chrom)).collect();
+            scored.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+            result = scored
+                .into_iter()
+                .map(|(id, chrom, _)| (id, chrom))
+                .collect();
         }
 
         result
@@ -439,10 +439,7 @@ impl EvolutionEngine {
                 .filter(|v| *v != "None")
                 .unwrap_or("")
                 .to_string();
-            let (_, _cov_rid) = map_elites_descriptor(
-                &coverage_signal,
-                verdict.rule_id.as_deref(),
-            );
+            let (_, _cov_rid) = map_elites_descriptor(&coverage_signal, verdict.rule_id.as_deref());
             self.rule_coverage
                 .record(&coverage_signal, verdict.rule_id.as_deref());
 
@@ -458,8 +455,7 @@ impl EvolutionEngine {
                 if passed {
                     self.booster.observe_pass(&key);
                 } else {
-                    self.booster
-                        .observe_block(&key, verdict.rule_id.as_deref());
+                    self.booster.observe_block(&key, verdict.rule_id.as_deref());
                 }
             }
 

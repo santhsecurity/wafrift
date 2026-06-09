@@ -40,8 +40,7 @@ pub fn plan_pipelines(
             // > 1.0). Bare `as u16` would wrap silently above
             // ~6.55× — saturating at 10_000 bps (100%) is the
             // semantically-correct ceiling for a rate metric.
-            cached.success_bps =
-                ((entry.success_rate() * 10000.0).clamp(0.0, 10_000.0)) as u16;
+            cached.success_bps = ((entry.success_rate() * 10000.0).clamp(0.0, 10_000.0)) as u16;
             if within_budget(cached.cost, budget) {
                 pipelines.push(cached);
             }

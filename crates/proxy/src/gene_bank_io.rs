@@ -60,8 +60,7 @@ pub fn default_gene_bank_path(supplied: &str) -> Option<PathBuf> {
         // persistence for every Windows user with no warning. The
         // sibling `trust.rs::default_path()` already falls back to
         // `USERPROFILE`; matching here.
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))?;
+        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
         let p = PathBuf::from(home).join(".wafrift").join("gene-bank.json");
         Some(p)
     } else if supplied == "off" || supplied == "-" {
@@ -130,9 +129,8 @@ pub fn load(path: &Path) -> PersistedGeneBank {
             // tag, or we'd silently lose that host's discovery.
             match serde_json::from_str::<serde_json::Value>(&s) {
                 Ok(serde_json::Value::Object(map)) => {
-                    let has_numeric_schema = map
-                        .get("schema")
-                        .is_some_and(serde_json::Value::is_u64);
+                    let has_numeric_schema =
+                        map.get("schema").is_some_and(serde_json::Value::is_u64);
                     if has_numeric_schema {
                         let value = serde_json::Value::Object(map);
                         match serde_json::from_value::<PersistedGeneBank>(value) {
@@ -419,7 +417,10 @@ mod tests {
         }"#;
         std::fs::write(&path, legacy).unwrap();
         let bank = load(&path);
-        assert_eq!(bank.schema, 1, "must migrate to schema 1, not treat 'schema' as a version tag");
+        assert_eq!(
+            bank.schema, 1,
+            "must migrate to schema 1, not treat 'schema' as a version tag"
+        );
         let host = bank
             .hosts
             .get("schema")

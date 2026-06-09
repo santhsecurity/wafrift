@@ -39,7 +39,10 @@ fn bypass_verdict() -> OracleVerdict {
 fn with_algorithm_ast_mcts_succeeds() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(1);
-    let budget = Budget { max_requests: 20, ..Default::default() };
+    let budget = Budget {
+        max_requests: 20,
+        ..Default::default()
+    };
     let engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget);
     assert!(engine.is_ok(), "with_algorithm(\"ast_mcts\") must succeed");
 }
@@ -60,9 +63,11 @@ fn with_algorithm_unknown_is_still_rejected() {
 fn ast_mcts_engine_produces_candidates() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(3);
-    let budget = Budget { max_requests: 10, ..Default::default() };
-    let mut engine =
-        EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
+    let budget = Budget {
+        max_requests: 10,
+        ..Default::default()
+    };
+    let mut engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
     engine.seed_population(make_sql_seed("'a'='a'"));
 
     let candidates = engine.batch_candidates(4);
@@ -76,9 +81,11 @@ fn ast_mcts_engine_produces_candidates() {
 fn ast_mcts_candidates_carry_ast_mcts_payload_gene() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(4);
-    let budget = Budget { max_requests: 20, ..Default::default() };
-    let mut engine =
-        EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
+    let budget = Budget {
+        max_requests: 20,
+        ..Default::default()
+    };
+    let mut engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
     engine.seed_population(make_sql_seed("1=1"));
 
     let candidates = engine.batch_candidates(6);
@@ -100,7 +107,10 @@ fn ast_mcts_payload_distribution_differs_from_hill_climbing() {
     {
         let pool = GenePool::default_wafrift();
         let rng = StdRng::seed_from_u64(0xABC);
-        let budget = Budget { max_requests: budget_size, ..Default::default() };
+        let budget = Budget {
+            max_requests: budget_size,
+            ..Default::default()
+        };
         let mut engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
         engine.seed_population(make_sql_seed(payload));
         while !engine.should_terminate() {
@@ -122,8 +132,12 @@ fn ast_mcts_payload_distribution_differs_from_hill_climbing() {
     {
         let pool = GenePool::default_wafrift();
         let rng = StdRng::seed_from_u64(0xABC);
-        let budget = Budget { max_requests: budget_size, ..Default::default() };
-        let mut engine = EvolutionEngine::with_algorithm("hill_climbing", pool, rng, budget).unwrap();
+        let budget = Budget {
+            max_requests: budget_size,
+            ..Default::default()
+        };
+        let mut engine =
+            EvolutionEngine::with_algorithm("hill_climbing", pool, rng, budget).unwrap();
         engine.seed_population(make_sql_seed(payload));
         while !engine.should_terminate() {
             let batch = engine.batch_candidates(3);
@@ -147,8 +161,7 @@ fn ast_mcts_payload_distribution_differs_from_hill_climbing() {
         "AST-MCTS must produce candidates for a SQL seed"
     );
     // The payloads should not ALL be identical to the original.
-    let unique: std::collections::HashSet<&str> =
-        ast_payloads.iter().map(String::as_str).collect();
+    let unique: std::collections::HashSet<&str> = ast_payloads.iter().map(String::as_str).collect();
     // At least one rewritten variant must appear (the MCTS explores 16 rules × 4 positions).
     assert!(
         !unique.is_empty(),
@@ -161,9 +174,11 @@ fn hill_climbing_still_works_backward_compat() {
     // When --mutator default is used, existing algorithms must behave identically.
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(0xDEAD);
-    let budget = Budget { max_requests: 10, ..Default::default() };
-    let mut engine =
-        EvolutionEngine::with_algorithm("hill_climbing", pool, rng, budget).unwrap();
+    let budget = Budget {
+        max_requests: 10,
+        ..Default::default()
+    };
+    let mut engine = EvolutionEngine::with_algorithm("hill_climbing", pool, rng, budget).unwrap();
     // Backward-compat: hill_climbing still initializes and produces candidates.
     let candidates = engine.batch_candidates(4);
     assert!(!candidates.is_empty());
@@ -173,9 +188,11 @@ fn hill_climbing_still_works_backward_compat() {
 fn map_elites_still_works_backward_compat() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(0xBEEF);
-    let budget = Budget { max_requests: 10, ..Default::default() };
-    let mut engine =
-        EvolutionEngine::with_algorithm("map_elites", pool, rng, budget).unwrap();
+    let budget = Budget {
+        max_requests: 10,
+        ..Default::default()
+    };
+    let mut engine = EvolutionEngine::with_algorithm("map_elites", pool, rng, budget).unwrap();
     let candidates = engine.batch_candidates(4);
     assert!(!candidates.is_empty());
 }
@@ -184,9 +201,11 @@ fn map_elites_still_works_backward_compat() {
 fn novelty_search_still_works_backward_compat() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(0xCAFE);
-    let budget = Budget { max_requests: 10, ..Default::default() };
-    let mut engine =
-        EvolutionEngine::with_algorithm("novelty_search", pool, rng, budget).unwrap();
+    let budget = Budget {
+        max_requests: 10,
+        ..Default::default()
+    };
+    let mut engine = EvolutionEngine::with_algorithm("novelty_search", pool, rng, budget).unwrap();
     let candidates = engine.batch_candidates(4);
     assert!(!candidates.is_empty());
 }
@@ -204,7 +223,10 @@ fn ast_mcts_deterministic_per_seed() {
     let run = |seed: u64| -> Vec<String> {
         let pool = GenePool::default_wafrift();
         let rng = StdRng::seed_from_u64(seed);
-        let budget = Budget { max_requests: budget_size, ..Default::default() };
+        let budget = Budget {
+            max_requests: budget_size,
+            ..Default::default()
+        };
         let mut engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
         engine.seed_population(make_sql_seed(payload));
         let mut seen = Vec::new();
@@ -267,7 +289,10 @@ fn ast_mcts_algorithm_checkpoint_roundtrip() {
     // Capture state before checkpoint.
     use wafrift_evolution::types::{Budget as Bgt, SearchStats};
     let stats = SearchStats::new();
-    let bgt = Bgt { max_requests: 1000, ..Default::default() };
+    let bgt = Bgt {
+        max_requests: 1000,
+        ..Default::default()
+    };
     let was_terminated = alg.should_terminate(&stats, &bgt);
     let best_payload_before = alg
         .best()
@@ -296,13 +321,15 @@ fn ast_mcts_algorithm_checkpoint_roundtrip() {
     );
 }
 
-
 #[test]
 fn ast_mcts_budget_is_honoured() {
     let pool = GenePool::default_wafrift();
     let rng = StdRng::seed_from_u64(0xFF);
     let max = 6usize;
-    let budget = Budget { max_requests: max, ..Default::default() };
+    let budget = Budget {
+        max_requests: max,
+        ..Default::default()
+    };
     let mut engine = EvolutionEngine::with_algorithm("ast_mcts", pool, rng, budget).unwrap();
     engine.seed_population(make_sql_seed("'a' OR 'a'='a'"));
 
@@ -346,7 +373,10 @@ fn ast_mcts_updates_best_on_bypass() {
     // bypass_found should now be true → should_terminate returns true.
     use wafrift_evolution::types::{Budget, SearchStats};
     let stats = SearchStats::new();
-    let budget = Budget { max_requests: 1000, ..Default::default() };
+    let budget = Budget {
+        max_requests: 1000,
+        ..Default::default()
+    };
     assert!(
         alg.should_terminate(&stats, &budget),
         "algorithm must terminate immediately after a bypass is confirmed"

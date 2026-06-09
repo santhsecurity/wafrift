@@ -22,7 +22,10 @@ fn enumerates_verified_policy_differentials_as_json() {
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     assert_eq!(v["schema"], "wafrift.tcp_overlap.v1");
     let diffs = v["differentials"].as_array().expect("differentials array");
-    assert!(!diffs.is_empty(), "some policy pair must disagree: {stdout}");
+    assert!(
+        !diffs.is_empty(),
+        "some policy pair must disagree: {stdout}"
+    );
     for d in diffs {
         // The contract: WAF view is benign, origin view is attack, policies differ.
         assert_eq!(d["waf_view"], "GET /safe");
@@ -38,13 +41,21 @@ fn enumerates_verified_policy_differentials_as_json() {
 #[test]
 fn the_canonical_first_to_last_pair_is_present() {
     let (code, stdout, _e) = wafrift(&[
-        "tcp-overlap", "--benign", "AAAA", "--attack", "BBBB", "--format", "json",
+        "tcp-overlap",
+        "--benign",
+        "AAAA",
+        "--attack",
+        "BBBB",
+        "--format",
+        "json",
     ]);
     assert_eq!(code, 0);
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     let diffs = v["differentials"].as_array().unwrap();
     assert!(
-        diffs.iter().any(|d| d["waf_policy"] == "first" && d["origin_policy"] == "last"),
+        diffs
+            .iter()
+            .any(|d| d["waf_policy"] == "first" && d["origin_policy"] == "last"),
         "the canonical first→last evasion must appear: {stdout}"
     );
 }
@@ -76,9 +87,13 @@ fn a_specific_policy_pair_can_be_targeted() {
 fn unequal_length_inputs_exit_4_with_explanation() {
     let (code, stdout, _e) =
         wafrift(&["tcp-overlap", "--benign", "short", "--attack", "muchlonger"]);
-    assert_eq!(code, 4, "no clean full-overlap differential for unequal lengths");
+    assert_eq!(
+        code, 4,
+        "no clean full-overlap differential for unequal lengths"
+    );
     assert!(
-        stdout.to_lowercase().contains("equal length") || stdout.to_lowercase().contains("no differential"),
+        stdout.to_lowercase().contains("equal length")
+            || stdout.to_lowercase().contains("no differential"),
         "must explain why: {stdout}"
     );
 }

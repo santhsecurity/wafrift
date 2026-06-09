@@ -34,8 +34,7 @@ fn strip_alg_changes_alg_to_none() {
     assert_eq!(parts.len(), 3);
     assert!(parts[2].is_empty()); // signature removed
 
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert_eq!(header["alg"], "none");
 }
 
@@ -53,8 +52,7 @@ fn strip_alg_on_already_none_jwt() {
     let token = alg_none_jwt();
     let result = manipulate(&token, &JwtManipulation::StripAlg, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert_eq!(header["alg"], "none");
 }
 
@@ -68,8 +66,7 @@ fn hs256_changes_alg() {
     let parts: Vec<&str> = result.split('.').collect();
     assert_eq!(parts.len(), 3);
 
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert_eq!(header["alg"], "HS256");
 }
 
@@ -97,8 +94,7 @@ fn jwk_embed_adds_jwk_to_header() {
     let result = manipulate(&token, &JwtManipulation::JwkEmbed { jwk: jwk.into() }, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
 
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert!(header["jwk"].is_object());
     assert_eq!(header["jwk"]["kty"], "RSA");
 }
@@ -183,11 +179,16 @@ fn strip_alg_on_hs256_produces_alg_none() {
     let result = manipulate(&token, &JwtManipulation::StripAlg, None).unwrap();
     let parts: Vec<&str> = result.split('.').collect();
     assert_eq!(parts.len(), 3, "result must have three dot-delimited parts");
-    assert!(parts[2].is_empty(), "signature part must be stripped for alg:none");
+    assert!(
+        parts[2].is_empty(),
+        "signature part must be stripped for alg:none"
+    );
 
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
-    assert_eq!(header["alg"], "none", "alg field must be rewritten to 'none'");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    assert_eq!(
+        header["alg"], "none",
+        "alg field must be rewritten to 'none'"
+    );
 }
 
 /// StripAlg on an HS256 token must preserve the payload claim-set unchanged.
@@ -214,13 +215,15 @@ fn hs256_with_key_on_hs256_token_roundtrips_alg() {
     let parts: Vec<&str> = result.split('.').collect();
     assert_eq!(parts.len(), 3);
 
-    let header: serde_json::Value =
-        decode_b64url_json(parts[0]).expect("valid base64url JSON");
+    let header: serde_json::Value = decode_b64url_json(parts[0]).expect("valid base64url JSON");
     assert_eq!(
         header["alg"], "HS256",
         "HS256 output of Hs256WithKey must keep alg:HS256"
     );
-    assert!(!parts[2].is_empty(), "signature must be present after HS256 re-signing");
+    assert!(
+        !parts[2].is_empty(),
+        "signature must be present after HS256 re-signing"
+    );
 }
 
 // ── Determinism ────────────────────────────────────────────────────────────

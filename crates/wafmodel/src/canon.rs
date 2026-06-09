@@ -263,8 +263,7 @@ mod tests {
     #[test]
     fn form_body_with_mixed_case_content_type_still_splits_into_args() {
         // The F131 case: capital Application/X-WWW-Form-URLencoded.
-        let r =
-            req_with_content_type("Application/X-WWW-Form-URLencoded", b"a=1&b=2");
+        let r = req_with_content_type("Application/X-WWW-Form-URLencoded", b"a=1&b=2");
         let view = canonicalize(&r);
         let names: Vec<_> = view
             .channel(Channel::ArgName)
@@ -283,8 +282,7 @@ mod tests {
 
     #[test]
     fn form_body_with_uppercase_content_type_still_splits_into_args() {
-        let r =
-            req_with_content_type("APPLICATION/X-WWW-FORM-URLENCODED", b"x=y");
+        let r = req_with_content_type("APPLICATION/X-WWW-FORM-URLENCODED", b"x=y");
         let view = canonicalize(&r);
         assert_eq!(view.channel(Channel::ArgName)[0], b"x");
         assert_eq!(view.channel(Channel::ArgValue)[0], b"y");
@@ -294,10 +292,7 @@ mod tests {
     fn form_body_with_charset_parameter_splits_into_args() {
         // Parameters after `;` are case-sensitive (per RFC) but
         // shouldn't affect type/subtype matching.
-        let r = req_with_content_type(
-            "application/x-www-form-urlencoded; charset=UTF-8",
-            b"k=v",
-        );
+        let r = req_with_content_type("application/x-www-form-urlencoded; charset=UTF-8", b"k=v");
         let view = canonicalize(&r);
         assert_eq!(view.channel(Channel::ArgName)[0], b"k");
     }
@@ -315,10 +310,7 @@ mod tests {
         // application/x-www-form-urlencoded-NOT-REALLY shouldn't
         // pass — the eq_ignore_ascii_case is on the whole token, not
         // a starts_with.
-        let r = req_with_content_type(
-            "application/x-www-form-urlencoded-extra",
-            b"a=1",
-        );
+        let r = req_with_content_type("application/x-www-form-urlencoded-extra", b"a=1");
         let view = canonicalize(&r);
         assert!(view.channel(Channel::ArgName).is_empty());
         assert_eq!(view.channel(Channel::Body)[0], b"a=1");

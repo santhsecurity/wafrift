@@ -28,20 +28,20 @@
 //! - The caller feeds frames to the QUIC stack in order
 
 pub mod capsule;
+pub mod mtu_fragmentation;
 pub mod qpack;
 pub mod quic_cid;
 pub mod quic_datagram;
-pub mod zero_rtt;
 pub mod stream_priority;
-pub mod mtu_fragmentation;
+pub mod zero_rtt;
 
 pub use capsule::{CapsuleFrame, CapsuleSmuggleAttack, CapsuleSmuggleVariant};
+pub use mtu_fragmentation::{MtuFragmentationAttack, QuicCryptoFragment};
 pub use qpack::{QpackDesyncAttack, QpackDesyncVariant, QpackEncoder};
 pub use quic_cid::{CidRotationStrategy, ConnectionIdGenerator};
 pub use quic_datagram::{QuicDatagramAttack, QuicDatagramFrame, QuicDatagramVariant};
-pub use zero_rtt::{ZeroRttReplayBuilder, ZeroRttPayload};
 pub use stream_priority::{H3PriorityAttack, H3PriorityVariant, PriorityUpdateFrame};
-pub use mtu_fragmentation::{MtuFragmentationAttack, QuicCryptoFragment};
+pub use zero_rtt::{ZeroRttPayload, ZeroRttReplayBuilder};
 
 /// A single wire-format frame to inject into the QUIC/HTTP3 stream.
 #[derive(Debug, Clone)]
@@ -105,13 +105,27 @@ impl EvasionTechnique {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::QpackDesync => "QPACK dynamic table desync — forged encoder instructions corrupt WAF decoder",
-            Self::CidRotation => "QUIC CID rotation — shards one session across multiple WAF state buckets",
-            Self::ZeroRttReplay => "0-RTT replay — application data before TLS handshake; WAF inspection blind spot",
-            Self::StreamPriorityTopology => "HTTP/3 PRIORITY_UPDATE topology — confuses WAF multiplexing reassemblers",
-            Self::MtuFragmentation => "QUIC MTU fragmentation — below-threshold fragment sizes evade DPI reassembly",
-            Self::CapsuleProtocolSmuggle => "HTTP Capsule Protocol (RFC 9297) — payload rides inside opaque capsules; WAF sees flat body, CONNECT-UDP/IP/WebTransport origin parses values",
-            Self::QuicDatagramSmuggle => "QUIC DATAGRAM (RFC 9221) — payload outside any HTTP/3 stream; WAF inspecting HTTP semantic misses it entirely",
+            Self::QpackDesync => {
+                "QPACK dynamic table desync — forged encoder instructions corrupt WAF decoder"
+            }
+            Self::CidRotation => {
+                "QUIC CID rotation — shards one session across multiple WAF state buckets"
+            }
+            Self::ZeroRttReplay => {
+                "0-RTT replay — application data before TLS handshake; WAF inspection blind spot"
+            }
+            Self::StreamPriorityTopology => {
+                "HTTP/3 PRIORITY_UPDATE topology — confuses WAF multiplexing reassemblers"
+            }
+            Self::MtuFragmentation => {
+                "QUIC MTU fragmentation — below-threshold fragment sizes evade DPI reassembly"
+            }
+            Self::CapsuleProtocolSmuggle => {
+                "HTTP Capsule Protocol (RFC 9297) — payload rides inside opaque capsules; WAF sees flat body, CONNECT-UDP/IP/WebTransport origin parses values"
+            }
+            Self::QuicDatagramSmuggle => {
+                "QUIC DATAGRAM (RFC 9221) — payload outside any HTTP/3 stream; WAF inspecting HTTP semantic misses it entirely"
+            }
         }
     }
 }
@@ -136,13 +150,13 @@ mod tests {
 
     #[test]
     fn all_techniques_descriptions_are_distinct() {
-        let descs: Vec<&str> = EvasionTechnique::all().iter().map(|t| t.description()).collect();
+        let descs: Vec<&str> = EvasionTechnique::all()
+            .iter()
+            .map(|t| t.description())
+            .collect();
         let mut seen = std::collections::HashSet::new();
         for desc in &descs {
-            assert!(
-                seen.insert(*desc),
-                "duplicate description detected: {desc}"
-            );
+            assert!(seen.insert(*desc), "duplicate description detected: {desc}");
         }
     }
 
@@ -155,13 +169,34 @@ mod tests {
         let all = EvasionTechnique::all();
         // Verify every concrete variant is present.
         let has = |t: EvasionTechnique| all.contains(&t);
-        assert!(has(EvasionTechnique::QpackDesync), "QpackDesync missing from all()");
-        assert!(has(EvasionTechnique::CidRotation), "CidRotation missing from all()");
-        assert!(has(EvasionTechnique::ZeroRttReplay), "ZeroRttReplay missing from all()");
-        assert!(has(EvasionTechnique::StreamPriorityTopology), "StreamPriorityTopology missing from all()");
-        assert!(has(EvasionTechnique::MtuFragmentation), "MtuFragmentation missing from all()");
-        assert!(has(EvasionTechnique::CapsuleProtocolSmuggle), "CapsuleProtocolSmuggle missing from all()");
-        assert!(has(EvasionTechnique::QuicDatagramSmuggle), "QuicDatagramSmuggle missing from all()");
+        assert!(
+            has(EvasionTechnique::QpackDesync),
+            "QpackDesync missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::CidRotation),
+            "CidRotation missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::ZeroRttReplay),
+            "ZeroRttReplay missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::StreamPriorityTopology),
+            "StreamPriorityTopology missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::MtuFragmentation),
+            "MtuFragmentation missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::CapsuleProtocolSmuggle),
+            "CapsuleProtocolSmuggle missing from all()"
+        );
+        assert!(
+            has(EvasionTechnique::QuicDatagramSmuggle),
+            "QuicDatagramSmuggle missing from all()"
+        );
     }
 
     // ── serde round-trip ──────────────────────────────────────────────────

@@ -26,7 +26,11 @@ fn collect_probes() -> Vec<Box<dyn SmuggleProbe>> {
     vec![
         Box::new(CookieSmuggleProbe::empty_name_pair("v")),
         Box::new(CookieSmuggleProbe::duplicate_name_last_wins("a", "x", "y")),
-        Box::new(AuthSmuggleProbe::lowercase_scheme("Authorization", "Bearer", "T")),
+        Box::new(AuthSmuggleProbe::lowercase_scheme(
+            "Authorization",
+            "Bearer",
+            "T",
+        )),
         Box::new(AuthSmuggleProbe::duplicate_header_first_wins_benign(
             "Authorization",
             "Bearer",
@@ -44,19 +48,25 @@ fn trait_is_object_safe_across_all_three_families() {
     // the trait is object-safe. The compiler will reject a non-safe
     // signature, so this test is the canary.
     let probes = collect_probes();
-    assert_eq!(probes.len(), 6, "expected six probes in the cross-family bundle");
+    assert_eq!(
+        probes.len(),
+        6,
+        "expected six probes in the cross-family bundle"
+    );
 }
 
 #[test]
 fn every_probe_returns_a_distinct_canary() {
     let probes = collect_probes();
-    let canaries: std::collections::HashSet<String> = probes
-        .iter()
-        .map(|p| p.canary().token.clone())
-        .collect();
+    let canaries: std::collections::HashSet<String> =
+        probes.iter().map(|p| p.canary().token.clone()).collect();
     // The very point of the per-probe canary is unique correlation;
     // six independent constructions must produce six distinct tokens.
-    assert_eq!(canaries.len(), probes.len(), "canaries must be unique per probe");
+    assert_eq!(
+        canaries.len(),
+        probes.len(),
+        "canaries must be unique per probe"
+    );
 }
 
 #[test]
@@ -79,13 +89,7 @@ fn family_identifiers_partition_into_three_distinct_namespaces() {
     let probes = collect_probes();
     let families: std::collections::HashSet<String> = probes
         .iter()
-        .map(|p| {
-            p.technique()
-                .split('.')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        })
+        .map(|p| p.technique().split('.').next().unwrap_or("").to_string())
         .collect();
     // Three distinct families across the six probes.
     assert!(families.contains("cookie"));
@@ -192,8 +196,9 @@ fn compose_header_plus_real_multipart_body() {
         ("token".to_string(), "smuggled".to_string()),
     ];
     let multipart_variants = generate_smuggle_variants(&params);
-    let multipart: &ContentTypeVariant =
-        multipart_variants.first().expect("multipart sweep emits >=1");
+    let multipart: &ContentTypeVariant = multipart_variants
+        .first()
+        .expect("multipart sweep emits >=1");
 
     let probes: Vec<&dyn SmuggleProbe> = vec![&cookie, multipart];
     let composed = compose_artifacts(&probes);
@@ -202,7 +207,10 @@ fn compose_header_plus_real_multipart_body() {
     // still recoverable from the original probe instances.
     assert_eq!(composed.headers.len(), 1, "exactly one Cookie header line");
     let (ct, body) = composed.body.as_ref().expect("multipart body present");
-    assert!(ct.starts_with("multipart/"), "body CT must be multipart, got: {ct}");
+    assert!(
+        ct.starts_with("multipart/"),
+        "body CT must be multipart, got: {ct}"
+    );
     assert!(!body.is_empty(), "multipart body must be non-empty");
 
     // Techniques tagged in input order, families come from the right
@@ -314,10 +322,7 @@ fn compose_cookie_plus_path_chains_into_one_request() {
     // request, two parser-differential surfaces — the headline value
     // proposition of the path family.
     let cookie = CookieSmuggleProbe::duplicate_name_last_wins("session", "guest", "admin");
-    let path = PathSmuggleProbe::new(
-        PathNormalizeTechnique::DotSegmentEncoded,
-        "/admin",
-    );
+    let path = PathSmuggleProbe::new(PathNormalizeTechnique::DotSegmentEncoded, "/admin");
     let probes: Vec<&dyn SmuggleProbe> = vec![&cookie, &path];
     let composed = compose_artifacts(&probes);
 

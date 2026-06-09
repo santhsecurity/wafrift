@@ -208,7 +208,10 @@ pub fn all_cache_poison_payloads(
     ];
     // Add cache-deception path variants — they're URL forms not
     // headers, but join into the variant set for completeness.
-    for (i, p) in web_cache_deception_paths(target_path).into_iter().enumerate() {
+    for (i, p) in web_cache_deception_paths(target_path)
+        .into_iter()
+        .enumerate()
+    {
         out.push((
             match i {
                 0 => "deception-css",
@@ -258,10 +261,7 @@ mod tests {
 
     #[test]
     fn x_original_url_basic() {
-        assert_eq!(
-            x_original_url("/admin"),
-            "X-Original-URL: /admin"
-        );
+        assert_eq!(x_original_url("/admin"), "X-Original-URL: /admin");
     }
 
     #[test]

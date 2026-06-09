@@ -147,9 +147,7 @@ impl CapsuleFrame {
     /// Serialize to bytes per RFC 9297 §3.2.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let declared = self
-            .overdeclared_length
-            .unwrap_or(self.value.len() as u64);
+        let declared = self.overdeclared_length.unwrap_or(self.value.len() as u64);
         // Saturating add: if `value` was constructed directly (bypassing
         // `new()`) with a pathologically large vec, adding 16 to
         // `value.len()` could wrap on 32-bit targets. Saturating keeps
@@ -224,7 +222,9 @@ impl CapsuleSmuggleAttack {
         Self {
             variant: CapsuleSmuggleVariant::OpaqueDatagramPayload,
             capsules: vec![cap],
-            description: "DATAGRAM capsule wraps payload — WAF sees opaque body, origin sees UDP-style frame".into(),
+            description:
+                "DATAGRAM capsule wraps payload — WAF sees opaque body, origin sees UDP-style frame"
+                    .into(),
             canary: Canary::generate(),
         }
     }
@@ -276,7 +276,8 @@ impl CapsuleSmuggleAttack {
     pub fn overdeclared_length(payload: Vec<u8>, declared_extra: u64) -> Self {
         let actual = payload.len() as u64;
         let declared = actual.saturating_add(declared_extra);
-        let cap = CapsuleFrame::new(capsule_type::DATAGRAM, payload).with_overdeclared_length(declared);
+        let cap =
+            CapsuleFrame::new(capsule_type::DATAGRAM, payload).with_overdeclared_length(declared);
         Self {
             variant: CapsuleSmuggleVariant::OverdeclaredLength,
             capsules: vec![cap],
@@ -388,7 +389,7 @@ impl SmuggleProbe for CapsuleSmuggleAttack {
 ///
 /// **Type-value randomisation.** The `UnknownTypeSmuggle` and inner-
 /// capsule type of `NestedCapsule` are drawn from
-/// [`UNALLOCATED_TYPE_POOL`] per call rather than hardcoded — a WAF
+/// `UNALLOCATED_TYPE_POOL` per call rather than hardcoded — a WAF
 /// that learns "block any capsule with type 0x2fffff" would otherwise
 /// pin wafrift's signature after one observed run. The pool entries
 /// all sit in the unallocated IANA capsule-type range and all fit
@@ -414,14 +415,7 @@ pub fn all_variants(payload: &[u8]) -> Vec<CapsuleSmuggleAttack> {
 /// 4-byte QUIC varint band (≤ 0x3FFF_FFFF). Picking per-call defeats
 /// the trivial "pin 0x2fffff" signature pattern.
 pub(crate) const UNALLOCATED_TYPE_POOL: &[u64] = &[
-    0x2f_ffff,
-    0x4_2424,
-    0x10_0000,
-    0x20_0000,
-    0xab_cdef,
-    0x3f_aaaa,
-    0x05_dead,
-    0x06_beef,
+    0x2f_ffff, 0x4_2424, 0x10_0000, 0x20_0000, 0xab_cdef, 0x3f_aaaa, 0x05_dead, 0x06_beef,
 ];
 
 #[cfg(test)]
@@ -455,8 +449,7 @@ mod tests {
         let (_t, n1) = quic_varint_decode(&bytes, 0).expect("type varint");
         let (l, _n2) = quic_varint_decode(&bytes, n1).expect("length varint");
         assert_eq!(
-            l as usize,
-            MAX_CAPSULE_VALUE_BYTES,
+            l as usize, MAX_CAPSULE_VALUE_BYTES,
             "serialized length must match truncated value length"
         );
     }
@@ -531,7 +524,11 @@ mod tests {
         }
         assert_eq!(seen.len(), v.len(), "no duplicate variants");
         // Pin the count so any silent removal breaks here.
-        assert_eq!(v.len(), 6, "sweep must emit exactly 6 capsule smuggle shapes");
+        assert_eq!(
+            v.len(),
+            6,
+            "sweep must emit exactly 6 capsule smuggle shapes"
+        );
     }
 
     #[test]
@@ -567,12 +564,7 @@ mod tests {
         // — 1-byte (63), 2-byte (16383), 4-byte (1073741823),
         // 8-byte. Anti-rig: a regression in varint encoding/decoding
         // would silently mis-frame every capsule.
-        for &t in &[
-            63_u64,
-            16_383,
-            1_073_741_823,
-            4_611_686_018_427_387_903,
-        ] {
+        for &t in &[63_u64, 16_383, 1_073_741_823, 4_611_686_018_427_387_903] {
             let cap = CapsuleFrame::new(t, b"v".to_vec());
             let bytes = cap.to_bytes();
             let (decoded, _) = quic_varint_decode(&bytes, 0).expect("type round-trip");
@@ -695,8 +687,7 @@ mod tests {
     fn overdeclared_length_with_zero_actual_payload() {
         // Boundary: empty value + overdeclared > 0 is the extreme case.
         // Receiver sees a length varint claiming N bytes but finds 0.
-        let cap = CapsuleFrame::new(capsule_type::DATAGRAM, vec![])
-            .with_overdeclared_length(500);
+        let cap = CapsuleFrame::new(capsule_type::DATAGRAM, vec![]).with_overdeclared_length(500);
         let bytes = cap.to_bytes();
         let (_t, n1) = quic_varint_decode(&bytes, 0).unwrap();
         let (l, n2) = quic_varint_decode(&bytes, n1).unwrap();
@@ -809,7 +800,11 @@ mod tests {
         let (t, n1) = quic_varint_decode(&bytes, 0).expect("type varint");
         let (l, _n2) = quic_varint_decode(&bytes, n1).expect("length varint");
         assert_eq!(t, capsule_type::DATAGRAM);
-        assert_eq!(l as usize, big_value.len(), "direct-constructed frame length must reflect full value");
+        assert_eq!(
+            l as usize,
+            big_value.len(),
+            "direct-constructed frame length must reflect full value"
+        );
     }
 
     #[test]

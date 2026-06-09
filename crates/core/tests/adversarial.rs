@@ -6,9 +6,9 @@
 use wafrift_core::content_type::{self, ContentTypeTechnique};
 use wafrift_core::encoding::{self, Strategy};
 use wafrift_core::fingerprint::{self, PROFILES, apply_profile};
-use wafrift_core::{EscalationLevel, EvasionConfig};
 use wafrift_core::strategy::{HostState, evade};
 use wafrift_core::waf_detect;
+use wafrift_core::{EscalationLevel, EvasionConfig};
 use wafrift_core::{Request, Technique};
 
 // ============================================================================

@@ -59,7 +59,7 @@ pub struct Production {
     pub terminal: String,
     /// Human-readable label. Read by [`CfgMutator::reward_by_name`] for
     /// name-keyed oracle feedback. Wired via [`CfgMutatorState::reward`]
-    /// and the public [`feedback`] function — no longer dead code as of
+    /// and the public `feedback` function — no longer dead code as of
     /// R56 pass-21.
     pub name: &'static str,
     /// Bypass score — updated by the caller when this production's output
@@ -96,17 +96,7 @@ pub fn default_sql_productions() -> Vec<Production> {
 
     // {ws} — whitespace alternatives
     for &ws in &[
-        " ",
-        "\t",
-        "\n",
-        "/**/",
-        "/**_*/",
-        "/*!*/",
-        "%20",
-        "%09",
-        "%0a",
-        "%0d",
-        "%a0",
+        " ", "\t", "\n", "/**/", "/**_*/", "/*!*/", "%20", "%09", "%0a", "%0d", "%a0",
     ] {
         prods.push(Production::new("{ws}", ws, "ws_variant"));
     }
@@ -118,15 +108,7 @@ pub fn default_sql_productions() -> Vec<Production> {
 
     // {or} — OR operator variants
     for &op in &[
-        "OR",
-        "||",
-        "or",
-        "Or",
-        "oR",
-        "OR/**/",
-        "/*!OR*/",
-        "O/**/R",
-        "OORR",
+        "OR", "||", "or", "Or", "oR", "OR/**/", "/*!OR*/", "O/**/R", "OORR",
     ] {
         prods.push(Production::new("{or}", op, "or_operator"));
     }
@@ -137,7 +119,15 @@ pub fn default_sql_productions() -> Vec<Production> {
     }
 
     // {eq} — equality variants
-    for &eq in &["=", " = ", " LIKE ", "<=", "!<", "REGEXP", " BETWEEN 1 AND "] {
+    for &eq in &[
+        "=",
+        " = ",
+        " LIKE ",
+        "<=",
+        "!<",
+        "REGEXP",
+        " BETWEEN 1 AND ",
+    ] {
         prods.push(Production::new("{eq}", eq, "eq_operator"));
     }
 
@@ -240,20 +230,20 @@ pub fn boltzmann_sample<'a>(
     temperature: f64,
     rng: &mut StdRng,
 ) -> Option<&'a Production> {
-    let candidates: Vec<&Production> =
-        prods.iter().filter(|p| p.nonterminal == nonterminal).collect();
+    let candidates: Vec<&Production> = prods
+        .iter()
+        .filter(|p| p.nonterminal == nonterminal)
+        .collect();
     if candidates.is_empty() {
         return None;
     }
     if temperature <= 0.0 {
         // Fully cold: argmax.
-        return candidates
-            .into_iter()
-            .max_by(|a, b| {
-                a.bypass_score
-                    .partial_cmp(&b.bypass_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+        return candidates.into_iter().max_by(|a, b| {
+            a.bypass_score
+                .partial_cmp(&b.bypass_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
     // Compute Boltzmann weights.
     let weights: Vec<f64> = candidates
@@ -462,8 +452,8 @@ impl CfgMutator {
     /// Scores are clamped to [0, ∞).
     ///
     /// **Oracle feedback wiring**: called by [`CfgMutatorState::reward`] and
-    /// (indirectly) by [`feedback`] in `grammar/mod.rs`. Both functions are
-    /// part of the [`mutate_as_with_state`] API surface — R56 pass-21
+    /// (indirectly) by `feedback` in `grammar/mod.rs`. Both functions are
+    /// part of the `mutate_as_with_state` API surface — R56 pass-21
     /// closes the oracle feedback loop (§9 WIRING / §11 UTILIZATION).
     pub fn reward(&mut self, nonterminal: &str, terminal: &str, delta: f64) {
         for p in &mut self.productions {
@@ -475,13 +465,13 @@ impl CfgMutator {
 
     /// Update the bypass score of a production by its human-readable `name`.
     ///
-    /// An alternative to [`reward`] when the caller tracked which production
+    /// An alternative to `reward` when the caller tracked which production
     /// fired by name (e.g. from the `rules_applied` Vec) rather than by the
     /// raw terminal string. Reads the `Production::name` field to match.
-    /// `delta` semantics are identical to [`reward`].
+    /// `delta` semantics are identical to `reward`.
     ///
     /// Called by [`CfgMutatorState::reward`] which is invoked by the
-    /// public [`feedback`] function — no longer dead code as of R56 pass-21.
+    /// public `feedback` function — no longer dead code as of R56 pass-21.
     pub fn reward_by_name(&mut self, name: &str, delta: f64) {
         for p in &mut self.productions {
             if p.name == name {
@@ -546,7 +536,7 @@ impl CfgMutator {
 
 /// Persistent convergence-annealing state for the oracle feedback loop.
 ///
-/// Pass this to [`mutate_as_with_state`] so bypass scores accumulate across
+/// Pass this to `mutate_as_with_state` so bypass scores accumulate across
 /// repeated calls, and call [`CfgMutatorState::reward`] after each probe
 /// result to steer the Boltzmann sampler toward higher-bypass productions.
 ///
@@ -599,7 +589,7 @@ impl CfgMutatorState {
     /// Reward or penalise a production by its label. `delta > 0` raises the
     /// score (bypass observed), `delta < 0` lowers it (WAF blocked).
     ///
-    /// `rules_applied` is the `rules_applied` Vec from a [`GrammarMutation`];
+    /// `rules_applied` is the `rules_applied` Vec from a `GrammarMutation`;
     /// the method looks for an element that matches a known production name.
     /// Pass the same `payload_type` you used when generating the variant.
     pub fn reward(&mut self, rule_name: &str, payload_type: super::PayloadType, delta: f64) {
@@ -649,7 +639,11 @@ mod tests {
     use super::*;
 
     fn make_mutator() -> CfgMutator {
-        CfgMutator::builder().seed(42).temperature(1.0).cooling_rate(0.9).build()
+        CfgMutator::builder()
+            .seed(42)
+            .temperature(1.0)
+            .cooling_rate(0.9)
+            .build()
     }
 
     #[test]
@@ -657,7 +651,10 @@ mod tests {
         let mut m = make_mutator();
         let result = m.expand("{ws}");
         // Must be one of the ws terminals, not the literal "{ws}".
-        assert!(!result.contains('{'), "nonterminal must be expanded: {result:?}");
+        assert!(
+            !result.contains('{'),
+            "nonterminal must be expanded: {result:?}"
+        );
     }
 
     #[test]
@@ -672,7 +669,10 @@ mod tests {
         let mut m = make_mutator();
         let result = m.expand("{ws}{comment}");
         // Must not contain any opening brace (both were expanded).
-        assert!(!result.contains('{'), "both nonterminals must be expanded: {result:?}");
+        assert!(
+            !result.contains('{'),
+            "both nonterminals must be expanded: {result:?}"
+        );
     }
 
     #[test]
@@ -680,7 +680,10 @@ mod tests {
         let mut m = make_mutator();
         // No closing brace — should emit "{ws" literally.
         let result = m.expand("{ws");
-        assert!(result.starts_with('{'), "unclosed brace must be literal: {result:?}");
+        assert!(
+            result.starts_with('{'),
+            "unclosed brace must be literal: {result:?}"
+        );
     }
 
     #[test]
@@ -688,7 +691,10 @@ mod tests {
         let mut m = make_mutator();
         let initial = m.temperature();
         m.anneal();
-        assert!(m.temperature() < initial, "temperature must decrease after anneal");
+        assert!(
+            m.temperature() < initial,
+            "temperature must decrease after anneal"
+        );
     }
 
     #[test]
@@ -775,7 +781,12 @@ mod tests {
     #[test]
     fn boltzmann_sample_zero_temperature_returns_argmax() {
         let prods = vec![
-            Production { nonterminal: "{t}", terminal: "low".into(), name: "low", bypass_score: 0.0 },
+            Production {
+                nonterminal: "{t}",
+                terminal: "low".into(),
+                name: "low",
+                bypass_score: 0.0,
+            },
             Production {
                 nonterminal: "{t}",
                 terminal: "high".into(),
@@ -791,7 +802,10 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(0);
         let selected = boltzmann_sample(&prods, "{t}", 0.0, &mut rng).unwrap();
-        assert_eq!(selected.terminal, "high", "argmax at T=0 must pick highest score");
+        assert_eq!(
+            selected.terminal, "high",
+            "argmax at T=0 must pick highest score"
+        );
     }
 
     #[test]
@@ -882,7 +896,15 @@ mod tests {
     #[test]
     fn default_sql_productions_have_all_nonterminals() {
         let prods = default_sql_productions();
-        let required = ["{ws}", "{comment}", "{or}", "{and}", "{eq}", "{str_open}", "{tautology}"];
+        let required = [
+            "{ws}",
+            "{comment}",
+            "{or}",
+            "{and}",
+            "{eq}",
+            "{str_open}",
+            "{tautology}",
+        ];
         for nt in &required {
             assert!(
                 prods.iter().any(|p| p.nonterminal == *nt),

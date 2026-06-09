@@ -162,7 +162,11 @@ fn print_human(result: &MineResult) {
     }
     println!(
         "strips handlers    : {}",
-        if m.strips_event_handlers { "yes" } else { "NO (event-handler vectors survive)" }
+        if m.strips_event_handlers {
+            "yes"
+        } else {
+            "NO (event-handler vectors survive)"
+        }
     );
     if !m.blocked_schemes.is_empty() {
         println!("blocked schemes    : [{}]", m.blocked_schemes.join(", "));
@@ -177,7 +181,10 @@ fn print_human(result: &MineResult) {
     if result.bypasses.is_empty() {
         println!("\nNo executable vector survives this sanitizer config (model-proven).");
     } else {
-        println!("\n{} bypass(es) survive the sanitizer (confirm in a real browser via scald):", result.bypasses.len());
+        println!(
+            "\n{} bypass(es) survive the sanitizer (confirm in a real browser via scald):",
+            result.bypasses.len()
+        );
         for b in &result.bypasses {
             println!("  [{}] {}", b.vector, b.payload);
         }

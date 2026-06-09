@@ -70,15 +70,16 @@ fn json_plan_carries_the_versioned_schema_and_marks_every_lane_waf_blind() {
             "every delivery must be flagged WAF-blind: {d}"
         );
         assert!(d["taint_source"].is_string());
-        assert!(d["action"]["kind"].is_string(), "action must be kind-tagged: {d}");
+        assert!(
+            d["action"]["kind"].is_string(),
+            "action must be kind-tagged: {d}"
+        );
     }
     // The scheme payload must produce at least one prefix-bypass delivery.
     assert!(
-        deliveries
-            .iter()
-            .any(|d| d["rules"].as_array().is_some_and(|r| r
-                .iter()
-                .any(|x| x == "prefix_bypass"))),
+        deliveries.iter().any(|d| d["rules"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|x| x == "prefix_bypass"))),
         "a javascript: payload must yield prefix-bypass deliveries:\n{stdout}"
     );
 }
@@ -157,11 +158,9 @@ fn markup_payload_covers_channels_without_prefix_bypass_noise() {
     let deliveries = v["deliveries"].as_array().unwrap();
     // No scheme ⇒ the channel itself is the bypass; no prefix variants.
     assert!(
-        !deliveries
-            .iter()
-            .any(|d| d["rules"].as_array().is_some_and(|r| r
-                .iter()
-                .any(|x| x == "prefix_bypass"))),
+        !deliveries.iter().any(|d| d["rules"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|x| x == "prefix_bypass"))),
         "markup payload must not emit prefix-bypass deliveries:\n{stdout}"
     );
     // …but the fragment lane still carries the raw markup.
@@ -180,7 +179,8 @@ fn help_explains_the_waf_blind_client_side_purpose() {
     assert!(lc.contains("--target"), "help must document --target");
     assert!(lc.contains("--payload"), "help must document --payload");
     assert!(
-        lc.contains("client") && (lc.contains("waf-blind") || lc.contains("dom") || lc.contains("fragment")),
+        lc.contains("client")
+            && (lc.contains("waf-blind") || lc.contains("dom") || lc.contains("fragment")),
         "help must convey the client-side / WAF-blind purpose:\n{stdout}"
     );
 }

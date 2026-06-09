@@ -355,7 +355,10 @@ mod tests {
     /// (LAW 1: never guess what we don't know.)
     #[test]
     fn context_from_content_type_unknown_is_none() {
-        assert_eq!(context_from_content_type(Some("application/octet-stream")), None);
+        assert_eq!(
+            context_from_content_type(Some("application/octet-stream")),
+            None
+        );
         assert_eq!(context_from_content_type(Some("text/plain")), None);
         assert_eq!(context_from_content_type(Some("")), None);
         assert_eq!(context_from_content_type(None), None);

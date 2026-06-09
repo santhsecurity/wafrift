@@ -122,9 +122,9 @@ fn entire_pool_cooled_returns_error() {
 #[test]
 fn rotation_distributes_load_across_pool() {
     let pool = two_entry_pool(100, 1); // Very tolerant threshold,
-                                       // very short cooldown — focus
-                                       // is on rotation order, not
-                                       // cooldown.
+    // very short cooldown — focus
+    // is on rotation order, not
+    // cooldown.
     let target = "round-robin.example";
 
     // Probe many times and count distinct entries returned.

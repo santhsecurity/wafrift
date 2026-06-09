@@ -147,7 +147,9 @@ mod roundtrip_props {
     /// Base64-encode the whole value (a whole-value transform).
     fn b64_all(s: &[u8]) -> Vec<u8> {
         use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(s).into_bytes()
+        base64::engine::general_purpose::STANDARD
+            .encode(s)
+            .into_bytes()
     }
     /// Hex-encode the whole value (a whole-value transform).
     fn hex_all(s: &[u8]) -> Vec<u8> {

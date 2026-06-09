@@ -24,7 +24,7 @@
 //! The mapping below is a sourced subset of the Windows-1252 best-fit table +
 //! the common cross-origin punctuation coercions. It is **Tier-B data**: append
 //! a `(codepoint, ascii)` pair to extend coverage. Soundness is enforced by the
-//! shared [`super::homoglyph_gen`] gate — every emitted variant best-fit-folds
+//! shared `super::homoglyph_gen` gate — every emitted variant best-fit-folds
 //! back to the exact attack under [`normalize`].
 
 use std::collections::HashMap;
@@ -80,7 +80,9 @@ const BEST_FIT: &[(char, char)] = &[
 #[must_use]
 pub fn normalize(s: &str) -> String {
     let fwd = forward_map();
-    s.chars().map(|c| fwd.get(&c).copied().unwrap_or(c)).collect()
+    s.chars()
+        .map(|c| fwd.get(&c).copied().unwrap_or(c))
+        .collect()
 }
 
 fn forward_map() -> &'static HashMap<char, char> {
@@ -125,7 +127,7 @@ pub fn first_preimage(c: char) -> Option<char> {
 }
 
 /// Layered best-fit + percent-encoding variants — a best-fit variant that is
-/// *also* `%XX`-encoded. See [`super::homoglyph_gen::generate_composed`]. Only
+/// *also* `%XX`-encoded. See `super::homoglyph_gen::generate_composed`. Only
 /// an origin that url-decodes THEN best-fit-coerces reconstructs the injection.
 #[must_use]
 pub fn composed_variants(payload: &str, max: usize) -> Vec<String> {
@@ -140,9 +142,15 @@ mod tests {
     fn nfkc_does_not_fold_curly_quotes_but_bestfit_does() {
         // The whole reason this engine exists: NFKC leaves the curly quote
         // alone; best-fit coerces it to ASCII `'`.
-        assert_eq!(super::super::nfkc_preimage::normalize("\u{2019}"), "\u{2019}");
+        assert_eq!(
+            super::super::nfkc_preimage::normalize("\u{2019}"),
+            "\u{2019}"
+        );
         assert_eq!(normalize("\u{2019}"), "'");
-        assert!(preimage_count('\'') >= 5, "apostrophe needs the curly-quote family");
+        assert!(
+            preimage_count('\'') >= 5,
+            "apostrophe needs the curly-quote family"
+        );
         assert!(preimage_count('"') >= 4);
         assert!(preimage_count('-') >= 6);
     }
@@ -151,7 +159,10 @@ mod tests {
     fn bestfit_covers_slash_and_backslash_nfkc_leaves_alone() {
         // Path-traversal `/` and Windows `..\`: NFKC does not fold the division/
         // fraction slash or set-minus; best-fit / confusable coercion does.
-        assert_eq!(super::super::nfkc_preimage::normalize("\u{2215}"), "\u{2215}");
+        assert_eq!(
+            super::super::nfkc_preimage::normalize("\u{2215}"),
+            "\u{2215}"
+        );
         assert_eq!(normalize("\u{2215}"), "/");
         assert_eq!(normalize("\u{2044}"), "/");
         assert_eq!(normalize("\u{2216}"), "\\");
@@ -160,13 +171,22 @@ mod tests {
             .iter()
             .find(|v| !v.contains('/'))
             .expect("a variant must hide the literal forward slash");
-        assert_eq!(normalize(v), "../../etc/passwd", "origin best-fit recovers the path");
+        assert_eq!(
+            normalize(v),
+            "../../etc/passwd",
+            "origin best-fit recovers the path"
+        );
     }
 
     #[test]
     fn every_variant_bestfit_folds_to_the_attack() {
         // SOUNDNESS: each variant coerces back to the exact SQLi payload.
-        for attack in ["' OR '1'='1", "admin'--", "1' UNION SELECT--", "\" OR \"\"=\""] {
+        for attack in [
+            "' OR '1'='1",
+            "admin'--",
+            "1' UNION SELECT--",
+            "\" OR \"\"=\"",
+        ] {
             let vs = variants(attack, 24);
             assert!(!vs.is_empty(), "no variants for {attack:?}");
             for v in &vs {
@@ -187,7 +207,11 @@ mod tests {
             .iter()
             .find(|v| !v.contains('\'') && !v.contains('-'))
             .expect("a variant must hide both the quote and the comment dashes");
-        assert_eq!(normalize(bypass), attack, "origin best-fit must recover the injection");
+        assert_eq!(
+            normalize(bypass),
+            attack,
+            "origin best-fit must recover the injection"
+        );
     }
 
     #[test]
@@ -196,11 +220,16 @@ mod tests {
         let vs = composed_variants(attack, 12);
         assert!(!vs.is_empty());
         for v in &vs {
-            assert!(v.contains('%'), "composed form must carry a percent layer: {v:?}");
+            assert!(
+                v.contains('%'),
+                "composed form must carry a percent layer: {v:?}"
+            );
             // A best-fit-coercing WAF that does NOT url-decode sees inert %XX.
             assert_ne!(normalize(v), attack);
             // Origin: url-decode THEN best-fit recovers the injection.
-            let decoded = urlencoding::decode(v).map(|c| c.into_owned()).unwrap_or_default();
+            let decoded = urlencoding::decode(v)
+                .map(|c| c.into_owned())
+                .unwrap_or_default();
             assert_eq!(normalize(&decoded), attack);
         }
     }
@@ -225,7 +254,11 @@ mod tests {
             let p = first_preimage(c).expect("delimiter must have a best-fit preimage");
             assert_ne!(p, c, "preimage of {c:?} is the char itself");
             assert!(!p.is_ascii(), "a best-fit preimage must be non-ASCII");
-            assert_eq!(normalize(&p.to_string()), c.to_string(), "best-fit({p:?}) != {c:?}");
+            assert_eq!(
+                normalize(&p.to_string()),
+                c.to_string(),
+                "best-fit({p:?}) != {c:?}"
+            );
         }
         // The SQLi gold: the single quote resolves to the curly-quote family.
         assert_eq!(first_preimage('\''), Some('\u{2018}'));

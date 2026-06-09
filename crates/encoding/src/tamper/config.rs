@@ -37,10 +37,7 @@ const STRATEGY_FILE_MAX_BYTES: u64 = 256 * 1024; // 256 KiB
 /// `metadata()` gate in `load_toml` filters obvious giant files
 /// without opening them; this function backstops it for the cases
 /// metadata lies about (symlinks, races, posthumous file-replace).
-fn read_capped_tamper_text(
-    path: &std::path::Path,
-    max_bytes: u64,
-) -> std::io::Result<String> {
+fn read_capped_tamper_text(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
     use std::io::Read;
     let f = std::fs::File::open(path)?;
     let mut limited = f.take(max_bytes + 1);

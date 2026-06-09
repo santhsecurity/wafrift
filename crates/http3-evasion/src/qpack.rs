@@ -113,7 +113,10 @@ impl QpackEncoder {
         self.insert_count += 1;
         QpackInstruction {
             bytes,
-            description: format!("Insert literal: {}:{} (entry #{})", name, value, self.insert_count),
+            description: format!(
+                "Insert literal: {}:{} (entry #{})",
+                name, value, self.insert_count
+            ),
         }
     }
 
@@ -533,7 +536,11 @@ mod tests {
             let (decoded, consumed) = decode_qpack_int(&buf, 0, 8)
                 .unwrap_or_else(|| panic!("8-bit-prefix decode returned None for {v}"));
             assert_eq!(decoded, v, "8-bit-prefix round-trip must preserve {v}");
-            assert_eq!(consumed, buf.len(), "must consume the whole encoding for {v}");
+            assert_eq!(
+                consumed,
+                buf.len(),
+                "must consume the whole encoding for {v}"
+            );
         }
     }
 
@@ -561,7 +568,11 @@ mod tests {
         let frame = http3_headers_frame(&field_block);
         assert_eq!(frame[0], 0x01); // type
         // 2-byte varint prefix: RFC 9000 §16 — 64..=16383 uses `01` high bits.
-        assert_eq!(frame[1] >> 6, 1, "100-byte payload must use 2-byte varint (01 prefix)");
+        assert_eq!(
+            frame[1] >> 6,
+            1,
+            "100-byte payload must use 2-byte varint (01 prefix)"
+        );
     }
 
     #[test]
@@ -575,7 +586,11 @@ mod tests {
         let frame = http3_headers_frame(&field_block);
         assert_eq!(frame[0], 0x01); // type
         // Must use 4-byte varint: `10` prefix (high 2 bits = 0b10).
-        assert_eq!(frame[1] >> 6, 2, "16384-byte payload must use 4-byte varint (10 prefix)");
+        assert_eq!(
+            frame[1] >> 6,
+            2,
+            "16384-byte payload must use 4-byte varint (10 prefix)"
+        );
         // The 4 length bytes encode 16384 = 0x4000.
         // With 4-byte quic_varint: 0x80 | (16384>>24)=0x80, then 0x00, 0x40, 0x00.
         let len_encoded = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]);
@@ -602,7 +617,11 @@ mod tests {
         let mut enc = QpackEncoder::new(4096);
         let instr = enc.insert_literal("x-t", "v");
         // First byte must have `01` high bits (0x40 base).
-        assert_eq!(instr.bytes[0] & 0xC0, 0x40, "insert literal prefix must be 01xxxxxx");
+        assert_eq!(
+            instr.bytes[0] & 0xC0,
+            0x40,
+            "insert literal prefix must be 01xxxxxx"
+        );
     }
 
     #[test]
@@ -610,7 +629,11 @@ mod tests {
         let enc = QpackEncoder::new(4096);
         let instr = enc.set_capacity(1024);
         // First byte: `001` prefix = 0x20 base
-        assert_eq!(instr.bytes[0] & 0xE0, 0x20, "set capacity prefix must be 001xxxxx");
+        assert_eq!(
+            instr.bytes[0] & 0xE0,
+            0x20,
+            "set capacity prefix must be 001xxxxx"
+        );
     }
 
     #[test]
@@ -618,7 +641,11 @@ mod tests {
         let enc = QpackEncoder::new(4096);
         let instr = enc.duplicate(0);
         // First byte: `000` prefix = 0x00 base
-        assert_eq!(instr.bytes[0] & 0xE0, 0x00, "duplicate prefix must be 000xxxxx");
+        assert_eq!(
+            instr.bytes[0] & 0xE0,
+            0x00,
+            "duplicate prefix must be 000xxxxx"
+        );
     }
 
     #[test]
@@ -626,7 +653,11 @@ mod tests {
         let mut enc = QpackEncoder::new(4096);
         let instr = enc.insert_with_static_ref(1, "custom");
         // First byte: `11` high bits = 0xC0 base
-        assert_eq!(instr.bytes[0] & 0xC0, 0xC0, "insert-with-static-ref prefix must be 11xxxxxx");
+        assert_eq!(
+            instr.bytes[0] & 0xC0,
+            0xC0,
+            "insert-with-static-ref prefix must be 11xxxxxx"
+        );
     }
 
     // ── Phantom-insert attack ─────────────────────────────────────────────
@@ -701,7 +732,10 @@ mod tests {
     #[test]
     fn decode_qpack_int_empty_bytes_returns_none() {
         // pos >= bytes.len() must return None, not panic.
-        assert!(decode_qpack_int(&[], 0, 5).is_none(), "empty slice must return None");
+        assert!(
+            decode_qpack_int(&[], 0, 5).is_none(),
+            "empty slice must return None"
+        );
     }
 
     #[test]
@@ -750,7 +784,10 @@ mod tests {
         let enc = QpackEncoder::new(4096);
         let cap = enc.remaining_capacity_entries(0);
         // 4096 / 32 = 128 entries.
-        assert_eq!(cap, 128, "zero avg must use only overhead (32 bytes) per entry");
+        assert_eq!(
+            cap, 128,
+            "zero avg must use only overhead (32 bytes) per entry"
+        );
     }
 
     #[test]
@@ -771,7 +808,10 @@ mod tests {
         enc.insert_literal("a", "b");
         let after = enc.remaining_capacity_entries(64);
         // max_capacity is fixed, so the calculation is the same regardless of inserts.
-        assert_eq!(before, after, "remaining_capacity_entries is based on max_capacity, not consumed space");
+        assert_eq!(
+            before, after,
+            "remaining_capacity_entries is based on max_capacity, not consumed space"
+        );
     }
 
     // ── http3_headers_frame with empty field block ────────────────────────
@@ -781,8 +821,15 @@ mod tests {
         let frame = http3_headers_frame(&[]);
         // type byte + length byte (0) — no payload
         assert_eq!(frame[0], 0x01, "type must be 0x01");
-        assert_eq!(frame[1], 0x00, "empty payload must encode length = 0 as single zero byte");
-        assert_eq!(frame.len(), 2, "empty field block: type + length, no payload");
+        assert_eq!(
+            frame[1], 0x00,
+            "empty payload must encode length = 0 as single zero byte"
+        );
+        assert_eq!(
+            frame.len(),
+            2,
+            "empty field block: type + length, no payload"
+        );
     }
 
     // ── phantom_insert with n=0 ───────────────────────────────────────────
@@ -795,7 +842,10 @@ mod tests {
         assert_eq!(attack.variant, QpackDesyncVariant::PhantomInsert);
         // min(0, max_phantoms.max(1)) = 0.min(≥1) = 0 phantom entries,
         // but the attack header is always inserted.
-        assert!(!attack.encoder_stream_bytes.is_empty(), "attack header must still be inserted");
+        assert!(
+            !attack.encoder_stream_bytes.is_empty(),
+            "attack header must still be inserted"
+        );
         assert!(!attack.headers_field_block.is_empty());
     }
 

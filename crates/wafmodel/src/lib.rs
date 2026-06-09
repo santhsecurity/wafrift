@@ -57,13 +57,13 @@ pub mod transduce;
 pub use artifact::{LearnedModel, Provenance};
 pub use booster::WafBoosterScorer;
 pub use canon::{CanonView, Channel, Segment, canonicalize};
+pub use ensemble_dilution::RuleGroup;
 pub use equiv_bridge::{norm_mismatch_members, sink_for_tag, solution_member};
 pub use equiv_query::{ChainedEq, PacBound, SampledEq, UcbBanditEq, WMethodEq};
 pub use error::{Result, WafModelError};
-pub use ensemble_dilution::RuleGroup;
 pub use filter_profile::{
-    DecodeGap, FilterProfile, TokenFinding, TokenProbe, Verdict, battery_from_toml,
-    characterize, default_battery as default_filter_battery, probe_decode_gaps,
+    DecodeGap, FilterProfile, TokenFinding, TokenProbe, Verdict, battery_from_toml, characterize,
+    default_battery as default_filter_battery, probe_decode_gaps,
 };
 pub use harden::{ClosureReport, synthesize_closure};
 pub use learn::{

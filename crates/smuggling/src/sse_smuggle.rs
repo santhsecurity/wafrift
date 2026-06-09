@@ -87,7 +87,8 @@ fn valid_payload(payload: &str) -> Result<(), SseSmugglingError> {
     if payload.is_empty() {
         return Err(SseSmugglingError::EmptyPayload);
     }
-    guard_prefix_len(payload, 64 * 1024).map_err(|_| SseSmugglingError::PayloadTooLong(payload.len()))?;
+    guard_prefix_len(payload, 64 * 1024)
+        .map_err(|_| SseSmugglingError::PayloadTooLong(payload.len()))?;
     Ok(())
 }
 
@@ -194,11 +195,17 @@ pub fn h2_multiplexed_overflow(
     // Stream 1 descriptor (4-byte big-endian stream id, 1-byte type marker)
     raw.extend_from_slice(&1u32.to_be_bytes());
     raw.push(0x01); // type: HEADERS (open stream)
-    raw.extend_from_slice(format!("GET /events HTTP/2\r\nHost: {host}\r\nAccept: text/event-stream\r\n\r\n").as_bytes());
+    raw.extend_from_slice(
+        format!("GET /events HTTP/2\r\nHost: {host}\r\nAccept: text/event-stream\r\n\r\n")
+            .as_bytes(),
+    );
     // Interleave: stream 3 HEADERS
     raw.extend_from_slice(&3u32.to_be_bytes());
     raw.push(0x01); // HEADERS
-    raw.extend_from_slice(format!("POST /api HTTP/2\r\nHost: {host}\r\nContent-Type: application/json\r\n\r\n").as_bytes());
+    raw.extend_from_slice(
+        format!("POST /api HTTP/2\r\nHost: {host}\r\nContent-Type: application/json\r\n\r\n")
+            .as_bytes(),
+    );
     // Stream 1 DATA (benign)
     raw.extend_from_slice(&1u32.to_be_bytes());
     raw.push(0x00); // DATA
@@ -342,7 +349,11 @@ mod tests {
     #[test]
     fn all_probes_have_non_empty_raw_bytes() {
         for p in all_probes(HOST, PAYLOAD).unwrap() {
-            assert!(!p.raw_bytes.is_empty(), "probe {:?} has empty raw_bytes", p.name);
+            assert!(
+                !p.raw_bytes.is_empty(),
+                "probe {:?} has empty raw_bytes",
+                p.name
+            );
         }
     }
 
@@ -358,7 +369,11 @@ mod tests {
     fn all_probes_have_non_empty_names_and_descriptions() {
         for p in all_probes(HOST, PAYLOAD).unwrap() {
             assert!(!p.name.is_empty());
-            assert!(!p.description.is_empty(), "probe {:?} missing description", p.name);
+            assert!(
+                !p.description.is_empty(),
+                "probe {:?} missing description",
+                p.name
+            );
         }
     }
 
@@ -368,7 +383,10 @@ mod tests {
     fn body_as_event_contains_attack_payload() {
         let p = body_as_event(HOST, "/events", PAYLOAD).unwrap();
         let raw = std::str::from_utf8(&p.raw_bytes).unwrap();
-        assert!(raw.contains(PAYLOAD), "attack payload must appear in raw bytes");
+        assert!(
+            raw.contains(PAYLOAD),
+            "attack payload must appear in raw bytes"
+        );
     }
 
     #[test]
@@ -382,7 +400,10 @@ mod tests {
     fn body_as_event_uses_sse_data_prefix() {
         let p = body_as_event(HOST, "/events", PAYLOAD).unwrap();
         let raw = std::str::from_utf8(&p.raw_bytes).unwrap();
-        assert!(raw.contains("data: "), "SSE event framing must use 'data: ' prefix");
+        assert!(
+            raw.contains("data: "),
+            "SSE event framing must use 'data: ' prefix"
+        );
     }
 
     #[test]

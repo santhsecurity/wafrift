@@ -671,7 +671,7 @@ fn run_inline_scan(a: InlineScanArgs<'_>) -> Result<serde_json::Value, String> {
     let exit_code = status.code().unwrap_or(-1);
     // 0 = bypass confirmed; 4 = WAF in play, none won; 5 = rate-limited partial;
     // 6 = no WAF on surface; 7 = timeout partial — all still emit JSON.
-    if !status.success() && !matches!(exit_code, 4 | 5 | 6 | 7) {
+    if !status.success() && !matches!(exit_code, 4..=7) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
             "`wafrift scan` exited with status {exit_code} (no JSON captured)"

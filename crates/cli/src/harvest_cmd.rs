@@ -44,9 +44,7 @@ const POLICING_PROBES_TOML: &str = include_str!("../rules/policing_probes.toml")
 
 /// Parse the Tier-B policing-probe table: `[[probe]] class=.. payload=..`.
 /// Fails closed on an empty table or an empty payload.
-fn load_policing_probes(
-    src: &str,
-) -> Result<std::collections::HashMap<String, String>, String> {
+fn load_policing_probes(src: &str) -> Result<std::collections::HashMap<String, String>, String> {
     #[derive(serde::Deserialize)]
     struct Row {
         class: String,
@@ -1242,7 +1240,11 @@ mod tests {
     #[test]
     fn embedded_policing_probes_load_and_are_nonempty() {
         let m = load_policing_probes(POLICING_PROBES_TOML).expect("shipped probe table is valid");
-        assert!(m.len() >= 8, "ship a real per-class probe table, got {}", m.len());
+        assert!(
+            m.len() >= 8,
+            "ship a real per-class probe table, got {}",
+            m.len()
+        );
         assert!(m.values().all(|p| !p.trim().is_empty()));
     }
 

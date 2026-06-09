@@ -9,9 +9,9 @@
 //!
 //! - [`policy`] — the reassembly policies (`first`/`last`/`bsd`/`linux`) and
 //!   their precise overlap-resolution rules.
-//! - [`reassemble`] — simulate reassembly of a segment set under a policy.
+//! - [`mod@reassemble`] — simulate reassembly of a segment set under a policy.
 //! - [`plan`] — construct overlapping segment sets and self-verifying
-//!   [`DifferentialPlan`](plan::DifferentialPlan)s that split a WAF from its
+//!   [`DifferentialPlan`]s that split a WAF from its
 //!   origin.
 //!
 //! This crate produces segment **descriptors** (sequence number + bytes) and

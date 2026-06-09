@@ -628,9 +628,7 @@ fn push_combined_whitespace_mutations(
         (acc ^ u64::from(b)).wrapping_mul(FNV_PRIME_64)
     });
     for iter in 0..n_combined {
-        let mix = seed
-            .wrapping_add(iter as u64)
-            .wrapping_mul(FNV_PRIME_64);
+        let mix = seed.wrapping_add(iter as u64).wrapping_mul(FNV_PRIME_64);
         let base_index = (mix as usize) % results.len();
         let ws_range = WHITESPACE_ALTERNATIVES.len() - 1; // 1..len()
         let whitespace_index = 1 + ((mix.rotate_left(17) as usize) % ws_range);

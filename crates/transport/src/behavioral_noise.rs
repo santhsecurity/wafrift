@@ -12,9 +12,11 @@ mod tests {
         let mut headers = Vec::new();
         injector.inject(&mut headers);
 
-        assert!(headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("user-agent")));
+        assert!(
+            headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+        );
         assert_eq!(injector.request_count(), 1);
     }
 }

@@ -1,5 +1,5 @@
 //! Adapter from `wafrift_oracle::OracleVerdict` (+ optional CF signal)
-//! to [`super::rule_corpus`] writes.
+//! to `super::rule_corpus` writes.
 //!
 //! The hunt loop fires a probe, gets back an `OracleVerdict`
 //! (`Pass`/`Block`/`Challenge`/`Ambiguous` + an attribution

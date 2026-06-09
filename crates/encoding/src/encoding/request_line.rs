@@ -30,25 +30,49 @@
 pub fn exotic_methods() -> Vec<&'static str> {
     vec![
         // WebDAV
-        "PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK",
+        "PROPFIND",
+        "PROPPATCH",
+        "MKCOL",
+        "COPY",
+        "MOVE",
+        "LOCK",
+        "UNLOCK",
         // CalDAV / CardDAV
-        "REPORT", "ACL", "SEARCH",
+        "REPORT",
+        "ACL",
+        "SEARCH",
         // Cache control (Varnish / Squid private)
-        "PURGE", "BAN", "REFRESH",
+        "PURGE",
+        "BAN",
+        "REFRESH",
         // Versioning extensions (RFC 3253)
-        "VERSION-CONTROL", "MKWORKSPACE", "UPDATE", "CHECKIN", "CHECKOUT",
-        "MKACTIVITY", "BASELINE-CONTROL", "MERGE",
+        "VERSION-CONTROL",
+        "MKWORKSPACE",
+        "UPDATE",
+        "CHECKIN",
+        "CHECKOUT",
+        "MKACTIVITY",
+        "BASELINE-CONTROL",
+        "MERGE",
         // Patch (RFC 5789) — older WAFs predate it
         "PATCH",
         // Tracing
         "TRACE",
         // Lowercase variants (some WAFs case-fold, some don't)
-        "get", "post", "put", "delete",
+        "get",
+        "post",
+        "put",
+        "delete",
         // Mixed case
-        "GeT", "PoSt", "PuT", "DeLeTe",
+        "GeT",
+        "PoSt",
+        "PuT",
+        "DeLeTe",
         // Tab/space padded names (the leading whitespace gets stripped
         // by most servers but inspected literally by some WAFs)
-        " GET", "\tGET", " GET ",
+        " GET",
+        "\tGET",
+        " GET ",
     ]
 }
 
@@ -275,7 +299,7 @@ mod tests {
         ];
         for c in candidates {
             assert!(!c.contains("\r\n"), "no CRLF in request line: {c:?}");
-            assert!(!c.contains('\n'),  "no LF in request line: {c:?}");
+            assert!(!c.contains('\n'), "no LF in request line: {c:?}");
         }
     }
 

@@ -1200,9 +1200,7 @@ mod tests {
 
         // Fill to the cap using direct insertion (bypasses both code paths).
         for i in 0..MAX_TECHNIQUE_STATS {
-            state
-                .technique_stats
-                .push((format!("dummy:{i}"), 0, 1));
+            state.technique_stats.push((format!("dummy:{i}"), 0, 1));
         }
         assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
 
@@ -1238,9 +1236,7 @@ mod tests {
 
         // Fill the rest to the cap.
         for i in 0..(MAX_TECHNIQUE_STATS - 1) {
-            state
-                .technique_stats
-                .push((format!("filler:{i}"), 0, 1));
+            state.technique_stats.push((format!("filler:{i}"), 0, 1));
         }
         assert_eq!(state.technique_stats.len(), MAX_TECHNIQUE_STATS);
 
@@ -1267,9 +1263,7 @@ mod tests {
         let mut state = HostState::default();
 
         for i in 0..MAX_TECHNIQUE_STATS {
-            state
-                .technique_stats
-                .push((format!("pre:{i}"), 0, 1));
+            state.technique_stats.push((format!("pre:{i}"), 0, 1));
         }
 
         // Success path — new technique.
@@ -1291,9 +1285,7 @@ mod tests {
         let mut state = HostState::default();
 
         for i in 0..MAX_TECHNIQUE_STATS {
-            state
-                .technique_stats
-                .push((format!("existing:{i}"), 0, 1));
+            state.technique_stats.push((format!("existing:{i}"), 0, 1));
         }
 
         // Pass four brand-new unique techniques at once.

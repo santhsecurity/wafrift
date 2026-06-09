@@ -27,7 +27,7 @@
 //! prefix-match ACL is bypassed by a one-character path edit.
 //!
 //! Citation:
-//! https://dev.to/cverports/cve-2025-29914-the-double-slash-deception-bypassing-coraza-waf-with-rfc-compliance-2l75
+//! <https://dev.to/cverports/cve-2025-29914-the-double-slash-deception-bypassing-coraza-waf-with-rfc-compliance-2l75>
 //!
 //! ### `PathPrefixStrategy::TripleSlash`
 //!
@@ -127,7 +127,10 @@ impl PathPrefixStrategy {
 /// Wraps [`PathPrefixStrategy::apply`] with the label that the
 /// gene-bank and `--techniques` flag downstream consume.
 #[must_use]
-pub fn mutate_path_prefix(path_and_query: &str, strategy: PathPrefixStrategy) -> (String, &'static str) {
+pub fn mutate_path_prefix(
+    path_and_query: &str,
+    strategy: PathPrefixStrategy,
+) -> (String, &'static str) {
     (strategy.apply(path_and_query), strategy.label())
 }
 
@@ -140,26 +143,17 @@ mod tests {
         // CVE-2025-29914 anti-rig: `/admin` MUST become `//admin`.
         // If this drifts (e.g. someone "tidies" the leading slash
         // semantics), every Coraza < 3.3.3 bypass we have stops working.
-        assert_eq!(
-            PathPrefixStrategy::DoubleSlash.apply("/admin"),
-            "//admin"
-        );
+        assert_eq!(PathPrefixStrategy::DoubleSlash.apply("/admin"), "//admin");
     }
 
     #[test]
     fn triple_slash_normalises_to_triple() {
-        assert_eq!(
-            PathPrefixStrategy::TripleSlash.apply("/admin"),
-            "///admin"
-        );
+        assert_eq!(PathPrefixStrategy::TripleSlash.apply("/admin"), "///admin");
     }
 
     #[test]
     fn slash_dot_inserts_dot_segment() {
-        assert_eq!(
-            PathPrefixStrategy::SlashDot.apply("/admin"),
-            "/./admin"
-        );
+        assert_eq!(PathPrefixStrategy::SlashDot.apply("/admin"), "/./admin");
     }
 
     #[test]
@@ -178,10 +172,7 @@ mod tests {
         // approach turned `///x` into `////x`, defeating the purpose
         // (the WAF would already strip three-or-more, the FOUR-slash
         // case is yet another fold class).
-        assert_eq!(
-            PathPrefixStrategy::DoubleSlash.apply("///admin"),
-            "//admin"
-        );
+        assert_eq!(PathPrefixStrategy::DoubleSlash.apply("///admin"), "//admin");
     }
 
     #[test]
@@ -200,14 +191,8 @@ mod tests {
         // Path that doesn't start with `/` is a contract violation —
         // return unchanged rather than producing a malformed mutation.
         // Matches `mutate_url`'s "doesn't look like a path" guard.
-        assert_eq!(
-            PathPrefixStrategy::DoubleSlash.apply("admin"),
-            "admin"
-        );
-        assert_eq!(
-            PathPrefixStrategy::DoubleSlash.apply(""),
-            ""
-        );
+        assert_eq!(PathPrefixStrategy::DoubleSlash.apply("admin"), "admin");
+        assert_eq!(PathPrefixStrategy::DoubleSlash.apply(""), "");
     }
 
     #[test]
@@ -215,14 +200,8 @@ mod tests {
         // Boundary: `/` → `//`. Some target webserver default-routes
         // every request to `/`, and `//` is the trivial protocol-
         // relative form. Don't crash, don't produce empty.
-        assert_eq!(
-            PathPrefixStrategy::DoubleSlash.apply("/"),
-            "//"
-        );
-        assert_eq!(
-            PathPrefixStrategy::SlashDot.apply("/"),
-            "/./"
-        );
+        assert_eq!(PathPrefixStrategy::DoubleSlash.apply("/"), "//");
+        assert_eq!(PathPrefixStrategy::SlashDot.apply("/"), "/./");
     }
 
     #[test]
@@ -235,8 +214,11 @@ mod tests {
             .map(|s| s.label())
             .collect();
         let unique: std::collections::HashSet<_> = labels.iter().collect();
-        assert_eq!(labels.len(), unique.len(),
-            "every PathPrefixStrategy variant must have a distinct label");
+        assert_eq!(
+            labels.len(),
+            unique.len(),
+            "every PathPrefixStrategy variant must have a distinct label"
+        );
     }
 
     #[test]

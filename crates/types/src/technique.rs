@@ -116,7 +116,11 @@ impl fmt::Display for Technique {
             Self::H2Evasion(s) => write!(f, "h2:{s}"),
             Self::DifferentialProbe => f.write_str("differential-probe"),
             Self::BodyPadding(n) => write!(f, "body-padding:{n}"),
-            Self::MlEvasion { waf_class, queries, off_manifold_rejected } => write!(
+            Self::MlEvasion {
+                waf_class,
+                queries,
+                off_manifold_rejected,
+            } => write!(
                 f,
                 "ml-evasion:{waf_class}(q={queries},off={off_manifold_rejected})"
             ),

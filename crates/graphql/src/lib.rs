@@ -131,7 +131,8 @@ pub fn generate_deep_query(depth: usize) -> String {
 /// limit field traversal but not fragment expansion.
 #[must_use]
 pub fn generate_fragment_query(depth: usize) -> String {
-    let mut q = String::from("query FragmentTest{user{...UserFields}} fragment UserFields on User{");
+    let mut q =
+        String::from("query FragmentTest{user{...UserFields}} fragment UserFields on User{");
     for i in 0..depth {
         q.push_str(&format!("f{i}:friends{{"));
     }
@@ -166,7 +167,10 @@ pub fn generate_batch(size: usize) -> Vec<serde_json::Value> {
 pub fn op_name_mismatch_payloads() -> Vec<String> {
     let cases = [
         ("BenignLookup", "{__schema{queryType{name}}}"),
-        ("HealthCheck", "{__type(name:\"User\"){fields{name type{name}}}}"),
+        (
+            "HealthCheck",
+            "{__type(name:\"User\"){fields{name type{name}}}}",
+        ),
         ("status", "query AdminPanel{__schema{types{name}}}"),
     ];
     cases
@@ -217,7 +221,9 @@ pub fn all_evasion_payloads() -> Vec<String> {
     // Vendored introspection variants.
     out.push(json!({ "query": INTROSPECTION_QUERY }).to_string());
     out.push(json!({ "query": SIMPLE_INTROSPECTION_QUERY }).to_string());
-    out.push(json!({ "query": TYPE_INTROSPECTION_QUERY, "variables": { "name": "User" } }).to_string());
+    out.push(
+        json!({ "query": TYPE_INTROSPECTION_QUERY, "variables": { "name": "User" } }).to_string(),
+    );
     // Vendored depth bombs at every test depth.
     for &d in &TEST_DEPTHS {
         out.push(json!({ "query": generate_deep_query(d) }).to_string());
@@ -316,7 +322,10 @@ mod tests {
             // so the substring (possibly with embedded whitespace or
             // zero-width chars) should be present somewhere.
             assert!(p.contains("__"), "whitespace variant lost __ prefix: {p}");
-            assert!(p.contains("schema"), "whitespace variant lost schema kw: {p}");
+            assert!(
+                p.contains("schema"),
+                "whitespace variant lost schema kw: {p}"
+            );
         }
     }
 
@@ -339,7 +348,11 @@ mod tests {
         assert!(v.len() > 20, "evasion battery too small: {}", v.len());
         // No exact-string duplicates inside the unified battery.
         let set: std::collections::BTreeSet<&String> = v.iter().collect();
-        assert_eq!(set.len(), v.len(), "all_evasion_payloads contains duplicates");
+        assert_eq!(
+            set.len(),
+            v.len(),
+            "all_evasion_payloads contains duplicates"
+        );
     }
 
     // ── TEST_DEPTHS / TEST_BATCH_SIZES constants (anti-rig) ────────────
@@ -351,16 +364,29 @@ mod tests {
     fn test_depths_contains_extremes() {
         // Must include the low (5) and high (200) values.
         assert!(TEST_DEPTHS.contains(&5), "minimum depth probe removed");
-        assert!(TEST_DEPTHS.contains(&200), "maximum depth probe removed — DoS coverage lost");
+        assert!(
+            TEST_DEPTHS.contains(&200),
+            "maximum depth probe removed — DoS coverage lost"
+        );
         // Anti-rig: exact count. If someone adds or removes depths, this catches it.
         assert_eq!(TEST_DEPTHS.len(), 6, "TEST_DEPTHS length changed from 6");
     }
 
     #[test]
     fn test_batch_sizes_contains_extremes() {
-        assert!(TEST_BATCH_SIZES.contains(&5), "minimum batch size probe removed");
-        assert!(TEST_BATCH_SIZES.contains(&100), "maximum batch size probe removed");
-        assert_eq!(TEST_BATCH_SIZES.len(), 5, "TEST_BATCH_SIZES length changed from 5");
+        assert!(
+            TEST_BATCH_SIZES.contains(&5),
+            "minimum batch size probe removed"
+        );
+        assert!(
+            TEST_BATCH_SIZES.contains(&100),
+            "maximum batch size probe removed"
+        );
+        assert_eq!(
+            TEST_BATCH_SIZES.len(),
+            5,
+            "TEST_BATCH_SIZES length changed from 5"
+        );
     }
 
     // ── generate_deep_query boundaries ─────────────────────────────────
@@ -506,9 +532,7 @@ mod tests {
     #[test]
     fn whitespace_split_contains_zero_width_space_variant() {
         let payloads = introspection_whitespace_split_payloads();
-        let has_zwsp = payloads
-            .iter()
-            .any(|p| p.contains('\u{200B}'));
+        let has_zwsp = payloads.iter().any(|p| p.contains('\u{200B}'));
         assert!(has_zwsp, "zero-width-space whitespace variant was removed");
     }
 
@@ -525,7 +549,10 @@ mod tests {
     #[test]
     fn field_typos_every_typo_differs_from_real() {
         for (typo, real) in FIELD_TYPOS {
-            assert_ne!(*typo, *real, "FIELD_TYPOS has identical typo and real: {typo}");
+            assert_ne!(
+                *typo, *real,
+                "FIELD_TYPOS has identical typo and real: {typo}"
+            );
         }
     }
 

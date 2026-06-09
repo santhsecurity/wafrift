@@ -284,7 +284,7 @@ impl RuleCoverage {
         serde_json::to_string_pretty(self)
     }
 
-    /// Deserialize a coverage map from JSON produced by [`to_json`].
+    /// Deserialize a coverage map from JSON produced by `to_json`.
     ///
     /// # Errors
     ///

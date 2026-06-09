@@ -8,10 +8,8 @@ use wafrift_core::content_type::{
     ContentTypeTechnique, generate_variants, generate_variants_from_body,
 };
 use wafrift_core::encoding::{self, Strategy};
+use wafrift_core::strategy::{CalibrationResult, HostState, analyze_calibration, evade};
 use wafrift_core::{EscalationLevel, EvasionConfig};
-use wafrift_core::strategy::{
-    CalibrationResult, HostState, analyze_calibration, evade,
-};
 use wafrift_core::{Request, Technique};
 
 // ============================================================================

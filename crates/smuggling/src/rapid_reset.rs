@@ -272,9 +272,7 @@ pub fn made_you_reset(
         exclusive: true,
         depends_on: dep,
         weight: 255,
-        description: format!(
-            "MadeYouReset PRIORITY: stream {sid} exclusive dep on idle {dep}"
-        ),
+        description: format!("MadeYouReset PRIORITY: stream {sid} exclusive dep on idle {dep}"),
     });
     let hdr_frame = headers_frame(sid, authority, true);
     let mut wire = Vec::with_capacity(prio_frame.len() + hdr_frame.len());
@@ -370,10 +368,10 @@ pub fn settings_storm(frame_count: usize) -> SettingsStorm {
     for i in 0..n {
         let frame = if i % 2 == 0 {
             settings_frame(&[
-                (0x3, 1),      // MAX_CONCURRENT_STREAMS=1
-                (0x4, 65535),  // INITIAL_WINDOW_SIZE=65535
-                (0x5, 16384),  // MAX_FRAME_SIZE=16384
-                (0x1, 4096),   // HEADER_TABLE_SIZE=4096
+                (0x3, 1),     // MAX_CONCURRENT_STREAMS=1
+                (0x4, 65535), // INITIAL_WINDOW_SIZE=65535
+                (0x5, 16384), // MAX_FRAME_SIZE=16384
+                (0x1, 4096),  // HEADER_TABLE_SIZE=4096
             ])
         } else {
             settings_frame(&[
@@ -501,10 +499,7 @@ mod tests {
 
     #[test]
     fn client_preface_exact_bytes() {
-        assert_eq!(
-            CLIENT_PREFACE,
-            b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-        );
+        assert_eq!(CLIENT_PREFACE, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
         assert_eq!(CLIENT_PREFACE.len(), 24);
     }
 
@@ -587,9 +582,8 @@ mod tests {
         let mut out = Vec::new();
         let mut i = 0;
         while i + 9 <= wire.len() {
-            let len = ((wire[i] as usize) << 16)
-                | ((wire[i + 1] as usize) << 8)
-                | wire[i + 2] as usize;
+            let len =
+                ((wire[i] as usize) << 16) | ((wire[i + 1] as usize) << 8) | wire[i + 2] as usize;
             let frame_type = wire[i + 3];
             let sid = ((wire[i + 5] as u32) << 24)
                 | ((wire[i + 6] as u32) << 16)
@@ -715,7 +709,11 @@ mod tests {
         // PRIORITY frame is 14 bytes (9 header + 5 payload).
         assert!(probe.wire_bytes.len() > 14);
         // Byte at offset 14+3 = 17 should be HEADERS type (0x01).
-        assert_eq!(probe.wire_bytes[14 + 3], 0x01, "HEADERS must follow PRIORITY");
+        assert_eq!(
+            probe.wire_bytes[14 + 3],
+            0x01,
+            "HEADERS must follow PRIORITY"
+        );
     }
 
     #[test]
@@ -780,7 +778,10 @@ mod tests {
             .count();
         // initial_settings + 6 storm frames = 7 non-ACK SETTINGS
         // (settings_storm does not emit ACKs, so all 0x04/stream=0 are data frames)
-        assert!(count >= 6, "expected at least 6 SETTINGS frames, got {count}");
+        assert!(
+            count >= 6,
+            "expected at least 6 SETTINGS frames, got {count}"
+        );
     }
 
     #[test]
@@ -879,9 +880,16 @@ mod tests {
         for len in [0usize, 1, 63, 126] {
             let encoded = hpack_string_length(len);
             assert_eq!(encoded.len(), 1, "len={len} must encode as 1 byte");
-            assert_eq!(encoded[0], len as u8, "encoded byte must equal len for len={len}");
+            assert_eq!(
+                encoded[0], len as u8,
+                "encoded byte must equal len for len={len}"
+            );
             // Bit 7 (Huffman flag) must be clear.
-            assert_eq!(encoded[0] & 0x80, 0, "Huffman bit must be clear for len={len}");
+            assert_eq!(
+                encoded[0] & 0x80,
+                0,
+                "Huffman bit must be clear for len={len}"
+            );
         }
     }
 
@@ -906,7 +914,10 @@ mod tests {
         // byte 1: 129 & 0x7F | 0x80 = 0x01 | 0x80 = 0x81 (more follows)
         // byte 2: 129 >> 7 = 1 (final)
         assert_eq!(encoded[0], 127, "first byte must saturate the prefix");
-        assert_eq!(encoded[1], 0x81, "second byte encodes low 7 bits with continuation");
+        assert_eq!(
+            encoded[1], 0x81,
+            "second byte encodes low 7 bits with continuation"
+        );
         assert_eq!(encoded[2], 0x01, "third byte encodes remaining bits");
         assert_eq!(encoded.len(), 3, "256 must encode as 3 bytes total");
     }
@@ -921,7 +932,10 @@ mod tests {
         // Find the length-varint position: after 0x82 0x84 0x87 0x10 0x01 (5 bytes).
         // hpack_string_length(256) = [127, 0x81, 0x01] = 3 bytes.
         assert_eq!(payload[5], 127, "first length byte must be 127 (saturated)");
-        assert_eq!(payload[6], 0x81, "second length byte = low bits with continuation");
+        assert_eq!(
+            payload[6], 0x81,
+            "second length byte = low bits with continuation"
+        );
         assert_eq!(payload[7], 0x01, "third length byte = remaining bits");
         // Authority bytes follow at position 8.
         assert_eq!(&payload[8..8 + 256], authority.as_bytes());
@@ -932,7 +946,10 @@ mod tests {
         // Short authority (e.g., "x.com" = 5 bytes) must use 1-byte length.
         let payload = minimal_headers_payload("x.com");
         // After 5 prefix bytes: length byte at index 5.
-        assert_eq!(payload[5], 5, "5-char authority must use single-byte length 5");
+        assert_eq!(
+            payload[5], 5,
+            "5-char authority must use single-byte length 5"
+        );
         assert_eq!(&payload[6..11], b"x.com");
     }
 
@@ -945,7 +962,10 @@ mod tests {
         // The fix must produce a well-formed HPACK block without panicking.
         let authority = "very-long-domain-".repeat(18); // 306 bytes
         let burst = classic_rapid_reset(&authority, 1, 0x8);
-        assert!(!burst.wire_bytes.is_empty(), "must produce non-empty wire bytes");
+        assert!(
+            !burst.wire_bytes.is_empty(),
+            "must produce non-empty wire bytes"
+        );
         assert!(burst.wire_bytes.starts_with(CLIENT_PREFACE));
     }
 }

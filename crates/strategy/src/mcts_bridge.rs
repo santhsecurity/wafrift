@@ -316,8 +316,7 @@ impl Environment for WafRiftEnv {
                     // oversized / unparseable body for the content-type
                     // switch means "no params to switch on" — fall
                     // through rather than erroring the whole MCTS step.
-                    let params = wafrift_content_type::parse_form_body(body)
-                        .unwrap_or_default();
+                    let params = wafrift_content_type::parse_form_body(body).unwrap_or_default();
                     if !params.is_empty() {
                         let variants = wafrift_content_type::generate_variants(&params);
                         if let Some(variant) = variants
@@ -563,10 +562,7 @@ mod tests {
         // HeaderTrick (F145) needs a Content-Type header on the request.
         // Build a request that satisfies every gate so the test
         // asserts breadth of the action space, not a single gate.
-        let mut req = Request::post(
-            "http://example.com/search",
-            b"q=admin' OR 1=1--".to_vec(),
-        );
+        let mut req = Request::post("http://example.com/search", b"q=admin' OR 1=1--".to_vec());
         req.headers.push((
             "Content-Type".into(),
             "application/x-www-form-urlencoded".into(),
@@ -871,10 +867,7 @@ mod tests {
     fn grammar_actions_in_legal_actions_are_unique() {
         // A CMDI payload typically generates multiple "separator_swap"
         // mutations (one per separator in the set).
-        let req = Request::post(
-            "http://example.com/exec",
-            b"cmd=ls%20-la".to_vec(),
-        );
+        let req = Request::post("http://example.com/exec", b"cmd=ls%20-la".to_vec());
         let env = WafRiftEnv::new(req, 6);
         let actions = env.legal_actions();
 
@@ -887,7 +880,7 @@ mod tests {
             .collect();
 
         let total = grammar_names.len();
-        grammar_names.dedup();  // in-place dedup of consecutive (sort first for safety)
+        grammar_names.dedup(); // in-place dedup of consecutive (sort first for safety)
         grammar_names.sort();
         grammar_names.dedup();
         assert_eq!(
@@ -905,10 +898,7 @@ mod tests {
     /// applying that action must mutate the body (not be a no-op).
     #[test]
     fn each_grammar_action_produces_a_distinct_body() {
-        let req = Request::post(
-            "http://example.com/exec",
-            b"cmd=ls%20-la".to_vec(),
-        );
+        let req = Request::post("http://example.com/exec", b"cmd=ls%20-la".to_vec());
         let original_body = req.body.clone().unwrap();
         let env = WafRiftEnv::new(req.clone(), 6);
         let grammar_actions: Vec<TechniqueAction> = env
@@ -940,10 +930,7 @@ mod tests {
     /// closed (`grammar_applied = true`), regardless of which rule was used.
     #[test]
     fn grammar_dimension_closed_after_any_grammar_action() {
-        let req = Request::post(
-            "http://example.com/search",
-            b"q=admin' OR 1=1--".to_vec(),
-        );
+        let req = Request::post("http://example.com/search", b"q=admin' OR 1=1--".to_vec());
         let env = WafRiftEnv::new(req.clone(), 6);
         let grammar_actions: Vec<TechniqueAction> = env
             .legal_actions()

@@ -200,7 +200,10 @@ pub enum DeliveryAction {
     /// Set `window.name = value` on an attacker-controlled page, then navigate
     /// the same tab to `then_navigate`. `window.name` survives the cross-origin
     /// navigation, carrying the payload into the target's `window.name` sink.
-    SetWindowName { value: String, then_navigate: String },
+    SetWindowName {
+        value: String,
+        then_navigate: String,
+    },
     /// Write `value` into `store[key]` (`localStorage` / `sessionStorage`), then
     /// load `then_load`; a later read of that key into a DOM sink executes it.
     SetStorage {
@@ -225,14 +228,24 @@ impl DeliveryAction {
     pub fn describe(&self) -> String {
         match self {
             Self::Navigate { url } => format!("navigate browser to {url}"),
-            Self::SetWindowName { value, then_navigate } => format!(
+            Self::SetWindowName {
+                value,
+                then_navigate,
+            } => format!(
                 "on an attacker page set window.name = {value:?}, then navigate the tab to \
                  {then_navigate}"
             ),
-            Self::SetStorage { store, key, value, then_load } => format!(
-                "set {store}[{key:?}] = {value:?}, then load {then_load}"
-            ),
-            Self::PostMessage { value, target, accepted_origin } => {
+            Self::SetStorage {
+                store,
+                key,
+                value,
+                then_load,
+            } => format!("set {store}[{key:?}] = {value:?}, then load {then_load}"),
+            Self::PostMessage {
+                value,
+                target,
+                accepted_origin,
+            } => {
                 let origin = accepted_origin.as_deref().unwrap_or("* (unvalidated)");
                 format!("postMessage({value:?}) to {target} (listener accepts origin {origin})")
             }
@@ -327,7 +340,11 @@ pub fn xss_client_delivered(payload: &str, max: usize) -> Vec<ClientDelivery> {
     let mut out: Vec<ClientDelivery> = Vec::with_capacity(max.min(32));
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    let push = |payload: String, channel: ClientChannel, rules: Vec<&'static str>, out: &mut Vec<ClientDelivery>, seen: &mut std::collections::HashSet<String>| {
+    let push = |payload: String,
+                channel: ClientChannel,
+                rules: Vec<&'static str>,
+                out: &mut Vec<ClientDelivery>,
+                seen: &mut std::collections::HashSet<String>| {
         if out.len() >= max {
             return;
         }
@@ -343,7 +360,13 @@ pub fn xss_client_delivered(payload: &str, max: usize) -> Vec<ClientDelivery> {
 
     // Seed 1: identity payload across every WAF-blind channel.
     for channel in ClientChannel::catalog() {
-        push(payload.to_string(), channel, vec!["identity"], &mut out, &mut seen);
+        push(
+            payload.to_string(),
+            channel,
+            vec!["identity"],
+            &mut out,
+            &mut seen,
+        );
     }
 
     // Seed 2: sanitizer prefix-bypass variants, delivered via the fragment
@@ -372,7 +395,8 @@ mod tests {
         // The payload lands verbatim after `#` — never percent-encoded,
         // because the fragment is never sent to the origin.
         assert_eq!(
-            c.fragment_url("https://t/checkout", "javascript:alert(1)").as_deref(),
+            c.fragment_url("https://t/checkout", "javascript:alert(1)")
+                .as_deref(),
             Some("https://t/checkout#javascript:alert(1)")
         );
     }
@@ -404,7 +428,11 @@ mod tests {
     #[test]
     fn every_client_channel_is_waf_blind() {
         for c in ClientChannel::catalog() {
-            assert!(!c.reaches_server(), "{} must never reach the server", c.label());
+            assert!(
+                !c.reaches_server(),
+                "{} must never reach the server",
+                c.label()
+            );
         }
     }
 
@@ -429,11 +457,18 @@ mod tests {
         for (variant, _rule) in &vs {
             // A position-anchored `substring(0,11) === 'javascript:'` check
             // FAILS (the contiguous lowercase scheme is no longer at offset 0).
-            assert_ne!(&variant[..variant.len().min(11)].to_ascii_lowercase(), "javascript:");
+            assert_ne!(
+                &variant[..variant.len().min(11)].to_ascii_lowercase(),
+                "javascript:"
+            );
             // …yet the scheme is still present once the browser strips the
             // tab/space/newline, so it still executes.
             let normalized: String = variant.chars().filter(|c| !c.is_whitespace()).collect();
-            assert!(normalized.to_ascii_lowercase().starts_with("javascript:alert"));
+            assert!(
+                normalized
+                    .to_ascii_lowercase()
+                    .starts_with("javascript:alert")
+            );
         }
     }
 
@@ -475,7 +510,8 @@ mod tests {
 
     #[test]
     fn delivery_action_fragment_is_a_navigation_to_the_hash_url() {
-        let a = ClientChannel::Fragment.delivery_action("https://t/checkout", "javascript:alert(1)");
+        let a =
+            ClientChannel::Fragment.delivery_action("https://t/checkout", "javascript:alert(1)");
         assert_eq!(
             a,
             DeliveryAction::Navigate {
@@ -486,7 +522,8 @@ mod tests {
 
     #[test]
     fn delivery_action_client_route_nests_under_hash_path() {
-        let a = ClientChannel::ClientRoute.delivery_action("https://t/app", "<img src=x onerror=alert(1)>");
+        let a = ClientChannel::ClientRoute
+            .delivery_action("https://t/app", "<img src=x onerror=alert(1)>");
         assert_eq!(
             a,
             DeliveryAction::Navigate {
@@ -539,10 +576,14 @@ mod tests {
                 accepted_origin: Some("https://evil.test".to_string()),
             }
         );
-        let wildcard = ClientChannel::PostMessage { origin: None }.delivery_action("https://t/", "x");
+        let wildcard =
+            ClientChannel::PostMessage { origin: None }.delivery_action("https://t/", "x");
         assert!(matches!(
             wildcard,
-            DeliveryAction::PostMessage { accepted_origin: None, .. }
+            DeliveryAction::PostMessage {
+                accepted_origin: None,
+                ..
+            }
         ));
     }
 
@@ -553,7 +594,11 @@ mod tests {
         for c in ClientChannel::catalog() {
             let a = c.delivery_action("https://t/path", "javascript:alert(1)");
             let line = a.describe();
-            assert!(!line.is_empty(), "{} produced an empty instruction", c.label());
+            assert!(
+                !line.is_empty(),
+                "{} produced an empty instruction",
+                c.label()
+            );
             // Every instruction must reference the payload it delivers.
             assert!(
                 line.contains("alert(1)"),
@@ -594,11 +639,10 @@ mod tests {
         // Coherence guard: a client channel must NEVER collide with a server
         // DeliveryShape label, or confirmation could be routed to the wrong
         // oracle (server verdict vs scald DOM).
-        let server: std::collections::HashSet<&'static str> =
-            super::super::sql::delivery_set("q")
-                .iter()
-                .map(super::super::DeliveryShape::label)
-                .collect();
+        let server: std::collections::HashSet<&'static str> = super::super::sql::delivery_set("q")
+            .iter()
+            .map(super::super::DeliveryShape::label)
+            .collect();
         for c in ClientChannel::catalog() {
             assert!(
                 !server.contains(c.label()),

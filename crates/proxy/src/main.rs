@@ -41,8 +41,8 @@ use wafrift_proxy::scope::ScopeFilter;
 use wafrift_proxy::upstream_policy::{
     BogonFilteringResolver, UpstreamPolicy, assert_forward_url_allowed, resolve_forward_url_pinned,
 };
-use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_strategy::HostState;
+use wafrift_strategy::strategy::{evade, evade_smart};
 use wafrift_transport::signal::{BlockClass, ResponseProfileDb};
 // §8 ARCHITECTURE: one import path for EvasionConfig — canonical home is
 // wafrift_types, not the forwarding re-export in wafrift_strategy.
@@ -1438,10 +1438,13 @@ async fn detonate_response(body: &[u8], url: &str) -> Option<finding_class::Deto
     // jsdet sandbox finishes in ~2s; the chrome engine cold-starts a browser and
     // has its own 15s internal kill, so allow it more headroom.
     let budget = if engine == "chrome" { 20 } else { 10 };
-    let out = tokio::time::timeout(std::time::Duration::from_secs(budget), child.wait_with_output())
-        .await
-        .ok()? // Elapsed → None (child killed on drop)
-        .ok()?; // io error → None
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(budget),
+        child.wait_with_output(),
+    )
+    .await
+    .ok()? // Elapsed → None (child killed on drop)
+    .ok()?; // io error → None
     #[derive(serde::Deserialize)]
     struct P {
         executed: bool,
@@ -1515,7 +1518,9 @@ async fn forward_wafrift_request(
         // Prevent unbounded memory growth from arbitrary Host headers (DoS vector).
         // Evict the oldest host (FIFO) rather than an arbitrary HashMap bucket.
         // Uses MAX_RESTORED_HOSTS so the runtime cap matches the restore cap.
-        if st.hosts.len() >= crate::gene_bank_io::MAX_RESTORED_HOSTS && !st.hosts.contains_key(&host) {
+        if st.hosts.len() >= crate::gene_bank_io::MAX_RESTORED_HOSTS
+            && !st.hosts.contains_key(&host)
+        {
             while let Some(key_to_remove) = st.host_fifo.pop_front() {
                 if st.hosts.remove(&key_to_remove).is_some() {
                     break;
@@ -1672,18 +1677,20 @@ async fn forward_wafrift_request(
         && let Some((scheme_authority, path_and_query)) =
             split_url_for_mutation(&evasion_result.request.url)
     {
-        let strategy =
-            match wafrift_encoding::path_prefix::PathPrefixStrategy::all().get(prefix_idx as usize)
-            {
-                Some(s) => *s,
-                // Defence in depth: the startup-time validator already
-                // rejects out-of-range indices, but trust nothing on the
-                // hot path.
-                None => return Ok(error_response(
+        let strategy = match wafrift_encoding::path_prefix::PathPrefixStrategy::all()
+            .get(prefix_idx as usize)
+        {
+            Some(s) => *s,
+            // Defence in depth: the startup-time validator already
+            // rejects out-of-range indices, but trust nothing on the
+            // hot path.
+            None => {
+                return Ok(error_response(
                     hyper::StatusCode::INTERNAL_SERVER_ERROR,
                     "internal: corrupt MUTATE_PATH_PREFIX index",
-                )),
-            };
+                ));
+            }
+        };
         let (mutated_pq, label) =
             wafrift_encoding::path_prefix::mutate_path_prefix(&path_and_query, strategy);
         if mutated_pq != path_and_query {
@@ -2040,9 +2047,8 @@ async fn forward_wafrift_request(
             //   - ChallengeRequired: JS/CAPTCHA challenge served as 200
             //   - Ambiguous: conflicting status vs body (200 + block-page body)
             //   - Blocked: oracle independently classified it as blocked
-            let oracle_block = verdict.is_blocked()
-                || verdict.is_challenge()
-                || verdict.is_ambiguous();
+            let oracle_block =
+                verdict.is_blocked() || verdict.is_challenge() || verdict.is_ambiguous();
             if oracle_block && !profile_blocked {
                 info!(
                     host = %host,

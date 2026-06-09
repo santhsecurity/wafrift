@@ -98,7 +98,8 @@ impl ZeroRttReplayBuilder {
             handshake_bytes: Vec::new(), // nothing in 1-RTT
             description: format!(
                 "0-RTT full request: {} {} ({} headers, {} body bytes)",
-                method, path,
+                method,
+                path,
                 headers.len(),
                 body.map(|b| b.len()).unwrap_or(0)
             ),
@@ -125,7 +126,9 @@ impl ZeroRttReplayBuilder {
             handshake_bytes: h3_data,
             description: format!(
                 "0-RTT split: HEADERS early, DATA ({} bytes) in 1-RTT — {} {}",
-                body.len(), method, path
+                body.len(),
+                method,
+                path
             ),
             strategy: ZeroRttStrategy::HeadersEarlyDataLate,
         }
@@ -138,11 +141,7 @@ impl ZeroRttReplayBuilder {
     /// exploit request. Since 0-RTT has already been processed, the server
     /// may have established a trusted session context that the 1-RTT exploit
     /// request inherits.
-    pub fn benign_early_exploit_late(
-        &self,
-        path: &str,
-        exploit_body: &[u8],
-    ) -> ZeroRttPayload {
+    pub fn benign_early_exploit_late(&self, path: &str, exploit_body: &[u8]) -> ZeroRttPayload {
         let benign_headers = [("cache-control", "max-age=0"), ("accept", "*/*")];
         let early = build_h3_headers_frame("GET", path, &benign_headers);
         let exploit_hdrs = [("content-type", "application/x-www-form-urlencoded")];
@@ -362,12 +361,16 @@ mod tests {
     #[test]
     fn h3_headers_frame_large_payload_uses_2byte_len() {
         // 100 extra headers → big field block
-        let extras: Vec<(&str, &str)> = (0..20).map(|_| ("x-long-header-name-that-makes-it-big", "longvalue")).collect();
+        let extras: Vec<(&str, &str)> = (0..20)
+            .map(|_| ("x-long-header-name-that-makes-it-big", "longvalue"))
+            .collect();
         let frame = build_h3_headers_frame("GET", "/path", &extras);
         if frame.len() > 65 {
             // length varint should have used 2 bytes
-            assert!(frame[1] >= 0x40 || frame.len() == frame[1] as usize + 2,
-                "large frame must use multi-byte length varint");
+            assert!(
+                frame[1] >= 0x40 || frame.len() == frame[1] as usize + 2,
+                "large frame must use multi-byte length varint"
+            );
         }
     }
 
@@ -378,7 +381,10 @@ mod tests {
         let b = builder();
         let payload = b.full_request_early("GET", "/", &[], None);
         assert!(!payload.early_data_bytes.is_empty());
-        assert!(payload.handshake_bytes.is_empty(), "no data should be in 1-RTT for full-early");
+        assert!(
+            payload.handshake_bytes.is_empty(),
+            "no data should be in 1-RTT for full-early"
+        );
         assert_eq!(payload.strategy, ZeroRttStrategy::FullRequestInEarlyData);
     }
 
@@ -386,19 +392,32 @@ mod tests {
     fn full_request_early_with_body() {
         let b = builder();
         let body = b"payload=SELECT+1--";
-        let payload = b.full_request_early("POST", "/login", &[("content-type", "application/x-www-form-urlencoded")], Some(body));
+        let payload = b.full_request_early(
+            "POST",
+            "/login",
+            &[("content-type", "application/x-www-form-urlencoded")],
+            Some(body),
+        );
         // early_data_bytes should contain both HEADERS and DATA frames
         assert!(payload.early_data_bytes.len() > 2);
         // DATA frame type=0x00 should be somewhere in the bytes
-        assert!(payload.early_data_bytes.iter().any(|&b| b == 0x00 || b == 0x01),
-            "early data should contain H3 frame markers");
+        assert!(
+            payload
+                .early_data_bytes
+                .iter()
+                .any(|&b| b == 0x00 || b == 0x01),
+            "early data should contain H3 frame markers"
+        );
     }
 
     #[test]
     fn headers_early_data_late_splits_correctly() {
         let b = builder();
         let payload = b.headers_early_data_late("POST", "/api", &[], b"evil body");
-        assert!(!payload.early_data_bytes.is_empty(), "HEADERS must be in early data");
+        assert!(
+            !payload.early_data_bytes.is_empty(),
+            "HEADERS must be in early data"
+        );
         assert!(!payload.handshake_bytes.is_empty(), "DATA must be in 1-RTT");
         assert_eq!(payload.strategy, ZeroRttStrategy::HeadersEarlyDataLate);
     }
@@ -409,7 +428,10 @@ mod tests {
         let body = b"test body bytes";
         let payload = b.headers_early_data_late("POST", "/", &[], body);
         // handshake_bytes is a DATA frame: starts with 0x00
-        assert_eq!(payload.handshake_bytes[0], 0x00, "1-RTT must be a DATA frame (type=0x00)");
+        assert_eq!(
+            payload.handshake_bytes[0], 0x00,
+            "1-RTT must be a DATA frame (type=0x00)"
+        );
     }
 
     #[test]
@@ -428,7 +450,11 @@ mod tests {
         let b = ZeroRttReplayBuilder::new(5);
         let payload = b.full_request_early("GET", "/", &[], None);
         let fs = b.replay_bundle(&payload);
-        assert_eq!(fs.frames.len(), 5, "replay bundle must contain exactly replay_count frames");
+        assert_eq!(
+            fs.frames.len(),
+            5,
+            "replay bundle must contain exactly replay_count frames"
+        );
     }
 
     #[test]
@@ -438,7 +464,11 @@ mod tests {
         let fs = b.replay_bundle(&payload);
         let stream_ids: Vec<u64> = fs.frames.iter().map(|f| f.stream_id).collect();
         let unique: std::collections::HashSet<_> = stream_ids.iter().collect();
-        assert_eq!(unique.len(), stream_ids.len(), "each replay must use a distinct stream ID");
+        assert_eq!(
+            unique.len(),
+            stream_ids.len(),
+            "each replay must use a distinct stream ID"
+        );
     }
 
     #[test]
@@ -456,7 +486,10 @@ mod tests {
         let b = ZeroRttReplayBuilder::new(0); // must clamp to 1
         let payload = b.full_request_early("GET", "/", &[], None);
         let fs = b.replay_bundle(&payload);
-        assert!(!fs.frames.is_empty(), "even with count=0, must produce at least 1 frame");
+        assert!(
+            !fs.frames.is_empty(),
+            "even with count=0, must produce at least 1 frame"
+        );
     }
 
     // ── §15 hostile-input: as u8 overflow guard on QPACK literal lengths ─────

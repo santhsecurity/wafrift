@@ -238,11 +238,7 @@ mod tests {
         // F142 regression: pre-fix rand::thread_rng() meant the same
         // input produced different output across calls when
         // alternatives.len() > 1, breaking gene-bank replay.
-        let alts = vec![
-            "||".to_string(),
-            "OR".to_string(),
-            "XOR".to_string(),
-        ];
+        let alts = vec!["||".to_string(), "OR".to_string(), "XOR".to_string()];
         let a = replace_logical_operator("1 or 1", &alts, "or").unwrap();
         let b = replace_logical_operator("1 or 1", &alts, "or").unwrap();
         let c = replace_logical_operator("1 or 1", &alts, "or").unwrap();
@@ -258,11 +254,7 @@ mod tests {
         // distinct payloads and assert ≥2 different alternatives
         // appear across them (with 3 alternatives and a real hash
         // mix, all-same is astronomically unlikely).
-        let alts = vec![
-            "||".to_string(),
-            "OR".to_string(),
-            "XOR".to_string(),
-        ];
+        let alts = vec!["||".to_string(), "OR".to_string(), "XOR".to_string()];
         let mut seen = std::collections::HashSet::new();
         for payload in [
             "1 or 1",

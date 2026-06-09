@@ -796,10 +796,22 @@ mod tests {
     fn known_threshold_values_contains_expected_numbers() {
         let values = known_threshold_values();
         // Pin the documented WAF thresholds.
-        assert!(values.contains(&(8 * 1024)), "must include 8 KiB (cloudflare-pro / aws-waf)");
-        assert!(values.contains(&(64 * 1024)), "must include 64 KiB (aws-waf-extended)");
-        assert!(values.contains(&(128 * 1024)), "must include 128 KiB (cloudflare-enterprise / imperva / modsecurity)");
-        assert!(values.contains(&(65 * 1024)), "must include 65 KiB (naxsi-default)");
+        assert!(
+            values.contains(&(8 * 1024)),
+            "must include 8 KiB (cloudflare-pro / aws-waf)"
+        );
+        assert!(
+            values.contains(&(64 * 1024)),
+            "must include 64 KiB (aws-waf-extended)"
+        );
+        assert!(
+            values.contains(&(128 * 1024)),
+            "must include 128 KiB (cloudflare-enterprise / imperva / modsecurity)"
+        );
+        assert!(
+            values.contains(&(65 * 1024)),
+            "must include 65 KiB (naxsi-default)"
+        );
     }
 
     #[test]
@@ -831,7 +843,10 @@ mod tests {
         let ct2 = "multipart/form-data; boundary=\u{2261}abc"; // ≡ in boundary value
         let boundary2 = extract_boundary(ct2);
         // The value "\u{2261}abc" should be returned if the prefix matches.
-        assert!(boundary2.is_some(), "unicode in boundary value must be preserved");
+        assert!(
+            boundary2.is_some(),
+            "unicode in boundary value must be preserved"
+        );
     }
 
     #[test]
@@ -885,7 +900,11 @@ mod tests {
 
     #[test]
     fn max_useful_pad_is_8_mib() {
-        assert_eq!(MAX_USEFUL_PAD, 8 * 1024 * 1024, "MAX_USEFUL_PAD must be 8 MiB");
+        assert_eq!(
+            MAX_USEFUL_PAD,
+            8 * 1024 * 1024,
+            "MAX_USEFUL_PAD must be 8 MiB"
+        );
     }
 
     #[test]

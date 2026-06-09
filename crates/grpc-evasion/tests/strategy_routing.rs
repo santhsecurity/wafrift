@@ -6,12 +6,11 @@
 //! call the grpc-evasion library and assert the produced frames are
 //! structurally valid for that content-type.
 
+use wafrift_grpc_evasion::{
+    decode_grpc_frame, embed_attack_in_message, embed_attack_in_nested, split_attack_across_fields,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use wafrift_grpc_evasion::{
-    decode_grpc_frame, embed_attack_in_message, embed_attack_in_nested,
-    split_attack_across_fields,
-};
 
 /// Start a mock server that mimics a gRPC endpoint: any POST to `/grpc`
 /// returns 200 with `Content-Type: application/grpc` and an empty body.
@@ -121,5 +120,9 @@ async fn test_split_field_grpc_payload_targets_grpc_endpoint() {
         .await
         .expect("request failed");
 
-    assert_eq!(resp.status(), 200, "split-field gRPC frame must be accepted");
+    assert_eq!(
+        resp.status(),
+        200,
+        "split-field gRPC frame must be accepted"
+    );
 }

@@ -15,15 +15,15 @@
 //!    bound `max_depth` (default 3 — beyond which compositions
 //!    are usually noise).
 //! 2. `LatticeSearch::enumerate_chains` produces a deterministic
-//!    sequence of [`EncodingChain`] candidates.
+//!    sequence of `EncodingChain` candidates.
 //! 3. For each candidate the caller:
-//!    a. Applies the chain via [`apply_chain`].
+//!    a. Applies the chain via `apply_chain`.
 //!    b. Verifies semantic preservation via the operator-supplied
 //!       oracle callback (`wafrift_oracle::oracle_for` is the
 //!       canonical implementation).
 //!    c. Fires the encoded payload at the live target; records the
-//!       outcome via [`super::hunt_corpus_bridge::record_outcome`].
-//! 4. Confirmed bypasses get fingerprinted via [`super::h1_dedup`]
+//!       outcome via `super::hunt_corpus_bridge::record_outcome`.
+//! 4. Confirmed bypasses get fingerprinted via `super::h1_dedup`
 //!    and gated for HackerOne submission.
 //!
 //! ## Determinism
@@ -50,7 +50,10 @@ impl EncodingChain {
     /// stores so callers don't need a re-encoder.
     #[must_use]
     pub fn to_chain_names(&self) -> Vec<String> {
-        self.strategies.iter().map(|s| s.as_str().to_string()).collect()
+        self.strategies
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect()
     }
 
     /// Number of encoder applications in the chain.
@@ -202,7 +205,7 @@ impl LatticeSearch {
     }
 }
 
-/// Apply an [`EncodingChain`] to a payload, left-to-right. Returns
+/// Apply an `EncodingChain` to a payload, left-to-right. Returns
 /// an error if any encoder fails (typically on malformed UTF-8 input
 /// for text-only encoders).
 pub fn apply_chain(payload: &[u8], chain: &EncodingChain) -> Result<String, ChainApplyError> {
@@ -212,13 +215,17 @@ pub fn apply_chain(payload: &[u8], chain: &EncodingChain) -> Result<String, Chai
     for &strategy in &chain.strategies {
         match wafrift_encoding::encode(&current, strategy) {
             Ok(encoded) => current = encoded,
-            Err(e) => return Err(ChainApplyError::EncoderRejected(format!("{strategy:?}: {e}"))),
+            Err(e) => {
+                return Err(ChainApplyError::EncoderRejected(format!(
+                    "{strategy:?}: {e}"
+                )));
+            }
         }
     }
     Ok(current)
 }
 
-/// Error from [`apply_chain`].
+/// Error from `apply_chain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainApplyError {
     /// Input wasn't valid UTF-8 for text-oriented encoders.
@@ -244,8 +251,7 @@ impl std::error::Error for ChainApplyError {}
 /// point — single encoders + pairs).
 #[must_use]
 pub fn shallow_lattice() -> LatticeSearch {
-    LatticeSearch::new(wafrift_encoding::all_strategies().to_vec())
-        .with_max_depth(2)
+    LatticeSearch::new(wafrift_encoding::all_strategies().to_vec()).with_max_depth(2)
 }
 
 #[cfg(test)]
@@ -353,7 +359,10 @@ mod tests {
             strategies: vec![Strategy::UrlEncode, Strategy::Base64Encode],
         };
         let names = chain.to_chain_names();
-        assert_eq!(names, vec!["UrlEncode".to_string(), "Base64Encode".to_string()]);
+        assert_eq!(
+            names,
+            vec!["UrlEncode".to_string(), "Base64Encode".to_string()]
+        );
     }
 
     #[test]

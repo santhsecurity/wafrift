@@ -199,7 +199,10 @@ fn nfkc_homoglyph_bypass_is_deduced_for_an_nfkc_normalizing_origin() {
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     // …and the NFKC origin reconstructs the live attack.
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -224,7 +227,10 @@ fn bestfit_curly_quote_sqli_bypass_is_deduced_for_a_bestfit_origin() {
     let mut replay = lit_waf("'", vec![Transform::Lowercase]);
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -233,7 +239,12 @@ fn solver_composes_url_decode_and_nfkc_for_a_two_stage_origin() {
     // behind a decoding proxy). The solver inverts BOTH stages in reverse — no
     // single rule covers this composite; it falls out of the pipeline-as-data.
     let attack = b"<script>";
-    let sink = Pipeline(vec![Stage::UrlDecode { plus_is_space: false }, Stage::NfkcNormalize]);
+    let sink = Pipeline(vec![
+        Stage::UrlDecode {
+            plus_is_space: false,
+        },
+        Stage::NfkcNormalize,
+    ]);
     let mut waf = crs_waf();
 
     let sol = solve_bypass(attack, &sink, &mut waf, &body)
@@ -265,7 +276,9 @@ fn every_invertible_stage_inverse_actually_round_trips_anti_drift() {
     // non-inverting and excluded.
     let attack = b"\"'<>";
     for st in [
-        Stage::UrlDecode { plus_is_space: false },
+        Stage::UrlDecode {
+            plus_is_space: false,
+        },
         Stage::DoubleUrlDecode,
         Stage::JsonUnescape,
         Stage::HtmlEntityDecode,
@@ -304,12 +317,19 @@ fn null_strip_bypass_is_deduced_for_a_nul_stripping_origin() {
         .unwrap()
         .expect("a NUL-stripping origin is bypassable by a NUL-injected preimage");
 
-    assert!(sol.input.contains(&0), "preimage must carry an embedded NUL: {:?}", sol.input);
+    assert!(
+        sol.input.contains(&0),
+        "preimage must carry an embedded NUL: {:?}",
+        sol.input
+    );
     assert_ne!(sol.input, attack.to_vec());
     let mut replay = crs_waf();
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -325,12 +345,22 @@ fn overlong_utf8_bypass_is_deduced_for_a_lenient_decoding_origin() {
         .unwrap()
         .expect("a lenient overlong-decoding origin is bypassable by the overlong preimage");
 
-    assert!(!sol.input.contains(&b'<'), "no literal `<` byte may survive: {:?}", sol.input);
-    assert!(sol.input.contains(&0xC0), "preimage must carry an overlong lead byte");
+    assert!(
+        !sol.input.contains(&b'<'),
+        "no literal `<` byte may survive: {:?}",
+        sol.input
+    );
+    assert!(
+        sol.input.contains(&0xC0),
+        "preimage must carry an overlong lead byte"
+    );
     let mut replay = crs_waf();
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -346,12 +376,19 @@ fn base64_bypass_is_deduced_for_a_base64_decoding_origin() {
         .unwrap()
         .expect("a base64-decoding origin is bypassable by a base64-encoded preimage");
 
-    assert!(!sol.input.contains(&b'<'), "no literal `<` may survive: {:?}", sol.input);
+    assert!(
+        !sol.input.contains(&b'<'),
+        "no literal `<` may survive: {:?}",
+        sol.input
+    );
     assert_ne!(sol.input, attack.to_vec());
     let mut replay = crs_waf();
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -366,12 +403,19 @@ fn hex_bypass_is_deduced_for_a_hex_decoding_origin() {
         .unwrap()
         .expect("a hex-decoding origin is bypassable by a hex-encoded preimage");
 
-    assert!(!sol.input.contains(&b'<'), "no literal `<` may survive: {:?}", sol.input);
+    assert!(
+        !sol.input.contains(&b'<'),
+        "no literal `<` may survive: {:?}",
+        sol.input
+    );
     assert_ne!(sol.input, attack.to_vec());
     let mut replay = crs_waf();
     assert_eq!(replay.classify(&body(&sol.input)).unwrap(), Outcome::Pass);
     assert!(sol.sink_view.windows(attack.len()).any(|w| w == attack));
-    assert!(sol.raw_attack_blocked, "control: the raw attack must be blocked");
+    assert!(
+        sol.raw_attack_blocked,
+        "control: the raw attack must be blocked"
+    );
 }
 
 #[test]
@@ -385,5 +429,8 @@ fn nfkc_preimage_under_an_identity_sink_is_honest_none() {
     let sink = Pipeline(vec![Stage::Identity]);
     let mut waf = crs_waf();
     let sol = solve_bypass(attack, &sink, &mut waf, &body).unwrap();
-    assert!(sol.is_none(), "identity origin cannot fold a homoglyph — must be None");
+    assert!(
+        sol.is_none(),
+        "identity origin cannot fold a homoglyph — must be None"
+    );
 }

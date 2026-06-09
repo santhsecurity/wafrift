@@ -188,15 +188,12 @@ pub fn compute_min_bypass_set(payloads: &[BypassPayload]) -> MinBypassSetResult 
         }
     }
 
-    let min_set: Vec<BypassPayload> = selected
-        .iter()
-        .map(|&idx| payloads[idx].clone())
-        .collect();
+    let min_set: Vec<BypassPayload> = selected.iter().map(|&idx| payloads[idx].clone()).collect();
     let classes_covered = total_classes - uncovered.len();
     let min_len = min_set.len().max(1);
     let compression_ratio = input_count as f64 / min_len as f64;
-    let likely_optimal = min_set.len() == 1
-        || (classes_covered > 0 && classes_covered == min_set.len());
+    let likely_optimal =
+        min_set.len() == 1 || (classes_covered > 0 && classes_covered == min_set.len());
 
     MinBypassSetResult {
         min_set,
@@ -248,7 +245,11 @@ pub fn format_min_bypass_summary(result: &MinBypassSetResult) -> String {
         result.input_count,
         result.classes_covered,
         result.compression_ratio,
-        if result.likely_optimal { " [likely optimal]" } else { "" },
+        if result.likely_optimal {
+            " [likely optimal]"
+        } else {
+            ""
+        },
     ));
     for (i, p) in result.min_set.iter().enumerate() {
         let classes = p.rule_classes.join(", ");
@@ -336,10 +337,7 @@ mod tests {
 
     #[test]
     fn two_disjoint_classes_require_two_payloads() {
-        let payloads = vec![
-            bp("p1", &["sqli"], 0.9),
-            bp("p2", &["xss"], 0.8),
-        ];
+        let payloads = vec![bp("p1", &["sqli"], 0.9), bp("p2", &["xss"], 0.8)];
         let r = compute_min_bypass_set(&payloads);
         assert_eq!(r.min_set.len(), 2, "two disjoint classes need two payloads");
         assert_eq!(r.classes_covered, 2);
@@ -464,22 +462,19 @@ mod tests {
 
     #[test]
     fn format_summary_contains_key_fields() {
-        let payloads = vec![
-            bp("p1", &["sqli"], 0.9),
-            bp("p2", &["xss"], 0.8),
-        ];
+        let payloads = vec![bp("p1", &["sqli"], 0.9), bp("p2", &["xss"], 0.8)];
         let r = compute_min_bypass_set(&payloads);
         let summary = format_min_bypass_summary(&r);
         assert!(summary.contains("2"), "summary must mention class count");
-        assert!(summary.contains("compression"), "summary must mention compression");
+        assert!(
+            summary.contains("compression"),
+            "summary must mention compression"
+        );
     }
 
     #[test]
     fn class_coverage_map_is_complete() {
-        let payloads = vec![
-            bp("p1", &["a", "b"], 0.9),
-            bp("p2", &["c"], 0.8),
-        ];
+        let payloads = vec![bp("p1", &["a", "b"], 0.9), bp("p2", &["c"], 0.8)];
         let r = compute_min_bypass_set(&payloads);
         let map = class_coverage_map(&r);
         assert!(map.contains_key("a"));
@@ -507,10 +502,7 @@ mod tests {
 
     #[test]
     fn nan_score_treated_as_zero() {
-        let payloads = vec![
-            bp("p_nan", &["a"], f64::NAN),
-            bp("p_good", &["a"], 0.9),
-        ];
+        let payloads = vec![bp("p_nan", &["a"], f64::NAN), bp("p_good", &["a"], 0.9)];
         // Must not panic; should prefer the finite-score payload
         let r = compute_min_bypass_set(&payloads);
         assert_eq!(r.min_set.len(), 1);
@@ -546,11 +538,11 @@ mod tests {
 
     #[test]
     fn classes_covered_equals_universe_size_when_fully_covered() {
-        let payloads = vec![
-            bp("p1", &["a", "b", "c"], 0.9),
-            bp("p2", &["d", "e"], 0.8),
-        ];
+        let payloads = vec![bp("p1", &["a", "b", "c"], 0.9), bp("p2", &["d", "e"], 0.8)];
         let r = compute_min_bypass_set(&payloads);
-        assert_eq!(r.classes_covered, 5, "all 5 distinct classes must be counted");
+        assert_eq!(
+            r.classes_covered, 5,
+            "all 5 distinct classes must be counted"
+        );
     }
 }

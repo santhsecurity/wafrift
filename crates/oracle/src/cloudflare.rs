@@ -106,9 +106,7 @@ pub fn parse_cf_block(response_headers: &[(String, String)], body: &[u8]) -> CfB
                     .rsplit('-')
                     .next()
                     .map(|s| s.trim().to_uppercase())
-                    .filter(|p| {
-                        p.len() == 3 && p.chars().all(|c| c.is_ascii_alphabetic())
-                    });
+                    .filter(|p| p.len() == 3 && p.chars().all(|c| c.is_ascii_alphabetic()));
                 edge_pop = pop;
                 cf_ray_raw = Some(value.clone());
             }
@@ -133,8 +131,7 @@ pub fn parse_cf_block(response_headers: &[(String, String)], body: &[u8]) -> CfB
 
     let body_has_jschl = body_str.contains("jschl") || body_str.contains("jschl_vc");
     let body_has_challenge_platform = body_str.contains("challenge-platform");
-    let body_has_turnstile =
-        body_str.contains("turnstile") || body_str.contains("cf-turnstile");
+    let body_has_turnstile = body_str.contains("turnstile") || body_str.contains("cf-turnstile");
     let body_has_under_attack =
         body_str.contains("under attack") || body_str.contains("ddos protection");
     let body_has_blocked_phrase = body_str.contains("sorry, you have been blocked")
@@ -191,11 +188,7 @@ pub fn parse_cf_block(response_headers: &[(String, String)], body: &[u8]) -> CfB
 /// - `data-translate="error_code">1020<`
 /// - `::ERRORPAGESSTATUS::1020`
 fn extract_cf_error_code(body_lc: &str) -> Option<String> {
-    for prefix in &[
-        "<!-- error code: ",
-        "error code: ",
-        "errorcode: ",
-    ] {
+    for prefix in &["<!-- error code: ", "error code: ", "errorcode: "] {
         if let Some(pos) = body_lc.find(prefix) {
             let after = &body_lc[pos + prefix.len()..];
             let code: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -305,32 +298,32 @@ fn extract_ruleset_from_body(body_lc: &str) -> Option<String> {
     }
 
     let patterns: &[(&str, &str)] = &[
-        ("log4j",                  "log4shell"),
-        ("log4shell",              "log4shell"),
-        ("spring4shell",           "spring4shell"),
-        ("shellshock",             "shellshock"),
-        ("heartbleed",             "heartbleed"),
-        ("struts2",                "apache-struts2"),
-        ("struts",                 "apache-struts"),
-        ("wordpress",              "wordpress"),
-        ("drupal",                 "drupal"),
-        ("joomla",                 "joomla"),
-        ("magento",                "magento"),
-        ("phpbb",                  "phpbb"),
-        ("nextcloud",              "nextcloud"),
-        ("sql injection",          "sqli"),
-        ("cross-site scripting",   "xss"),
-        ("xss",                    "xss"),
-        ("command injection",      "cmdi"),
-        ("path traversal",         "path-traversal"),
-        ("local file inclusion",   "lfi"),
-        ("remote file inclusion",  "rfi"),
-        ("server-side template",   "ssti"),
-        ("ssrf",                   "ssrf"),
-        ("owasp",                  "owasp"),
-        ("modsecurity",            "modsecurity"),
-        ("cloudflare managed",     "cf-managed"),
-        ("cloudflare specials",    "cf-specials"),
+        ("log4j", "log4shell"),
+        ("log4shell", "log4shell"),
+        ("spring4shell", "spring4shell"),
+        ("shellshock", "shellshock"),
+        ("heartbleed", "heartbleed"),
+        ("struts2", "apache-struts2"),
+        ("struts", "apache-struts"),
+        ("wordpress", "wordpress"),
+        ("drupal", "drupal"),
+        ("joomla", "joomla"),
+        ("magento", "magento"),
+        ("phpbb", "phpbb"),
+        ("nextcloud", "nextcloud"),
+        ("sql injection", "sqli"),
+        ("cross-site scripting", "xss"),
+        ("xss", "xss"),
+        ("command injection", "cmdi"),
+        ("path traversal", "path-traversal"),
+        ("local file inclusion", "lfi"),
+        ("remote file inclusion", "rfi"),
+        ("server-side template", "ssti"),
+        ("ssrf", "ssrf"),
+        ("owasp", "owasp"),
+        ("modsecurity", "modsecurity"),
+        ("cloudflare managed", "cf-managed"),
+        ("cloudflare specials", "cf-specials"),
     ];
 
     for (needle, group) in patterns {
@@ -769,10 +762,7 @@ mod tests {
 
     #[test]
     fn non_cloudflare_response_not_detected() {
-        let hdrs = vec![
-            h("server", "nginx"),
-            h("content-type", "text/html"),
-        ];
+        let hdrs = vec![h("server", "nginx"), h("content-type", "text/html")];
         let sig = parse_cf_block(&hdrs, b"<html><body>Forbidden</body></html>");
         assert!(!sig.is_cloudflare_response());
         assert_eq!(sig.edge_pop, None);
@@ -838,7 +828,8 @@ mod tests {
 
     #[test]
     fn error_code_1015_rate_limited() {
-        let body = b"<html><body><!-- error code: 1015 --><h1>You have been blocked</h1></body></html>";
+        let body =
+            b"<html><body><!-- error code: 1015 --><h1>You have been blocked</h1></body></html>";
         let hdrs = vec![
             h("cf-ray", "ff1a2b3c4d5e6f7a-GIG"),
             h("cf-mitigated", "block"),
@@ -855,7 +846,10 @@ mod tests {
     #[test]
     fn error_code_1010_browser_integrity() {
         let body = b"<html><body><!-- error code: 1010 --><h1>Access denied</h1></body></html>";
-        let hdrs = vec![h("cf-ray", "a01b2c3d4e5f6a7b-MAD"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "a01b2c3d4e5f6a7b-MAD"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("browser-integrity"));
     }
@@ -865,7 +859,10 @@ mod tests {
     #[test]
     fn error_code_1009_ip_banned() {
         let body = b"<html><body><!-- error code: 1009 --><h1>Access denied</h1></body></html>";
-        let hdrs = vec![h("cf-ray", "b11c2d3e4f5a6b7c-ICN"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "b11c2d3e4f5a6b7c-ICN"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("ip-banned"));
         assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
@@ -892,7 +889,10 @@ mod tests {
             h("cf-ray", "d31e4f5a6b7c8d9e-HKG"),
             h("cf-mitigated", "jschallenge"),
         ];
-        let sig = parse_cf_block(&hdrs, b"<html><body>Please complete the challenge.</body></html>");
+        let sig = parse_cf_block(
+            &hdrs,
+            b"<html><body>Please complete the challenge.</body></html>",
+        );
         assert_eq!(sig.block_class, BlockClass::BotChallenge);
     }
 
@@ -986,7 +986,10 @@ mod tests {
 
     #[test]
     fn access_denied_phrase_is_managed_block() {
-        let hdrs = vec![h("cf-ray", "c31d4e5f6a7b8c9d-ZRH"), h("server", "cloudflare")];
+        let hdrs = vec![
+            h("cf-ray", "c31d4e5f6a7b8c9d-ZRH"),
+            h("server", "cloudflare"),
+        ];
         let body = b"<html><body><h1>Access Denied</h1><p>This site is protected by Cloudflare.</p></body></html>";
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
@@ -997,7 +1000,10 @@ mod tests {
     #[test]
     fn errorpagesstatus_pattern_extracted() {
         let body = b"<!-- ::ERRORPAGESSTATUS::1020 -->";
-        let hdrs = vec![h("cf-ray", "d41e5f6a7b8c9d0e-VIE"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "d41e5f6a7b8c9d0e-VIE"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("waf-managed-rule"));
     }
@@ -1007,7 +1013,10 @@ mod tests {
     #[test]
     fn data_translate_error_code_pattern() {
         let body = b"<span data-translate=\"error_code\">1006</span>";
-        let hdrs = vec![h("cf-ray", "e51f6a7b8c9d0e1f-WAW"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "e51f6a7b8c9d0e1f-WAW"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("ip-banned"));
     }
@@ -1187,7 +1196,10 @@ mod tests {
     #[test]
     fn error_code_1016_origin_dns() {
         let body = b"<!-- error code: 1016 --><h1>Origin DNS error</h1>";
-        let hdrs = vec![h("cf-ray", "ef5d2e3f4a5b6c7d-ABP"), h("server", "cloudflare")];
+        let hdrs = vec![
+            h("cf-ray", "ef5d2e3f4a5b6c7d-ABP"),
+            h("server", "cloudflare"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("origin-dns"));
     }
@@ -1223,7 +1235,10 @@ mod tests {
     #[test]
     fn error_1011_hotlinking_maps_to_hotlinking() {
         let body = b"<!-- error code: 1011 --><h1>Access denied</h1>";
-        let hdrs = vec![h("cf-ray", "129a5b6c7d8e9f0a-ABS"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "129a5b6c7d8e9f0a-ABS"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("hotlinking"));
     }
@@ -1231,7 +1246,10 @@ mod tests {
     #[test]
     fn error_1012_access_denied() {
         let body = b"<!-- error code: 1012 --><h1>Access denied</h1>";
-        let hdrs = vec![h("cf-ray", "23ab6c7d8e9f0a1b-ABT"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "23ab6c7d8e9f0a1b-ABT"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, body);
         assert_eq!(sig.ruleset_hint.as_deref(), Some("access-denied"));
     }
@@ -1313,7 +1331,8 @@ mod tests {
     fn unknown_mitigated_with_rate_limit_body_is_rate_limited() {
         // An unknown cf-mitigated value falls back to body signals,
         // where body-text rate-limit IS authoritative.
-        let body = b"<html><body><h1>Too Many Requests</h1><p>rate-limit exceeded</p></body></html>";
+        let body =
+            b"<html><body><h1>Too Many Requests</h1><p>rate-limit exceeded</p></body></html>";
         let hdrs = vec![
             h("cf-ray", "890a1c2d3e4f5a6b-HKG"),
             h("cf-mitigated", "redirect"),
@@ -1330,7 +1349,10 @@ mod tests {
         // overlong encodings, surrogate pairs) must not panic.  The parser
         // must fall back gracefully to an empty body.
         let body: Vec<u8> = vec![0xff, 0xfe, 0x00, 0x41, 0x42, 0x43, 0x80, 0x81];
-        let hdrs = vec![h("cf-ray", "9a1b2c3d4e5f6a7b-IAD"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "9a1b2c3d4e5f6a7b-IAD"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, &body);
         // Must not panic; block_class may be Unknown (body unreadable) or
         // ManagedRulesetBlock (from cf-mitigated header alone).
@@ -1376,7 +1398,10 @@ mod tests {
         let mut body = b"<!-- error code: 1020 -->".to_vec();
         body.extend_from_slice(&[0xc0, 0x80]); // overlong NUL in modified UTF-8
         body.extend_from_slice(b"<h1>blocked</h1>");
-        let hdrs = vec![h("cf-ray", "bc3d4e5f6a7b8c9d-MIA"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "bc3d4e5f6a7b8c9d-MIA"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, &body);
         // Even with mixed encoding, the parser must not panic.
         // It may or may not extract the error code depending on from_utf8 result.
@@ -1390,7 +1415,10 @@ mod tests {
         // overflow and return a result within bounded time.
         let chunk = b"<html><body><p>Sorry, you have been blocked.</p>";
         let body: Vec<u8> = chunk.iter().cloned().cycle().take(512 * 1024).collect();
-        let hdrs = vec![h("cf-ray", "cd4e5f6a7b8c9d0e-LHR"), h("cf-mitigated", "block")];
+        let hdrs = vec![
+            h("cf-ray", "cd4e5f6a7b8c9d0e-LHR"),
+            h("cf-mitigated", "block"),
+        ];
         let sig = parse_cf_block(&hdrs, &body);
         assert_eq!(sig.block_class, BlockClass::ManagedRulesetBlock);
     }
@@ -1419,10 +1447,7 @@ mod tests {
     fn multiple_cf_ray_headers_last_one_wins() {
         // HTTP/2 allows duplicate header names; the parser processes them in
         // order so the last `cf-ray` entry wins (same as most HTTP stacks).
-        let hdrs = vec![
-            h("cf-ray", "first-SJC"),
-            h("cf-ray", "second-LHR"),
-        ];
+        let hdrs = vec![h("cf-ray", "first-SJC"), h("cf-ray", "second-LHR")];
         let sig = parse_cf_block(&hdrs, b"");
         // The last cf-ray processed overwrites the earlier one.
         assert_eq!(sig.cf_ray.as_deref(), Some("second-LHR"));

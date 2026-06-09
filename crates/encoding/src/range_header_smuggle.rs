@@ -213,7 +213,7 @@ impl RangeSmuggleProbe {
     }
 
     /// `Range: bytes=0-{LARGE}` — over-large last position. The
-    /// position is drawn from [`SAFE_LARGE_LAST_POS`] per-call.
+    /// position is drawn from `SAFE_LARGE_LAST_POS` per-call.
     #[must_use]
     pub fn over_large_last_position() -> Self {
         let last = pick_from(SAFE_LARGE_LAST_POS, 1_000_000_000_u64);
@@ -237,8 +237,7 @@ impl RangeSmuggleProbe {
         let after_eq = if rng.gen_bool(0.5) { " " } else { "" };
         let around_dash_left = if rng.gen_bool(0.5) { " " } else { "" };
         let around_dash_right = if rng.gen_bool(0.5) { " " } else { "" };
-        let value =
-            format!("bytes={after_eq}0{around_dash_left}-{around_dash_right}99");
+        let value = format!("bytes={after_eq}0{around_dash_left}-{around_dash_right}99");
         Self::finalise(
             RangeSmuggleVariant::WhitespaceInsideRange,
             vec![("Range".into(), value)],
@@ -259,7 +258,7 @@ impl RangeSmuggleProbe {
     }
 
     /// `Range: <unit>=0-9` — non-`bytes` unit. Unit drawn from
-    /// [`NON_BYTES_UNITS`] per-call.
+    /// `NON_BYTES_UNITS` per-call.
     #[must_use]
     pub fn non_bytes_unit() -> Self {
         let unit = pick_from(NON_BYTES_UNITS, "pages");

@@ -114,7 +114,11 @@ pub fn deep_path_collapse(depth: usize, target: &str) -> String {
     // Pre-fix: `i.to_string()` allocated a new String per iteration.
     // Post-fix: use `write!` into the already-allocated `out` buffer.
     use std::fmt::Write as _;
-    let max_seg_digits = if depth == 0 { 1 } else { depth.ilog10() as usize + 1 };
+    let max_seg_digits = if depth == 0 {
+        1
+    } else {
+        depth.ilog10() as usize + 1
+    };
     let mut out = String::with_capacity(depth * (6 + max_seg_digits) + target.len() + 1);
     for i in 0..depth {
         out.push('/');
@@ -291,7 +295,11 @@ mod tests {
     #[test]
     fn path_variants_contain_percent_encoded() {
         let variants = path_variants("/x", "/y");
-        assert!(variants.iter().any(|v| v.contains("%2e") || v.contains("%2E")));
+        assert!(
+            variants
+                .iter()
+                .any(|v| v.contains("%2e") || v.contains("%2E"))
+        );
     }
 
     #[test]
@@ -309,7 +317,11 @@ mod tests {
     #[test]
     fn path_variants_contain_backslash() {
         let variants = path_variants("/x", "/y");
-        assert!(variants.iter().any(|v| v.contains('\\') || v.contains("%5c") || v.contains("%5C")));
+        assert!(
+            variants
+                .iter()
+                .any(|v| v.contains('\\') || v.contains("%5c") || v.contains("%5C"))
+        );
     }
 
     #[test]

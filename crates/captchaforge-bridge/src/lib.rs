@@ -34,8 +34,8 @@
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
-use runtime_foxdriver::{launch_firefox, FoxBrowserConfig};
+use anyhow::{Context, Result, anyhow};
+use runtime_foxdriver::{FoxBrowserConfig, launch_firefox};
 use tokio::sync::Mutex;
 
 use wafrift_transport::challenge::{ChallengeKind, ChallengeStore};
@@ -93,9 +93,11 @@ impl Default for BridgeConfig {
 fn bridge_launch_options(cfg: &BridgeConfig) -> FoxBrowserConfig {
     FoxBrowserConfig {
         headless: cfg.headless,
-        executable_path: std::env::var("FIREFOX_PATH")
-            .ok()
-            .or_else(|| which::which("firefox").ok().map(|p| p.to_string_lossy().to_string())),
+        executable_path: std::env::var("FIREFOX_PATH").ok().or_else(|| {
+            which::which("firefox")
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        }),
         ..Default::default()
     }
 }
@@ -119,12 +121,12 @@ pub async fn solve_in_browser(
     let started = std::time::Instant::now();
 
     let launch_cfg = bridge_launch_options(cfg);
-    if let Some(ref path) = launch_cfg.executable_path {
-        if !std::path::Path::new(path).exists() {
-            return Err(anyhow!(
-                "firefox executable not found at {path} — install Firefox or set the FIREFOX_PATH environment variable"
-            ));
-        }
+    if let Some(ref path) = launch_cfg.executable_path
+        && !std::path::Path::new(path).exists()
+    {
+        return Err(anyhow!(
+            "firefox executable not found at {path} — install Firefox or set the FIREFOX_PATH environment variable"
+        ));
     }
     let page = launch_firefox(launch_cfg)
         .await
@@ -170,10 +172,7 @@ pub async fn solve_in_browser(
             let nav_timeout = std::time::Duration::from_secs(15);
             match tokio::time::timeout(nav_timeout, page.goto(target_url)).await {
                 Ok(Ok(())) => {
-                    tracing::debug!(
-                        url = target_url,
-                        "captchaforge-bridge navigated to target"
-                    );
+                    tracing::debug!(url = target_url, "captchaforge-bridge navigated to target");
                     true
                 }
                 Ok(Err(e)) => {

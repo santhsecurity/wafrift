@@ -18,8 +18,7 @@
 
 use proptest::prelude::*;
 use wafrift_encoding::encoding::{
-    cache_poison, invisible, method_override, path_norm, race, request_line,
-    unicode,
+    cache_poison, invisible, method_override, path_norm, race, request_line, unicode,
 };
 
 // ───────────────────────────────────────────────────────────────

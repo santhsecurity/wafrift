@@ -358,10 +358,7 @@ pub(crate) const MAX_CHECKPOINT_BYTES: usize = 512 * 1024 * 1024;
 /// Pure size-gate used by both save and load. Extracted as a free
 /// function so the boundary contract is testable without allocating
 /// a 512 MiB-equivalent fixture. R55 pass-19 I7 (CLAUDE.md §12).
-fn reject_oversize_checkpoint(
-    size: usize,
-    path: &std::path::Path,
-) -> Result<(), EvolutionError> {
+fn reject_oversize_checkpoint(size: usize, path: &std::path::Path) -> Result<(), EvolutionError> {
     if size > MAX_CHECKPOINT_BYTES {
         Err(EvolutionError::OversizedData {
             context: format!("checkpoint {}", path.display()),
@@ -740,7 +737,10 @@ mod tests {
         assert!(!d.is_duplicate(&empty));
         d.insert(&empty);
         let empty2 = Chromosome::new(vec![]);
-        assert!(d.is_duplicate(&empty2), "two empty-gene chromosomes must be duplicates");
+        assert!(
+            d.is_duplicate(&empty2),
+            "two empty-gene chromosomes must be duplicates"
+        );
     }
 
     // ── SearchStats::fixup_start_time no-panic ────────────────────────────
@@ -772,7 +772,10 @@ mod tests {
     fn budget_default_matches_default_wafrift() {
         let via_default = Budget::default();
         let via_fn = Budget::default_wafrift();
-        assert_eq!(via_default, via_fn, "Budget::default() must match default_wafrift()");
+        assert_eq!(
+            via_default, via_fn,
+            "Budget::default() must match default_wafrift()"
+        );
     }
 
     // ── OracleVerdict serde round-trip ────────────────────────────────────

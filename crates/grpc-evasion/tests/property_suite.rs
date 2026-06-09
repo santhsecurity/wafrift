@@ -175,7 +175,10 @@ fn decode_grpc_frame_max_u32_declared_len() {
     let result = decode_grpc_frame(&frame);
     assert!(matches!(
         result,
-        Err(GrpcFrameError::LengthMismatch { declared: u32::MAX, .. })
+        Err(GrpcFrameError::LengthMismatch {
+            declared: u32::MAX,
+            ..
+        })
     ));
 }
 

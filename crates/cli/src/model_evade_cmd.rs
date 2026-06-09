@@ -294,8 +294,9 @@ pub(crate) fn build_http_oracle(
     // Tier-B block-page signatures, loaded once: a 2xx body carrying one of
     // these is a block served with a success status (not a pass). A
     // `--block-signatures` file overrides the embedded default.
-    let block_signatures =
-        Arc::new(block_signatures.unwrap_or_else(wafrift_liveoracle::verdict::default_block_signatures));
+    let block_signatures = Arc::new(
+        block_signatures.unwrap_or_else(wafrift_liveoracle::verdict::default_block_signatures),
+    );
 
     // Self-calibration: learn THIS target's block signal from controls so the
     // oracle works even against a WAF whose block shape no signature lists. If
@@ -303,7 +304,11 @@ pub(crate) fn build_http_oracle(
     // calibration declines (None) and we fall back to the static classifier.
     let calibration = Arc::new(calibrate_target(&rt, &client, &target_url, &param));
     if let Some(c) = calibration.as_ref() {
-        eprintln!("{} oracle self-calibration — {}", "info:".cyan(), c.describe());
+        eprintln!(
+            "{} oracle self-calibration — {}",
+            "info:".cyan(),
+            c.describe()
+        );
     }
 
     Ok(FnOracle::new(move |req: &Request| {
@@ -333,19 +338,23 @@ pub(crate) fn build_http_oracle(
             if matches!(r.status, 429 | 502 | 503 | 504) {
                 return LiveVerdict::Transient;
             }
-            if let Some(cal) = calibration.as_ref() {
-                if let Some(v) = cal.classify(r.status, &r.body) {
-                    return v;
-                }
+            if let Some(cal) = calibration.as_ref()
+                && let Some(v) = cal.classify(r.status, &r.body)
+            {
+                return v;
             }
-            wafrift_liveoracle::verdict::classify_live_response(r.status, &r.body, &block_signatures)
+            wafrift_liveoracle::verdict::classify_live_response(
+                r.status,
+                &r.body,
+                &block_signatures,
+            )
         };
 
         wafrift_liveoracle::verdict::classify_with_retry(
             probe,
             classify,
             wafrift_liveoracle::verdict::MAX_TRANSIENT_RETRIES,
-            |d| std::thread::sleep(d),
+            std::thread::sleep,
         )
     }))
 }
@@ -363,11 +372,10 @@ fn send_live_probe(
     let client = client.clone();
     let probe_url = probe_url.to_string();
     rt.block_on(async move {
-        let resp = client
-            .get(&probe_url)
-            .send()
-            .await
-            .map_err(|e| WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}")))?;
+        let resp =
+            client.get(&probe_url).send().await.map_err(|e| {
+                WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}"))
+            })?;
         let status = resp.status().as_u16();
         let retry_after_secs = resp
             .headers()
@@ -381,7 +389,11 @@ fn send_live_probe(
         } else {
             Vec::new()
         };
-        Ok(wafrift_liveoracle::verdict::ProbeResponse { status, retry_after_secs, body })
+        Ok(wafrift_liveoracle::verdict::ProbeResponse {
+            status,
+            retry_after_secs,
+            body,
+        })
     })
 }
 

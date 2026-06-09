@@ -236,7 +236,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::with_capacity(8);

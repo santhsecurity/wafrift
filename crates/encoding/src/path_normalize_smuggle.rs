@@ -89,31 +89,19 @@ impl PathNormalizeTechnique {
             Self::DotSegmentEncoded => {
                 "URL-encoded dot-dot traversal — bypasses literal `../` scanners"
             }
-            Self::DoubleEncodedDotSegment => {
-                "Double-encoded dot-dot — bypasses single-decode WAFs"
-            }
-            Self::MixedDotEncoding => {
-                "Mixed encoded + literal dot — bypasses one-pass normalizers"
-            }
+            Self::DoubleEncodedDotSegment => "Double-encoded dot-dot — bypasses single-decode WAFs",
+            Self::MixedDotEncoding => "Mixed encoded + literal dot — bypasses one-pass normalizers",
             Self::BackslashTraversal => {
                 "Windows backslash separator — IIS-style WAF/origin differential"
             }
-            Self::NullByteTruncation => {
-                "NUL-byte truncation — splits WAF view from backend view"
-            }
+            Self::NullByteTruncation => "NUL-byte truncation — splits WAF view from backend view",
             Self::MultiSlashCollapse => "Multi-slash run — segment-count differential",
-            Self::FragmentLeak => {
-                "Fragment-in-path — WAFs that split early see wrong path"
-            }
-            Self::SemicolonPathParam => {
-                "RFC 3986 path-param suffix — normalizer differential"
-            }
+            Self::FragmentLeak => "Fragment-in-path — WAFs that split early see wrong path",
+            Self::SemicolonPathParam => "RFC 3986 path-param suffix — normalizer differential",
             Self::UnicodeFullwidthSlash => {
                 "U+FF0F fullwidth solidus — visually a slash, byte-wise not"
             }
-            Self::OverlongUtf8Slash => {
-                "Overlong UTF-8 `/` (%c0%af) — accepted by lenient parsers"
-            }
+            Self::OverlongUtf8Slash => "Overlong UTF-8 `/` (%c0%af) — accepted by lenient parsers",
         }
     }
 }
@@ -265,10 +253,7 @@ mod tests {
 
     #[test]
     fn double_encoded_contains_double_percent() {
-        let p = PathSmuggleProbe::new(
-            PathNormalizeTechnique::DoubleEncodedDotSegment,
-            "/admin",
-        );
+        let p = PathSmuggleProbe::new(PathNormalizeTechnique::DoubleEncodedDotSegment, "/admin");
         assert!(p.path.contains("%252e%252e"), "got {}", p.path);
     }
 
@@ -311,10 +296,7 @@ mod tests {
 
     #[test]
     fn unicode_fullwidth_variant_contains_ff0f_bytes() {
-        let p = PathSmuggleProbe::new(
-            PathNormalizeTechnique::UnicodeFullwidthSlash,
-            "/admin",
-        );
+        let p = PathSmuggleProbe::new(PathNormalizeTechnique::UnicodeFullwidthSlash, "/admin");
         // U+FF0F in UTF-8 is EF BC 8F.
         let bytes = p.path.as_bytes();
         assert!(
@@ -332,8 +314,7 @@ mod tests {
     #[test]
     fn canaries_are_unique_per_probe() {
         let probes = all_variants("/admin");
-        let tokens: HashSet<String> =
-            probes.iter().map(|p| p.canary().token.clone()).collect();
+        let tokens: HashSet<String> = probes.iter().map(|p| p.canary().token.clone()).collect();
         assert_eq!(tokens.len(), probes.len());
     }
 
@@ -351,15 +332,16 @@ mod tests {
     fn technique_names_are_distinct() {
         let probes = all_variants("/admin");
         let techs: HashSet<String> = probes.iter().map(|p| p.technique()).collect();
-        assert_eq!(techs.len(), probes.len(), "technique names must be distinct");
+        assert_eq!(
+            techs.len(),
+            probes.len(),
+            "technique names must be distinct"
+        );
     }
 
     #[test]
     fn custom_protected_path_appears_in_artifact() {
-        let p = PathSmuggleProbe::new(
-            PathNormalizeTechnique::DotSegmentEncoded,
-            "/wp-admin",
-        );
+        let p = PathSmuggleProbe::new(PathNormalizeTechnique::DotSegmentEncoded, "/wp-admin");
         assert!(p.path.contains("wp-admin"), "got {}", p.path);
     }
 

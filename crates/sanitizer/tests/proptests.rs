@@ -83,7 +83,9 @@ proptest! {
 // ── 3. Mining soundness, boundedness, determinism over random models ────────
 
 /// A vocabulary of tags the random models draw their forbid/allow lists from.
-const TAGS: &[&str] = &["script", "svg", "img", "iframe", "math", "a", "b", "i", "em", "p"];
+const TAGS: &[&str] = &[
+    "script", "svg", "img", "iframe", "math", "a", "b", "i", "em", "p",
+];
 const SCHEMES: &[&str] = &["javascript", "data", "vbscript"];
 
 prop_compose! {
@@ -96,17 +98,21 @@ prop_compose! {
         schemes in proptest::collection::vec(0usize..SCHEMES.len(), 0..SCHEMES.len()),
         with_strip in any::<bool>(),
     ) -> SanitizerModel {
-        let mut m = SanitizerModel::default();
-        m.forbidden_tags = forbidden.into_iter().map(|i| TAGS[i].to_string()).collect();
-        m.allowed_tags = allow_some.then(|| allowed.into_iter().map(|i| TAGS[i].to_string()).collect());
-        m.strips_event_handlers = strips_handlers;
-        m.blocked_schemes = schemes.into_iter().map(|i| SCHEMES[i].to_string()).collect();
-        if with_strip {
-            // The canonical on-handler strip regex — exercises the precompiled
-            // hot path that once caused the per-query-recompile hang.
-            m.strip_patterns = vec![r#"\son\w+=("[^"]*"|'[^']*'|[^\s>]*)"#.to_string()];
+        // The canonical on-handler strip regex — exercises the precompiled
+        // hot path that once caused the per-query-recompile hang.
+        let strip_patterns = if with_strip {
+            vec![r#"\son\w+=("[^"]*"|'[^']*'|[^\s>]*)"#.to_string()]
+        } else {
+            Vec::new()
+        };
+        SanitizerModel {
+            forbidden_tags: forbidden.into_iter().map(|i| TAGS[i].to_string()).collect(),
+            allowed_tags: allow_some.then(|| allowed.into_iter().map(|i| TAGS[i].to_string()).collect()),
+            strips_event_handlers: strips_handlers,
+            blocked_schemes: schemes.into_iter().map(|i| SCHEMES[i].to_string()).collect(),
+            strip_patterns,
+            ..Default::default()
         }
-        m
     }
 }
 
@@ -159,13 +165,17 @@ proptest! {
     fn prop_maximally_strict_model_admits_no_bypass(
         inert in proptest::collection::vec(prop::sample::select(vec!["b", "i", "em", "p"]), 1..4),
     ) {
-        let mut m = SanitizerModel::default();
-        m.forbidden_tags = ["script", "svg", "img", "iframe", "math", "a", "object", "embed"]
-            .iter().map(|s| s.to_string()).collect();
-        m.allowed_tags = Some(inert.into_iter().map(String::from).collect());
-        m.strips_event_handlers = true;
-        m.blocked_schemes = vec!["javascript".into(), "data".into()];
-        m.strip_patterns = vec![r#"\son\w+=("[^"]*"|'[^']*'|[^\s>]*)"#.to_string()];
+        let m = SanitizerModel {
+            forbidden_tags: ["script", "svg", "img", "iframe", "math", "a", "object", "embed"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            allowed_tags: Some(inert.into_iter().map(String::from).collect()),
+            strips_event_handlers: true,
+            blocked_schemes: vec!["javascript".into(), "data".into()],
+            strip_patterns: vec![r#"\son\w+=("[^"]*"|'[^']*'|[^\s>]*)"#.to_string()],
+            ..Default::default()
+        };
         let result = decompile_and_mine(m, 64, 20, 5);
         prop_assert!(result.bypasses.is_empty(), "strict model leaked: {:?}", result.bypasses);
     }
@@ -176,7 +186,11 @@ proptest! {
 #[test]
 fn canonical_vectors_are_all_executable() {
     let vs = canonical_vectors();
-    assert!(vs.len() >= 10, "ship a real vector corpus, got {}", vs.len());
+    assert!(
+        vs.len() >= 10,
+        "ship a real vector corpus, got {}",
+        vs.len()
+    );
     for v in &vs {
         assert!(
             wafrift_sanitizer::model::is_executable_html(v),

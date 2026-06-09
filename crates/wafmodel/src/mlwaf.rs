@@ -75,11 +75,23 @@ fn mut_class(input: &[u8]) -> MutClass {
     let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
     if has(&["$(", "${ifs}", "/bin/", "`", "system(", "exec(", "popen("]) {
         MutClass::Cmd
-    } else if has(&["<script", "onerror", "onload", "javascript:", "alert(", "<svg", "<img"]) {
+    } else if has(&[
+        "<script",
+        "onerror",
+        "onload",
+        "javascript:",
+        "alert(",
+        "<svg",
+        "<img",
+    ]) {
         MutClass::Xss
-    } else if has(&["select", "union", " or ", " and ", "sleep(", "/**/", "'--", "'#"]) {
+    } else if has(&[
+        "select", "union", " or ", " and ", "sleep(", "/**/", "'--", "'#",
+    ]) {
         MutClass::Sql
-    } else if has(&["../", "..\\", "/etc/", "%2e%2e", "..%2f", "..%5c", "c:\\", "\\\\"]) {
+    } else if has(&[
+        "../", "..\\", "/etc/", "%2e%2e", "..%2f", "..%5c", "c:\\", "\\\\",
+    ]) {
         MutClass::Path
     } else if s.contains("${") {
         MutClass::Template
@@ -358,11 +370,11 @@ mod attack_manifold_tests {
             "<script>alert(1)</script>",
             "; cat /etc/passwd",
             "C:\\Windows\\system32\\cmd.exe", // drive path (dogfood gap)
-            "\\\\attacker\\share\\x",          // UNC path (dogfood gap)
-            "..\\..\\..\\boot.ini",            // Windows traversal
-            "%2e%2e%2f%2e%2e%2fetc/hosts",     // encoded traversal
-            "${jndi:ldap://x/a}",              // log4shell / EL injection
-            "<svg onload=alert(1)>",           // SVG-vector XSS
+            "\\\\attacker\\share\\x",         // UNC path (dogfood gap)
+            "..\\..\\..\\boot.ini",           // Windows traversal
+            "%2e%2e%2f%2e%2e%2fetc/hosts",    // encoded traversal
+            "${jndi:ldap://x/a}",             // log4shell / EL injection
+            "<svg onload=alert(1)>",          // SVG-vector XSS
         ] {
             assert!(
                 is_attack_payload(atk.as_bytes()),

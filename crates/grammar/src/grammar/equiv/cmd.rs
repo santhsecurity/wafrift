@@ -505,7 +505,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::with_capacity(8);
@@ -664,7 +666,11 @@ mod tests {
         let mut tagged = false;
         for seed in 0..60u64 {
             for m in generate(atk, &cfg(seed)) {
-                assert!(still_executes_cmd(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                assert!(
+                    still_executes_cmd(atk, &m.payload),
+                    "UNSOUND {:?}",
+                    m.payload
+                );
                 if m.rules.contains(&"cmd_token_obfuscate") {
                     tagged = true;
                     if !m.payload.contains("passwd") {
@@ -677,7 +683,10 @@ mod tests {
             }
         }
         assert!(tagged, "no variant tagged cmd_token_obfuscate");
-        assert!(hidden_target, "generator never hid the cleartext target token");
+        assert!(
+            hidden_target,
+            "generator never hid the cleartext target token"
+        );
     }
 
     #[test]
@@ -726,7 +735,11 @@ mod tests {
                     m.payload
                 );
                 // Whatever it emitted must still truly execute.
-                assert!(still_executes_cmd(atk, &m.payload), "UNSOUND: {:?}", m.payload);
+                assert!(
+                    still_executes_cmd(atk, &m.payload),
+                    "UNSOUND: {:?}",
+                    m.payload
+                );
             }
         }
     }
@@ -751,12 +764,18 @@ mod tests {
         // The verb AND target encoded as hex still execute the original.
         let atk = "; cat /etc/passwd";
         let enc = "; $'\\x63\\x61\\x74'${IFS}/$'\\x65\\x74\\x63'/$'\\x70\\x61\\x73\\x73\\x77\\x64'";
-        assert!(still_executes_cmd(atk, enc), "ANSI-C encoded form not certified sound");
+        assert!(
+            still_executes_cmd(atk, enc),
+            "ANSI-C encoded form not certified sound"
+        );
         // Cleartext WAF tokens are gone from the raw payload …
         assert!(!enc.contains("cat") && !enc.contains("passwd"));
         // … yet normalize recovers them.
         let n = normalize(enc);
-        assert!(n.contains("cat") && n.contains("/etc/passwd"), "normalize lost target: {n}");
+        assert!(
+            n.contains("cat") && n.contains("/etc/passwd"),
+            "normalize lost target: {n}"
+        );
     }
 
     #[test]
@@ -769,7 +788,11 @@ mod tests {
         let mut tagged = false;
         for seed in 0..80u64 {
             for m in generate(atk, &cfg(seed)) {
-                assert!(still_executes_cmd(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                assert!(
+                    still_executes_cmd(atk, &m.payload),
+                    "UNSOUND {:?}",
+                    m.payload
+                );
                 if m.rules.contains(&"cmd_ansi_c") {
                     tagged = true;
                     if !m.payload.contains("passwd") {
@@ -782,7 +805,10 @@ mod tests {
             }
         }
         assert!(tagged, "no variant tagged cmd_ansi_c");
-        assert!(hid, "ANSI-C variant never removed the cleartext target token");
+        assert!(
+            hid,
+            "ANSI-C variant never removed the cleartext target token"
+        );
     }
 
     #[test]

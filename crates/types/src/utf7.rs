@@ -129,7 +129,7 @@ pub fn utf7_decode(s: &str) -> Option<String> {
                 j += 1;
             }
             let mut chunk = s[start..j].to_string();
-            while chunk.len() % 4 != 0 {
+            while !chunk.len().is_multiple_of(4) {
                 chunk.push('='); // re-pad for the standard decoder
             }
             let raw = general_purpose::STANDARD.decode(chunk.as_bytes()).ok()?;

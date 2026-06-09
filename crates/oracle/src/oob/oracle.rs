@@ -323,7 +323,9 @@ mod tests {
             async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
                 let n = self.polls.fetch_add(1, Ordering::Relaxed);
                 if n < self.error_count {
-                    Err(OobError::PollFailed { reason: "transient".into() })
+                    Err(OobError::PollFailed {
+                        reason: "transient".into(),
+                    })
                 } else {
                     Ok(vec![OobInteraction::DnsQuery {
                         query: "test.oast".into(),
@@ -340,7 +342,9 @@ mod tests {
         let oracle = OobOracle::new(
             provider,
             OobConfig {
-                provider: OobProvider::Interactsh { server: "test".into() },
+                provider: OobProvider::Interactsh {
+                    server: "test".into(),
+                },
                 poll_interval_secs: 1,
                 timeout_secs: 10,
             },
@@ -370,14 +374,18 @@ mod tests {
                 })
             }
             async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
-                Err(OobError::PollFailed { reason: "provider dead".into() })
+                Err(OobError::PollFailed {
+                    reason: "provider dead".into(),
+                })
             }
         }
 
         let oracle = OobOracle::new(
             Box::new(AlwaysErrorProvider),
             OobConfig {
-                provider: OobProvider::Interactsh { server: "test".into() },
+                provider: OobProvider::Interactsh {
+                    server: "test".into(),
+                },
                 poll_interval_secs: 1,
                 timeout_secs: 30,
             },
@@ -411,7 +419,9 @@ mod tests {
             async fn poll(&self, _: &OobCanary) -> Result<Vec<OobInteraction>, OobError> {
                 let n = self.polls.fetch_add(1, Ordering::Relaxed);
                 if n < 2 {
-                    Err(OobError::PollFailed { reason: "flaky".into() })
+                    Err(OobError::PollFailed {
+                        reason: "flaky".into(),
+                    })
                 } else {
                     Ok(vec![OobInteraction::DnsQuery {
                         query: "bg.oast".into(),
@@ -422,9 +432,13 @@ mod tests {
         }
 
         let oracle = OobOracle::new(
-            Box::new(BgErrorThenConfirm { polls: AtomicUsize::new(0) }),
+            Box::new(BgErrorThenConfirm {
+                polls: AtomicUsize::new(0),
+            }),
             OobConfig {
-                provider: OobProvider::Interactsh { server: "test".into() },
+                provider: OobProvider::Interactsh {
+                    server: "test".into(),
+                },
                 poll_interval_secs: 1,
                 timeout_secs: 10,
             },

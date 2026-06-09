@@ -164,7 +164,10 @@ struct BanditArm {
 
 impl BanditArm {
     fn new() -> Self {
-        Self { visits: 0.0, total_reward: 0.0 }
+        Self {
+            visits: 0.0,
+            total_reward: 0.0,
+        }
     }
 
     /// UCB1 score: mean_reward + C * sqrt(ln(N) / n_i).
@@ -193,7 +196,11 @@ fn apply_rule(stmt: &Statement, rule: RuleId, position: u8) -> Option<String> {
     let lowered = s.to_string();
     let idx = lowered.find(WRAP_NEEDLE)?;
     let fragment = lowered[idx + WRAP_NEEDLE.len()..].trim().to_string();
-    if fragment.is_empty() { None } else { Some(fragment) }
+    if fragment.is_empty() {
+        None
+    } else {
+        Some(fragment)
+    }
 }
 
 /// Returns `true` if the rule fired at least once.
@@ -227,7 +234,9 @@ fn walk_and_rewrite(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
                 fired |= walk_and_rewrite(item, rule, target, counter);
             }
         }
-        Expr::Between { expr, low, high, .. } => {
+        Expr::Between {
+            expr, low, high, ..
+        } => {
             fired |= walk_and_rewrite(expr, rule, target, counter);
             fired |= walk_and_rewrite(low, rule, target, counter);
             fired |= walk_and_rewrite(high, rule, target, counter);
@@ -235,7 +244,12 @@ fn walk_and_rewrite(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
         Expr::Cast { expr, .. } => {
             fired |= walk_and_rewrite(expr, rule, target, counter);
         }
-        Expr::Case { operand, conditions, else_result, .. } => {
+        Expr::Case {
+            operand,
+            conditions,
+            else_result,
+            ..
+        } => {
             if let Some(op) = operand {
                 fired |= walk_and_rewrite(op, rule, target, counter);
             }
@@ -256,70 +270,68 @@ fn walk_and_rewrite(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
 
 fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) -> bool {
     match rule {
-        RuleId::ADD_ZERO => {
-            if is_number(e) {
-                if *counter == target {
-                    let orig = std::mem::replace(e, dummy_one());
-                    *e = Expr::BinaryOp {
-                        left: Box::new(orig),
-                        op: BinaryOperator::Plus,
-                        right: Box::new(num("0")),
-                    };
-                    *counter += 1;
-                    return true;
-                }
+        RuleId::ADD_ZERO if is_number(e) => {
+            if *counter == target {
+                let orig = std::mem::replace(e, dummy_one());
+                *e = Expr::BinaryOp {
+                    left: Box::new(orig),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(num("0")),
+                };
                 *counter += 1;
+                return true;
             }
+            *counter += 1;
         }
-        RuleId::MUL_ONE => {
-            if is_number(e) {
-                if *counter == target {
-                    let orig = std::mem::replace(e, dummy_one());
-                    *e = Expr::BinaryOp {
-                        left: Box::new(orig),
-                        op: BinaryOperator::Multiply,
-                        right: Box::new(num("1")),
-                    };
-                    *counter += 1;
-                    return true;
-                }
+        RuleId::MUL_ONE if is_number(e) => {
+            if *counter == target {
+                let orig = std::mem::replace(e, dummy_one());
+                *e = Expr::BinaryOp {
+                    left: Box::new(orig),
+                    op: BinaryOperator::Multiply,
+                    right: Box::new(num("1")),
+                };
                 *counter += 1;
+                return true;
             }
+            *counter += 1;
         }
-        RuleId::DIV_ONE => {
-            if is_number(e) {
-                if *counter == target {
-                    let orig = std::mem::replace(e, dummy_one());
-                    *e = Expr::BinaryOp {
-                        left: Box::new(orig),
-                        op: BinaryOperator::Divide,
-                        right: Box::new(num("1")),
-                    };
-                    *counter += 1;
-                    return true;
-                }
+        RuleId::DIV_ONE if is_number(e) => {
+            if *counter == target {
+                let orig = std::mem::replace(e, dummy_one());
+                *e = Expr::BinaryOp {
+                    left: Box::new(orig),
+                    op: BinaryOperator::Divide,
+                    right: Box::new(num("1")),
+                };
                 *counter += 1;
+                return true;
             }
+            *counter += 1;
         }
-        RuleId::CAST_IDENTITY => {
-            if is_number(e) {
-                if *counter == target {
-                    let orig = std::mem::replace(e, dummy_one());
-                    *e = Expr::Cast {
-                        kind: sqlparser::ast::CastKind::Cast,
-                        expr: Box::new(orig),
-                        data_type: DataType::Int(None),
-                        array: false,
-                        format: None,
-                    };
-                    *counter += 1;
-                    return true;
-                }
+        RuleId::CAST_IDENTITY if is_number(e) => {
+            if *counter == target {
+                let orig = std::mem::replace(e, dummy_one());
+                *e = Expr::Cast {
+                    kind: sqlparser::ast::CastKind::Cast,
+                    expr: Box::new(orig),
+                    data_type: DataType::Int(None),
+                    array: false,
+                    format: None,
+                };
                 *counter += 1;
+                return true;
             }
+            *counter += 1;
         }
         RuleId::DOUBLE_NEGATION => {
-            if matches!(e, Expr::BinaryOp { op: BinaryOperator::Eq | BinaryOperator::NotEq, .. }) {
+            if matches!(
+                e,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Eq | BinaryOperator::NotEq,
+                    ..
+                }
+            ) {
                 if *counter == target {
                     let orig = std::mem::replace(e, dummy_one());
                     *e = Expr::UnaryOp {
@@ -338,7 +350,10 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
         RuleId::PAREN_WRAP => {
             if matches!(
                 e,
-                Expr::BinaryOp { op: BinaryOperator::Or | BinaryOperator::And, .. }
+                Expr::BinaryOp {
+                    op: BinaryOperator::Or | BinaryOperator::And,
+                    ..
+                }
             ) {
                 if *counter == target {
                     let orig = std::mem::replace(e, dummy_one());
@@ -353,7 +368,13 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             // Replace "a = b" with "CASE WHEN a = b THEN 1 ELSE 0 END = 1"
             if is_synthetic_column(e) {
                 // skip the top-level WHERE column
-            } else if matches!(e, Expr::BinaryOp { op: BinaryOperator::Eq, .. }) {
+            } else if matches!(
+                e,
+                Expr::BinaryOp {
+                    op: BinaryOperator::Eq,
+                    ..
+                }
+            ) {
                 if *counter == target {
                     let orig = std::mem::replace(e, dummy_one());
                     // CASE WHEN <orig> THEN 1 ELSE 0 END = 1
@@ -382,7 +403,11 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             }
         }
         RuleId::BETWEEN_EQ => {
-            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e
+            if let Expr::BinaryOp {
+                op: BinaryOperator::Eq,
+                left,
+                right,
+            } = e
                 && !is_synthetic_column(left)
             {
                 if *counter == target {
@@ -399,7 +424,11 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             }
         }
         RuleId::IN_SINGLE => {
-            if let Expr::BinaryOp { op: BinaryOperator::Eq, left, right } = e
+            if let Expr::BinaryOp {
+                op: BinaryOperator::Eq,
+                left,
+                right,
+            } = e
                 && !is_synthetic_column(left)
             {
                 if *counter == target {
@@ -415,7 +444,12 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             }
         }
         RuleId::COMMUTE_OR => {
-            if let Expr::BinaryOp { op: BinaryOperator::Or, left, right } = e {
+            if let Expr::BinaryOp {
+                op: BinaryOperator::Or,
+                left,
+                right,
+            } = e
+            {
                 if *counter == target {
                     std::mem::swap(left, right);
                     *counter += 1;
@@ -425,7 +459,12 @@ fn try_rewrite_node(e: &mut Expr, rule: RuleId, target: u8, counter: &mut u8) ->
             }
         }
         RuleId::COMMUTE_AND => {
-            if let Expr::BinaryOp { op: BinaryOperator::And, left, right } = e {
+            if let Expr::BinaryOp {
+                op: BinaryOperator::And,
+                left,
+                right,
+            } = e
+            {
                 if *counter == target {
                     std::mem::swap(left, right);
                     *counter += 1;
@@ -450,7 +489,9 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
     match rule {
         RuleId::COMMENT_INSERT => {
             // Insert /**/ between keyword boundaries at `position`-th opportunity.
-            let boundaries = [" OR ", " AND ", " WHERE ", " FROM ", " UNION ", "=", "<", ">"];
+            let boundaries = [
+                " OR ", " AND ", " WHERE ", " FROM ", " UNION ", "=", "<", ">",
+            ];
             let mut count = 0u8;
             for boundary in &boundaries {
                 if let Some(idx) = fragment.find(boundary) {
@@ -475,11 +516,7 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
             if pos < digits.len() {
                 let i = digits[pos];
                 let c = &fragment[i..i + 1];
-                let replaced = format!(
-                    "{}(SELECT {c}){}",
-                    &fragment[..i],
-                    &fragment[i + 1..]
-                );
+                let replaced = format!("{}(SELECT {c}){}", &fragment[..i], &fragment[i + 1..]);
                 return Some(replaced);
             }
             None
@@ -491,7 +528,11 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
             {
                 let s = &fragment[start + 1..start + 1 + end];
                 let hex: String = s.bytes().map(|b| format!("{b:02X}")).collect();
-                let replaced = format!("{}0x{hex}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
+                let replaced = format!(
+                    "{}0x{hex}{}",
+                    &fragment[..start],
+                    &fragment[start + 1 + end + 1..]
+                );
                 return Some(replaced);
             }
             None
@@ -510,7 +551,11 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
                     .map(|b| format!("CHAR({b})"))
                     .collect::<Vec<_>>()
                     .join("||");
-                let replaced = format!("{}{chars}{}", &fragment[..start], &fragment[start + 1 + end + 1..]);
+                let replaced = format!(
+                    "{}{chars}{}",
+                    &fragment[..start],
+                    &fragment[start + 1 + end + 1..]
+                );
                 return Some(replaced);
             }
             None
@@ -518,13 +563,17 @@ fn apply_text_rule(fragment: &str, rule: RuleId, position: u8) -> Option<String>
         RuleId::UNION_VARIANT => {
             // Rotate UNION → UNION ALL / UNION SELECT → UNION ALL SELECT.
             if fragment.to_uppercase().contains("UNION ALL") {
-                return Some(fragment.replace("UNION ALL", "UNION").replace("union all", "UNION"));
-            } else if fragment.to_uppercase().contains("UNION") {
                 return Some(
                     fragment
-                        .replacen("UNION", "UNION ALL", 1)
-                        .replacen("union", "UNION ALL", 1),
+                        .replace("UNION ALL", "UNION")
+                        .replace("union all", "UNION"),
                 );
+            } else if fragment.to_uppercase().contains("UNION") {
+                return Some(fragment.replacen("UNION", "UNION ALL", 1).replacen(
+                    "union",
+                    "UNION ALL",
+                    1,
+                ));
             }
             None
         }
@@ -577,7 +626,10 @@ pub fn mcts_search<O: AstMctsOracle>(
     let max_pos = 4u8; // up to 4 occurrences per rule
     for &rule in RuleId::ALL {
         for pos in 0..max_pos {
-            let action = MctsAction { rule, position: pos };
+            let action = MctsAction {
+                rule,
+                position: pos,
+            };
             let candidate = build_candidate(&base_stmt, action, payload);
             if candidate.is_some() {
                 arms.insert(action, BanditArm::new());
@@ -704,7 +756,10 @@ fn mcts_text_only<O: AstMctsOracle>(
     let mut arms: BTreeMap<MctsAction, BanditArm> = BTreeMap::new();
     for &rule in &text_rules {
         for pos in 0u8..4 {
-            let action = MctsAction { rule, position: pos };
+            let action = MctsAction {
+                rule,
+                position: pos,
+            };
             if apply_text_rule(payload, rule, pos).is_some() {
                 arms.insert(action, BanditArm::new());
             }
@@ -774,7 +829,10 @@ fn mcts_text_only<O: AstMctsOracle>(
 fn is_number(e: &Expr) -> bool {
     matches!(
         e,
-        Expr::Value(ValueWithSpan { value: Value::Number(_, _), .. })
+        Expr::Value(ValueWithSpan {
+            value: Value::Number(_, _),
+            ..
+        })
     )
 }
 
@@ -811,14 +869,19 @@ mod tests {
     }
     impl BlockKeywordOracle {
         fn new(kw: &str) -> Self {
-            Self { keyword: kw.to_string(), calls: 0 }
+            Self {
+                keyword: kw.to_string(),
+                calls: 0,
+            }
         }
     }
     impl AstMctsOracle for BlockKeywordOracle {
         fn eval(&mut self, candidate: &str) -> bool {
             self.calls += 1;
             // Block if keyword is present (case-insensitive).
-            candidate.to_lowercase().contains(&self.keyword.to_lowercase())
+            candidate
+                .to_lowercase()
+                .contains(&self.keyword.to_lowercase())
         }
     }
 
@@ -864,7 +927,10 @@ mod tests {
         let result = apply_rule(&stmts[0], RuleId::MUL_ONE, 0);
         assert!(result.is_some(), "mul_one must fire");
         let s = result.unwrap();
-        assert!(s.contains("* 1") || s.contains("*1"), "mul_one must produce * 1: {s}");
+        assert!(
+            s.contains("* 1") || s.contains("*1"),
+            "mul_one must produce * 1: {s}"
+        );
     }
 
     #[test]
@@ -886,7 +952,10 @@ mod tests {
         let result = apply_rule(&stmts[0], RuleId::BETWEEN_EQ, 0);
         assert!(result.is_some(), "between_eq must fire");
         let s = result.unwrap();
-        assert!(s.to_uppercase().contains("BETWEEN"), "must use BETWEEN: {s}");
+        assert!(
+            s.to_uppercase().contains("BETWEEN"),
+            "must use BETWEEN: {s}"
+        );
     }
 
     #[test]
@@ -938,7 +1007,10 @@ mod tests {
     fn text_rule_char_concat_fires() {
         let result = apply_text_rule("'ab'='ab'", RuleId::CHAR_CONCAT, 0);
         assert!(result.is_some());
-        assert!(result.unwrap().contains("CHAR("), "must produce CHAR concat");
+        assert!(
+            result.unwrap().contains("CHAR("),
+            "must produce CHAR concat"
+        );
     }
 
     #[test]

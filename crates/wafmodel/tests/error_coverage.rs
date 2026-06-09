@@ -63,7 +63,10 @@ fn budget_exhausted_variant_is_produced_by_the_budgeted_learner() {
     };
 
     let mut w = mk();
-    let mut eq = BoundedExhaustiveEq { max_len: 6, max_queries: None };
+    let mut eq = BoundedExhaustiveEq {
+        max_len: 6,
+        max_queries: None,
+    };
     let err = l_star_budgeted(&mut w, &body, &alpha, &mut eq, 1).unwrap_err();
     match err {
         WafModelError::BudgetExhausted { queries } => {
@@ -81,7 +84,10 @@ fn budget_exhausted_variant_is_produced_by_the_budgeted_learner() {
 
     // Control: unbounded budget on the identical target succeeds.
     let mut w2 = mk();
-    let mut eq2 = BoundedExhaustiveEq { max_len: 6, max_queries: None };
+    let mut eq2 = BoundedExhaustiveEq {
+        max_len: 6,
+        max_queries: None,
+    };
     assert!(
         l_star_budgeted(&mut w2, &body, &alpha, &mut eq2, u64::MAX).is_ok(),
         "the target IS learnable — only the budget caused the failure"

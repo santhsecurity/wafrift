@@ -310,10 +310,9 @@ fn decompress_bytes(bytes: &[u8], algo: Algorithm) -> Result<Vec<u8>, Compressio
             }
             Ok(bytes.to_vec())
         }
-        Algorithm::Gzip => drain_capped(
-            flate2::read::GzDecoder::new(bytes),
-            CompressionError::Gzip,
-        ),
+        Algorithm::Gzip => {
+            drain_capped(flate2::read::GzDecoder::new(bytes), CompressionError::Gzip)
+        }
         Algorithm::Deflate => drain_capped(
             flate2::read::DeflateDecoder::new(bytes),
             CompressionError::Deflate,
@@ -568,8 +567,7 @@ mod tests {
         // so its inverse `decompress` must too — otherwise a crafted
         // `gzip,gzip,…×N` Content-Encoding header drives an O(N) decode loop.
         // The cap is checked BEFORE any decode work, so the body can be empty.
-        let header = std::iter::repeat("gzip")
-            .take(MAX_CHAIN_LAYERS + 1)
+        let header = std::iter::repeat_n("gzip", MAX_CHAIN_LAYERS + 1)
             .collect::<Vec<_>>()
             .join(", ");
         let blob = CompressedBody {
@@ -590,8 +588,7 @@ mod tests {
         let body = b"hello world";
         let compressed = compress(body, Algorithm::Gzip).unwrap();
         // (MAX+5) unknown `snappy` tokens + one real gzip = 1 recognised layer.
-        let mut tokens: Vec<String> = std::iter::repeat("snappy")
-            .take(MAX_CHAIN_LAYERS + 5)
+        let mut tokens: Vec<String> = std::iter::repeat_n("snappy", MAX_CHAIN_LAYERS + 5)
             .map(str::to_string)
             .collect();
         tokens.push(compressed.content_encoding.clone());
@@ -658,7 +655,10 @@ mod tests {
         let err = super::decompress_bytes(&oversized, Algorithm::Identity)
             .expect_err("identity decompress must refuse > cap input");
         match err {
-            CompressionError::DecompressionBomb { cap_bytes, observed_bytes } => {
+            CompressionError::DecompressionBomb {
+                cap_bytes,
+                observed_bytes,
+            } => {
                 assert_eq!(cap_bytes, DECOMPRESSED_BODY_MAX_BYTES);
                 assert_eq!(observed_bytes, DECOMPRESSED_BODY_MAX_BYTES + 1);
             }
@@ -695,7 +695,10 @@ mod tests {
         let mut limited = oversized.take((cap as u64) + 1);
         let mut buf = Vec::new();
         limited.read_to_end(&mut buf).expect("read");
-        assert!(buf.len() > cap, "Read::take(cap+1) must produce cap+1 bytes for a > cap source");
+        assert!(
+            buf.len() > cap,
+            "Read::take(cap+1) must produce cap+1 bytes for a > cap source"
+        );
         // The error promotion is purely a buf.len() > cap check —
         // already exercised in identity_decompress_rejects_oversize_input.
     }

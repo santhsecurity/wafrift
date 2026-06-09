@@ -46,8 +46,14 @@ fn waf_diff_equals_exactly_the_known_added_rule_language() {
     // and `<s`+`xy` have all Myhill–Nerode distinguishing words of
     // length ≤ 3, and the diff witnesses (`xy`, `<sxy`) are ≤ 4 — so 6
     // soundly certifies exactness while staying fast (5^≤6, not 5^≤10).
-    let mut ea = BoundedExhaustiveEq { max_len: 6, max_queries: None };
-    let mut eb = BoundedExhaustiveEq { max_len: 6, max_queries: None };
+    let mut ea = BoundedExhaustiveEq {
+        max_len: 6,
+        max_queries: None,
+    };
+    let mut eb = BoundedExhaustiveEq {
+        max_len: 6,
+        max_queries: None,
+    };
     let la = l_star(&mut a, &body, &alpha, &mut ea).unwrap().sfa;
     let lb = l_star(&mut b, &body, &alpha, &mut eb).unwrap().sfa;
 
@@ -109,7 +115,10 @@ fn dual_evaluation_of_a_richer_ruleset_is_self_consistent() {
     // Exactness over the full length-≤9 corpus ⇒ the learner must be
     // provably complete to that depth, not merely within W-method's
     // conditional bound.
-    let mut eq = BoundedExhaustiveEq { max_len: 9, max_queries: None };
+    let mut eq = BoundedExhaustiveEq {
+        max_len: 9,
+        max_queries: None,
+    };
     let learned = l_star(&mut waf, &body, &alpha, &mut eq).unwrap().sfa;
 
     let mut oracle = SimRegexWaf::new(

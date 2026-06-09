@@ -20,9 +20,9 @@
 use proptest::prelude::*;
 use wafrift_graphql::{
     INTROSPECTION_QUERY, SIMPLE_INTROSPECTION_QUERY, TEST_BATCH_SIZES, TEST_DEPTHS,
-    TYPE_INTROSPECTION_QUERY, alias_flood_payload, all_evasion_payloads,
-    generate_batch, generate_deep_query, generate_fragment_query,
-    introspection_whitespace_split_payloads, op_name_mismatch_payloads,
+    TYPE_INTROSPECTION_QUERY, alias_flood_payload, all_evasion_payloads, generate_batch,
+    generate_deep_query, generate_fragment_query, introspection_whitespace_split_payloads,
+    op_name_mismatch_payloads,
 };
 
 // ───────────────────────────────────────────────────────────────
@@ -283,9 +283,8 @@ fn all_evasion_payloads_no_duplicates() {
 #[test]
 fn all_evasion_payloads_all_valid_json() {
     for p in all_evasion_payloads() {
-        let parsed: serde_json::Value = serde_json::from_str(&p).unwrap_or_else(|e| {
-            panic!("all_evasion_payloads emitted non-JSON: {p:?} — {e}")
-        });
+        let parsed: serde_json::Value = serde_json::from_str(&p)
+            .unwrap_or_else(|e| panic!("all_evasion_payloads emitted non-JSON: {p:?} — {e}"));
         // Either an object with "query", or an array (the batch ones).
         assert!(
             parsed.is_object() || parsed.is_array(),

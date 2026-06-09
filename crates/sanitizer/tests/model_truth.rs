@@ -14,13 +14,14 @@ fn model(
     schemes: &[&str],
     strips: &[&str],
 ) -> SanitizerModel {
-    let mut m = SanitizerModel::default();
-    m.forbidden_tags = forbidden.iter().map(|s| s.to_string()).collect();
-    m.allowed_tags = allowed.map(|a| a.iter().map(|s| s.to_string()).collect());
-    m.strips_event_handlers = strip_handlers;
-    m.blocked_schemes = schemes.iter().map(|s| s.to_string()).collect();
-    m.strip_patterns = strips.iter().map(|s| s.to_string()).collect();
-    m
+    SanitizerModel {
+        forbidden_tags: forbidden.iter().map(|s| s.to_string()).collect(),
+        allowed_tags: allowed.map(|a| a.iter().map(|s| s.to_string()).collect()),
+        strips_event_handlers: strip_handlers,
+        blocked_schemes: schemes.iter().map(|s| s.to_string()).collect(),
+        strip_patterns: strips.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    }
 }
 
 // ── tag forbid / allow ───────────────────────────────────────────────────────
@@ -29,7 +30,10 @@ fn model(
 fn a_forbidden_script_tag_is_dropped_and_not_executable() {
     let m = model(&["script"], None, false, &[], &[]);
     let out = m.sanitize("<script>alert(1)</script>");
-    assert!(!is_executable_html(&out), "forbidden <script> must not survive: {out:?}");
+    assert!(
+        !is_executable_html(&out),
+        "forbidden <script> must not survive: {out:?}"
+    );
     assert!(!m.survives_executable("<script>alert(1)</script>"));
 }
 
@@ -43,7 +47,10 @@ fn an_unforbidden_script_tag_survives_and_is_executable() {
 fn an_allowlist_drops_a_non_allowlisted_tag() {
     let m = model(&[], Some(&["b", "i"]), false, &[], &[]);
     let out = m.sanitize("<svg onload=alert(1)>");
-    assert!(!out.contains("<svg"), "non-allowlisted <svg> must be dropped: {out:?}");
+    assert!(
+        !out.contains("<svg"),
+        "non-allowlisted <svg> must be dropped: {out:?}"
+    );
 }
 
 #[test]
@@ -66,13 +73,19 @@ fn forbid_overrides_allow_for_the_same_tag() {
 #[test]
 fn an_event_handler_is_stripped_when_the_model_strips_handlers() {
     let m = model(&[], None, true, &[], &[]);
-    assert!(!m.survives_executable("<svg onload=alert(1)>"), "onload must be stripped");
+    assert!(
+        !m.survives_executable("<svg onload=alert(1)>"),
+        "onload must be stripped"
+    );
 }
 
 #[test]
 fn an_event_handler_survives_when_the_model_does_not_strip() {
     let m = model(&[], None, false, &[], &[]);
-    assert!(m.survives_executable("<svg onload=alert(1)>"), "unstripped onload is a bypass");
+    assert!(
+        m.survives_executable("<svg onload=alert(1)>"),
+        "unstripped onload is a bypass"
+    );
 }
 
 #[test]
@@ -115,7 +128,9 @@ fn executable_detector_rejects_plain_text() {
 fn executable_detector_rejects_a_bare_javascript_scheme_string() {
     // A bare `javascript:` in text (no tag/handler) is inert in a markup sink —
     // flagging it would over-report. Documented soundness choice.
-    assert!(!is_executable_html("the string javascript:alert(1) as text"));
+    assert!(!is_executable_html(
+        "the string javascript:alert(1) as text"
+    ));
 }
 
 #[test]
@@ -161,7 +176,10 @@ fn an_uncompilable_strip_pattern_is_dropped_not_panicked() {
     // (the model keeps more input — the sound direction), never panic.
     let m = model(&[], None, false, &[], &["(?<=lookbehind)x"]);
     let compiled = m.compiled_strip_patterns();
-    assert!(compiled.is_empty(), "an uncompilable pattern yields no compiled regex");
+    assert!(
+        compiled.is_empty(),
+        "an uncompilable pattern yields no compiled regex"
+    );
     // sanitize still runs and is total.
     let _ = m.sanitize("<script>alert(1)</script>");
 }

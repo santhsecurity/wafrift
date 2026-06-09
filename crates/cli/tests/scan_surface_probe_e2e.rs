@@ -11,7 +11,7 @@ const STATIC_SHELL: &[u8] = b"STATIC_WAF_ENGAGEMENT_SHELL_v1";
 
 /// Primary `?q=` is unguarded (identical shell). `/register.php?username=` is selective.
 async fn spawn_escalate_mock() -> std::net::SocketAddr {
-    let handler: Arc<dyn Fn(&[u8]) -> (u16, Vec<u8>) + Send + Sync> = Arc::new(|req| {
+    let handler: MockHandler = Arc::new(|req| {
         let req = String::from_utf8_lossy(req);
         if (req.contains("/register.php") || req.contains("POST /register.php"))
             && (req.contains("username=") || req.contains("username%3D"))

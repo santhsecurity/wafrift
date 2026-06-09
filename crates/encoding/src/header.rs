@@ -276,15 +276,15 @@ pub fn charset_confusion(media_type: &str, charset: &str) -> String {
 /// Each is a real IANA charset that some backend will accept and a
 /// hand-rolled WAF regex won't decode.
 pub const EXOTIC_CHARSETS: &[&str] = &[
-    "ibm037",     // EBCDIC — byte values disjoint from ASCII
-    "ibm500",     // EBCDIC variant
-    "utf-32",     // 4-byte-per-char — ASCII regex misses
+    "ibm037", // EBCDIC — byte values disjoint from ASCII
+    "ibm500", // EBCDIC variant
+    "utf-32", // 4-byte-per-char — ASCII regex misses
     "utf-32be",
     "utf-16",
     "utf-16be",
-    "utf-7",      // SELECT = +U0wAAA-
-    "shift_jis",  // Japanese — partial ASCII overlap
-    "gb18030",    // Chinese
+    "utf-7",       // SELECT = +U0wAAA-
+    "shift_jis",   // Japanese — partial ASCII overlap
+    "gb18030",     // Chinese
     "iso-2022-jp", // Stateful — toggle-byte before SELECT
 ];
 

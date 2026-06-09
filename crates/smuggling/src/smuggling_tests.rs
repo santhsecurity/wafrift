@@ -239,7 +239,8 @@ mod tests {
         // not `ChunkExtension`. The bandit and gene-bank dedup by variant
         // tag, so a wrong tag would silently merge CVE-2025-55315 successes
         // into the legacy chunk-extension pool.
-        let p = chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let p =
+            chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
         assert_eq!(p.variant, SmugglingVariant::ChunkExtensionLoneLf);
     }
 
@@ -249,7 +250,8 @@ mod tests {
         // — the standard zero-length terminator. Without it, the back-end
         // hangs waiting for more chunks and the smuggling test times out
         // rather than completing the desync.
-        let p = chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let p =
+            chunk_extension_lone_lf("example.com", "GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
         assert!(
             p.raw_bytes.ends_with(b"0\r\n\r\n"),
             "outer chunked body must terminate with 0\\r\\n\\r\\n; got tail: {:?}",
@@ -756,8 +758,7 @@ mod tests {
         assert!(path.contains("UNION SELECT 1,2,3--"));
         assert!(path.contains("?page=1"));
         assert_eq!(
-            path,
-            "/api/v1/users%3FUNION SELECT 1,2,3--?page=1",
+            path, "/api/v1/users%3FUNION SELECT 1,2,3--?page=1",
             "wire format must match exactly"
         );
     }
@@ -801,7 +802,11 @@ mod tests {
     #[test]
     fn header_overflow_smuggle_zero_padding() {
         let headers = header_overflow_smuggle(0, "X-Payload", "value");
-        assert_eq!(headers.len(), 1, "zero padding must produce exactly 1 header");
+        assert_eq!(
+            headers.len(),
+            1,
+            "zero padding must produce exactly 1 header"
+        );
         assert_eq!(headers[0].0, "X-Payload");
         assert_eq!(headers[0].1, "value");
     }
@@ -812,7 +817,11 @@ mod tests {
         // 94 padding + 1 payload = 95 total. The payload is the 95th header,
         // which falls past OpenResty's ~94-header inspection limit.
         let headers = header_overflow_smuggle(94, "Authorization", "Bearer smuggled");
-        assert_eq!(headers.len(), 95, "must have 95 headers total (94 padding + 1 payload)");
+        assert_eq!(
+            headers.len(),
+            95,
+            "must have 95 headers total (94 padding + 1 payload)"
+        );
         // All padding headers must be X-Pad-0 through X-Pad-93.
         for (i, header) in headers.iter().enumerate().take(94) {
             assert_eq!(header.0, format!("X-Pad-{i}"));
@@ -848,8 +857,7 @@ mod tests {
     fn websocket_smuggle_custom_with_protocol() {
         let key = "testkey==";
         let proto = "chat, superchat";
-        let p =
-            websocket_smuggle_custom("example.com", "/chat", Some(key), Some(proto)).unwrap();
+        let p = websocket_smuggle_custom("example.com", "/chat", Some(key), Some(proto)).unwrap();
         let s = String::from_utf8_lossy(&p.raw_bytes);
         assert!(
             s.contains(&format!("Sec-WebSocket-Key: {key}\r\n")),
@@ -967,8 +975,7 @@ mod tests {
             .expect("header separator must be present");
         let body = &p.raw_bytes[pos + sep.len()..];
         assert_eq!(
-            body,
-            b"5\r\n\r\n0\r\n\r\n",
+            body, b"5\r\n\r\n0\r\n\r\n",
             "detect_te_cl body must be exactly '5\\r\\n\\r\\n0\\r\\n\\r\\n', \
              got: {body:?}"
         );
@@ -1022,7 +1029,8 @@ mod tests {
         // Body must be appended after the header block.
         assert!(
             p.raw_bytes.ends_with(body),
-            "body bytes must be the last {} bytes of raw_bytes", body.len()
+            "body bytes must be the last {} bytes of raw_bytes",
+            body.len()
         );
         // Must use POST method.
         assert!(s.starts_with("POST / HTTP/1.1\r\n"));
@@ -1169,13 +1177,23 @@ mod tests {
     #[test]
     fn vh_masked_header_empty_name_no_panic() {
         let variants = vh_masked_header("", "value").unwrap();
-        assert_eq!(variants.len(), 2, "must still return 2 variants for empty name");
+        assert_eq!(
+            variants.len(),
+            2,
+            "must still return 2 variants for empty name"
+        );
         // Space-prefix: " : value"
         let s0 = String::from_utf8_lossy(&variants[0].raw_bytes);
-        assert!(s0.contains(": value\r\n"), "space-prefix must still produce header line");
+        assert!(
+            s0.contains(": value\r\n"),
+            "space-prefix must still produce header line"
+        );
         // Char-rewrite: empty name → "X-Unknown"
         let s1 = String::from_utf8_lossy(&variants[1].raw_bytes);
-        assert!(s1.contains("X-Unknown: value\r\n"), "char-rewrite with empty name must use X-Unknown");
+        assert!(
+            s1.contains("X-Unknown: value\r\n"),
+            "char-rewrite with empty name must use X-Unknown"
+        );
     }
 
     /// CRLF injection in masked_name is rejected — anti-rig for the
@@ -1193,20 +1211,14 @@ mod tests {
     #[test]
     fn vh_masked_header_rejects_crlf_in_value() {
         let result = vh_masked_header("Host", "evil.internal\r\nX-Injected: payload");
-        assert!(
-            result.is_err(),
-            "CRLF in value must be rejected"
-        );
+        assert!(result.is_err(), "CRLF in value must be rejected");
     }
 
     /// NUL byte in masked_name is rejected.
     #[test]
     fn vh_masked_header_rejects_nul_in_name() {
         let result = vh_masked_header("Host\0extra", "val");
-        assert!(
-            result.is_err(),
-            "NUL byte in masked_name must be rejected"
-        );
+        assert!(result.is_err(), "NUL byte in masked_name must be rejected");
     }
 
     /// LF-only (no CR) in value is also rejected.
@@ -1228,7 +1240,10 @@ mod tests {
             s.starts_with("GET /logout HTTP/1.1\r\n"),
             "must use GET /logout, got:\n{s}"
         );
-        assert!(s.contains("Expect: 100-continue\r\n"), "must have Expect header");
+        assert!(
+            s.contains("Expect: 100-continue\r\n"),
+            "must have Expect header"
+        );
         assert!(s.contains("Content-Length: 44\r\n"), "must have attack CL");
         assert!(s.contains(smuggled), "smuggled request must appear in body");
         assert_eq!(p.variant, SmugglingVariant::KettleDesync);
@@ -1262,8 +1277,14 @@ mod tests {
         let variants = expect_100_obfuscated("x-", "!", "PAYLOAD", 7).unwrap();
         for v in &variants {
             let s = String::from_utf8_lossy(&v.raw_bytes);
-            assert!(s.contains("Expect: "), "all variants must have Expect:, got:\n{s}");
-            assert!(s.contains("100"), "all variants must reference '100', got:\n{s}");
+            assert!(
+                s.contains("Expect: "),
+                "all variants must have Expect:, got:\n{s}"
+            );
+            assert!(
+                s.contains("100"),
+                "all variants must reference '100', got:\n{s}"
+            );
         }
     }
 
@@ -1271,9 +1292,9 @@ mod tests {
     #[test]
     fn expect_100_obfuscated_y_prefix_variant_present() {
         let variants = expect_100_obfuscated("", "", "SMUGGLED", 5).unwrap();
-        let has_y_prefix = variants.iter().any(|v| {
-            String::from_utf8_lossy(&v.raw_bytes).contains("Expect: y 100-continue\r\n")
-        });
+        let has_y_prefix = variants
+            .iter()
+            .any(|v| String::from_utf8_lossy(&v.raw_bytes).contains("Expect: y 100-continue\r\n"));
         assert!(has_y_prefix, "must include 'y 100-continue' variant");
     }
 
@@ -1282,10 +1303,12 @@ mod tests {
     fn expect_100_obfuscated_caller_prefix_suffix() {
         let variants = expect_100_obfuscated("CUSTOM-", "-SUFFIX", "BODY", 4).unwrap();
         let has_custom = variants.iter().any(|v| {
-            String::from_utf8_lossy(&v.raw_bytes)
-                .contains("Expect: CUSTOM-100-continue-SUFFIX\r\n")
+            String::from_utf8_lossy(&v.raw_bytes).contains("Expect: CUSTOM-100-continue-SUFFIX\r\n")
         });
-        assert!(has_custom, "must include caller-supplied prefix/suffix variant");
+        assert!(
+            has_custom,
+            "must include caller-supplied prefix/suffix variant"
+        );
     }
 
     // ── 5. cl_zero_via_expect ───────────────────────────────────────────────
@@ -1300,7 +1323,10 @@ mod tests {
             s.starts_with("POST /images/ HTTP/1.1\r\n"),
             "must use POST /images/, got:\n{s}"
         );
-        assert!(s.contains("Expect: 100-continue\r\n"), "must have Expect header");
+        assert!(
+            s.contains("Expect: 100-continue\r\n"),
+            "must have Expect header"
+        );
         assert!(s.contains("Content-Length: 42\r\n"), "must have CL=42");
         assert!(s.contains(smuggled), "smuggled must appear in body");
         assert_eq!(p.variant, SmugglingVariant::KettleDesync);
@@ -1323,9 +1349,15 @@ mod tests {
         let bytes = double_desync("/con", "/images/", "PAYLOAD").unwrap();
         let s = String::from_utf8_lossy(&bytes);
         // Stage 1: 0.CL desync on /con.
-        assert!(s.starts_with("GET /con HTTP/1.1\r\n"), "stage 1 must be GET /con");
+        assert!(
+            s.starts_with("GET /con HTTP/1.1\r\n"),
+            "stage 1 must be GET /con"
+        );
         // Stage 2 body embedded in stage 1's body.
-        assert!(s.contains("POST /images/ HTTP/1.1\r\n"), "stage 2 POST must appear");
+        assert!(
+            s.contains("POST /images/ HTTP/1.1\r\n"),
+            "stage 2 POST must appear"
+        );
         // Payload appears after stage 2.
         assert!(s.contains("PAYLOAD"), "caller payload must appear");
         // Stage 1's Content-Length must equal the byte length of stage 2.
@@ -1397,7 +1429,8 @@ mod tests {
         for delim in &[':', '/', '\\', '?', '#', '@', '[', ']'] {
             assert!(
                 raw_strs.iter().any(|s| s.contains(*delim)),
-                "delimiter {:?} must appear in some variant", delim
+                "delimiter {:?} must appear in some variant",
+                delim
             );
         }
     }
@@ -1409,7 +1442,10 @@ mod tests {
         // Must not panic; all must have a Host header.
         for v in &variants {
             let s = String::from_utf8_lossy(&v.raw_bytes);
-            assert!(s.contains("Host: "), "short host must still produce Host header");
+            assert!(
+                s.contains("Host: "),
+                "short host must still produce Host header"
+            );
         }
     }
 
@@ -1431,23 +1467,33 @@ mod tests {
         // Pre-fix slicing at byte-index 3 hit the end (OK), but "日本a" would hit
         // mid-char. Use a representative mix.
         let cases = &[
-            "日本語.com",   // 3-byte chars
-            "x£.com",      // 1-byte + 2-byte
-            "€€.eu",       // 3-byte + 3-byte
-            "a",           // shorter than 3 chars
-            "",            // empty
-            "abc",         // exactly 3 ASCII
-            "abcd",        // > 3 ASCII
+            "日本語.com", // 3-byte chars
+            "x£.com",     // 1-byte + 2-byte
+            "€€.eu",      // 3-byte + 3-byte
+            "a",          // shorter than 3 chars
+            "",           // empty
+            "abc",        // exactly 3 ASCII
+            "abcd",       // > 3 ASCII
         ];
         for case in cases {
             // Must not panic.
             let variants = malformed_host_split(case).unwrap();
-            assert_eq!(variants.len(), 8, "must always produce 8 variants for input {case:?}");
+            assert_eq!(
+                variants.len(),
+                8,
+                "must always produce 8 variants for input {case:?}"
+            );
             for v in &variants {
                 // Must produce a syntactically valid GET request with a Host header.
                 let s = String::from_utf8_lossy(&v.raw_bytes);
-                assert!(s.contains("Host: "), "multibyte host {case:?} must produce Host header");
-                assert!(s.starts_with("GET / HTTP/1.1\r\n"), "must start with GET request line");
+                assert!(
+                    s.contains("Host: "),
+                    "multibyte host {case:?} must produce Host header"
+                );
+                assert!(
+                    s.starts_with("GET / HTTP/1.1\r\n"),
+                    "must start with GET request line"
+                );
             }
         }
     }
@@ -1462,18 +1508,31 @@ mod tests {
         // Must target protocol downgrade.
         assert_eq!(evasion.target_flaw, H2TargetFlaw::ProtocolDowngrade);
         // Pseudo-headers: :method, :path, :scheme.
-        let methods: Vec<_> = evasion.pseudo_headers.iter()
-            .filter(|(k, _)| k == ":method").collect();
-        assert_eq!(methods.len(), 1, "must have exactly one :method pseudo-header");
+        let methods: Vec<_> = evasion
+            .pseudo_headers
+            .iter()
+            .filter(|(k, _)| k == ":method")
+            .collect();
+        assert_eq!(
+            methods.len(),
+            1,
+            "must have exactly one :method pseudo-header"
+        );
         assert_eq!(methods[0].1, "POST");
         // Conflicting content-length header.
-        let cl_headers: Vec<_> = evasion.headers.iter()
-            .filter(|(k, _)| k == "content-length").collect();
+        let cl_headers: Vec<_> = evasion
+            .headers
+            .iter()
+            .filter(|(k, _)| k == "content-length")
+            .collect();
         assert_eq!(cl_headers.len(), 1, "must have content-length header");
         assert_eq!(cl_headers[0].1, "10", "declared_cl must be 10");
         // Transfer-encoding: chunked for H2.TE.
-        let te_headers: Vec<_> = evasion.headers.iter()
-            .filter(|(k, _)| k == "transfer-encoding").collect();
+        let te_headers: Vec<_> = evasion
+            .headers
+            .iter()
+            .filter(|(k, _)| k == "transfer-encoding")
+            .collect();
         assert_eq!(te_headers.len(), 1, "must have transfer-encoding header");
         assert_eq!(te_headers[0].1, "chunked");
     }
@@ -1495,11 +1554,16 @@ mod tests {
             "empty body must set end_stream=false or leave unset"
         );
         // x-body-frame must encode the terminating chunk.
-        let body_frame = evasion.headers.iter()
+        let body_frame = evasion
+            .headers
+            .iter()
             .find(|(k, _)| k == "x-body-frame")
             .map(|(_, v)| v.as_str())
             .unwrap_or("");
-        assert!(body_frame.contains("0\r\n\r\n"), "empty body must produce terminating chunk");
+        assert!(
+            body_frame.contains("0\r\n\r\n"),
+            "empty body must produce terminating chunk"
+        );
     }
 
     // ── 9. line_folded_header ────────────────────────────────────────────────
@@ -1564,7 +1628,10 @@ mod tests {
             standard.contains("1;x=y\r\nX\r\n"),
             "standard variant must have '1;x=y\\r\\nX\\r\\n', got:\n{standard}"
         );
-        assert!(standard.contains("0\r\n\r\nBODY"), "smuggled body must follow terminator");
+        assert!(
+            standard.contains("0\r\n\r\nBODY"),
+            "smuggled body must follow terminator"
+        );
         assert_eq!(variants[0].variant, SmugglingVariant::ChunkExtension);
     }
 
@@ -1687,8 +1754,7 @@ mod tests {
             "NUL in http2_settings must be rejected; got: {err:?}"
         );
         // None must succeed
-        h2c_post_smuggle("example.com", b"body", None)
-            .expect("None settings must succeed");
+        h2c_post_smuggle("example.com", b"body", None).expect("None settings must succeed");
     }
 
     /// `chunk_extension_variants` with an oversized body must return Err.
@@ -1708,8 +1774,7 @@ mod tests {
         );
         // Exactly at the limit must succeed.
         let exactly = "B".repeat(64 * 1024);
-        chunk_extension_variants(&exactly)
-            .expect("body at exactly 64 KiB must succeed");
+        chunk_extension_variants(&exactly).expect("body at exactly 64 KiB must succeed");
         // Empty body must succeed.
         chunk_extension_variants("").expect("empty body must succeed");
     }
@@ -1763,14 +1828,25 @@ mod tests {
         let declared_cl = 5;
         let evasion = browser_powered_h2_downgrade("POST", "/api/data", body, declared_cl).unwrap();
         assert_eq!(evasion.target_flaw, H2TargetFlaw::ProtocolDowngrade);
-        let cl_header = evasion.headers.iter()
+        let cl_header = evasion
+            .headers
+            .iter()
             .find(|(k, _)| k == "content-length")
             .expect("content-length header must be present");
         // The declared CL is 5 — intentionally shorter than the real body.
-        assert_eq!(cl_header.1, "5", "declared CL must be 5 (mismatched desync)");
+        assert_eq!(
+            cl_header.1, "5",
+            "declared CL must be 5 (mismatched desync)"
+        );
         // Both CL and TE present → H2.CL + H2.TE ambiguity.
-        let has_te = evasion.headers.iter().any(|(k, v)| k == "transfer-encoding" && v == "chunked");
-        assert!(has_te, "must have transfer-encoding: chunked for H2.TE desync");
+        let has_te = evasion
+            .headers
+            .iter()
+            .any(|(k, v)| k == "transfer-encoding" && v == "chunked");
+        assert!(
+            has_te,
+            "must have transfer-encoding: chunked for H2.TE desync"
+        );
     }
 
     // ── Concurrency stress ──────────────────────────────────────────────────

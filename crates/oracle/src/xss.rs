@@ -40,8 +40,7 @@ fn xss_rules() -> &'static XssRules {
     static RULES: OnceLock<XssRules> = OnceLock::new();
     RULES.get_or_init(|| {
         let raw = include_str!("../rules/xss/structure.toml");
-        let mut rules: XssRules =
-            toml::from_str(raw).expect("rules/xss/structure.toml must parse");
+        let mut rules: XssRules = toml::from_str(raw).expect("rules/xss/structure.toml must parse");
         // F134: every lookup uses `payload.to_ascii_lowercase().contains(needle)`,
         // so any rule whose `name` / `prefix` contains an upper-case letter is
         // dead — pre-fix this silently disabled the `setTimeout`, `setInterval`,

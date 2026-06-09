@@ -20,9 +20,7 @@ use crate::grammar::template::is_structured_ssti;
 /// silently rewriting a FreeMarker `${…}` payload into Jinja
 /// `{{ … }}` (different engine, the rewritten variant is a no-op
 /// on the target). Now the original delimiters round-trip.
-fn inner_expr(
-    payload: &str,
-) -> Option<(String, String, String, &'static str, &'static str)> {
+fn inner_expr(payload: &str) -> Option<(String, String, String, &'static str, &'static str)> {
     for (o, c) in [
         ("{{", "}}"),
         ("{%", "%}"),
@@ -254,7 +252,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
     }
 
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::with_capacity(8);

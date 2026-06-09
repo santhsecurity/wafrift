@@ -12,7 +12,7 @@ const FORM_HTML: &[u8] =
 
 /// Same selective WAF as `scan_surface_probe_e2e`, but the guarded sink is POST form.
 async fn spawn_post_register_mock() -> std::net::SocketAddr {
-    let handler: Arc<dyn Fn(&[u8]) -> (u16, Vec<u8>) + Send + Sync> = Arc::new(|req| {
+    let handler: MockHandler = Arc::new(|req| {
         let req = String::from_utf8_lossy(req);
         if req.starts_with("GET / ") || req.starts_with("GET / HTTP") {
             return (200, FORM_HTML.to_vec());

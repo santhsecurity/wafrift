@@ -46,7 +46,11 @@ impl RateLimiter {
     #[must_use]
     pub fn new(rps: f64, burst: f64) -> Arc<Self> {
         // Sanitize: NaN or negative → treat as 0 (unlimited / no-op).
-        let rps = if rps.is_finite() && rps > 0.0 { rps } else { 0.0 };
+        let rps = if rps.is_finite() && rps > 0.0 {
+            rps
+        } else {
+            0.0
+        };
         let burst_raw = if burst.is_finite() && burst > 0.0 {
             burst
         } else {
@@ -225,7 +229,10 @@ mod tests {
         // Duration::from_secs_f64(need / INF) = 0s — which loops forever
         // without the sanitize fix.
         let l = RateLimiter::new(f64::INFINITY, 0.0);
-        assert!(l.is_unlimited(), "infinite rps must be treated as unlimited");
+        assert!(
+            l.is_unlimited(),
+            "infinite rps must be treated as unlimited"
+        );
         l.acquire("h").await;
     }
 
@@ -235,7 +242,10 @@ mod tests {
         // false, parking every request forever. The sanitizer must clamp
         // NaN burst to a sane value.
         let l = RateLimiter::new(100.0, f64::NAN);
-        assert!(!l.is_unlimited(), "valid rps with NaN burst must not be unlimited");
+        assert!(
+            !l.is_unlimited(),
+            "valid rps with NaN burst must not be unlimited"
+        );
         // With high enough rps and clamped burst, first acquire should succeed quickly.
         let start = TokioInstant::now();
         l.acquire("h").await;

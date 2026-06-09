@@ -52,7 +52,10 @@ fn encode_random_case_is_deterministic_post_fix() {
     );
     // Distinct inputs must produce distinct outputs (not a constant encoder).
     let c = encode(b"AbCdEfGhIjKlMnOpQrStUvWxY".as_ref(), S::RandomCase).unwrap();
-    assert_ne!(a, c, "RandomCase must vary with input — not a fixed-case encoder");
+    assert_ne!(
+        a, c,
+        "RandomCase must vary with input — not a fixed-case encoder"
+    );
 }
 
 #[test]
@@ -62,7 +65,10 @@ fn encode_space_to_random_blank_is_deterministic() {
     let payload = "SELECT * FROM t WHERE a = 1 AND b = 2";
     let a = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
     let b = encode(payload.as_bytes(), S::SpaceToRandomBlank).unwrap();
-    assert_eq!(a, b, "SpaceToRandomBlank must be deterministic for identical input");
+    assert_eq!(
+        a, b,
+        "SpaceToRandomBlank must be deterministic for identical input"
+    );
     // Distinct inputs must produce distinct outputs (not a constant encoder).
     let c = encode(b"SELECT 1 FROM x".as_ref(), S::SpaceToRandomBlank).unwrap();
     assert_ne!(a, c, "SpaceToRandomBlank must vary with input");
@@ -111,10 +117,16 @@ fn tamper_random_case_deterministic_and_varies_with_input() {
     // mixed-case output every run. Different inputs produce different output.
     let a = tamper("random_case", "PayloadText", Some("sql")).unwrap();
     let b = tamper("random_case", "PayloadText", Some("sql")).unwrap();
-    assert_eq!(a, b, "random_case tamper must be deterministic (FNV-1a seeded)");
+    assert_eq!(
+        a, b,
+        "random_case tamper must be deterministic (FNV-1a seeded)"
+    );
     // Distinct inputs must produce distinct patterns.
     let c = tamper("random_case", "PayloadTexu", Some("sql")).unwrap();
-    assert_ne!(a, c, "random_case must vary with input — not a fixed-case encoder");
+    assert_ne!(
+        a, c,
+        "random_case must vary with input — not a fixed-case encoder"
+    );
 }
 
 #[test]

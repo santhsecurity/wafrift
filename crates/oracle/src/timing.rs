@@ -243,8 +243,10 @@ mod tests {
 
     #[test]
     fn k_sigma_4_is_stricter_than_default() {
-        let lenient = TimingOracle::from_calibration_with_k(&[100.0, 120.0, 140.0, 110.0, 130.0], 2.0);
-        let strict = TimingOracle::from_calibration_with_k(&[100.0, 120.0, 140.0, 110.0, 130.0], 4.0);
+        let lenient =
+            TimingOracle::from_calibration_with_k(&[100.0, 120.0, 140.0, 110.0, 130.0], 2.0);
+        let strict =
+            TimingOracle::from_calibration_with_k(&[100.0, 120.0, 140.0, 110.0, 130.0], 4.0);
         // k=2 threshold < k=4 threshold for the same calibration.
         assert!(lenient.threshold_ms() < strict.threshold_ms());
         // A 200 ms response: anomalous under k=2 (threshold 170 ms),
@@ -279,11 +281,20 @@ mod tests {
         // MIN_STDEV_MS = 25ms applies and the oracle must remain queryable.
         // baseline=500, stdev=25 (floor), threshold = 500 + 3*25 = 575ms.
         let o = TimingOracle::from_calibration(&[500.0]);
-        assert_eq!(o.stdev_ms, MIN_STDEV_MS, "single-sample stdev must be the floor");
+        assert_eq!(
+            o.stdev_ms, MIN_STDEV_MS,
+            "single-sample stdev must be the floor"
+        );
         // 500ms (baseline itself) must not be anomalous.
-        assert!(!o.is_anomalous(500.0), "baseline response must not be anomalous");
+        assert!(
+            !o.is_anomalous(500.0),
+            "baseline response must not be anomalous"
+        );
         // A big delay still fires.
-        assert!(o.is_anomalous(10_000.0), "10s delay must trigger even on single-sample cal");
+        assert!(
+            o.is_anomalous(10_000.0),
+            "10s delay must trigger even on single-sample cal"
+        );
     }
 
     #[test]

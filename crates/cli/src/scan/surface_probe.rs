@@ -398,7 +398,7 @@ pub(crate) async fn probe_alternatives(
 }
 
 #[must_use]
-pub(crate) fn best_meaningful<'a>(alts: &'a [SurfacePreflight]) -> Option<&'a SurfacePreflight> {
+pub(crate) fn best_meaningful(alts: &[SurfacePreflight]) -> Option<&SurfacePreflight> {
     alts.iter().find(|p| p.counts_meaningful_bypass())
 }
 
@@ -452,16 +452,16 @@ pub(crate) fn build_recommendations(
             r.push("Could not assess WAF engagement — fix connectivity and re-run.".to_string());
         }
     }
-    if let Some(best) = alts.first() {
-        if best.counts_meaningful_bypass() {
-            r.push(format!(
-                "Best alternative surface: {} param={} ({}, score={}) — rerun with --auto-escalate",
-                best.candidate.url,
-                best.candidate.param,
-                best.report.level.as_str(),
-                best.score
-            ));
-        }
+    if let Some(best) = alts.first()
+        && best.counts_meaningful_bypass()
+    {
+        r.push(format!(
+            "Best alternative surface: {} param={} ({}, score={}) — rerun with --auto-escalate",
+            best.candidate.url,
+            best.candidate.param,
+            best.report.level.as_str(),
+            best.score
+        ));
     }
     r
 }

@@ -294,9 +294,7 @@ pub enum GrpcFrameError {
         need: usize,
     },
     /// The declared payload length exceeds the available bytes.
-    #[error(
-        "gRPC frame length mismatch: declared {declared} bytes but only {available} available"
-    )]
+    #[error("gRPC frame length mismatch: declared {declared} bytes but only {available} available")]
     LengthMismatch {
         /// Length claimed by the frame header.
         declared: u32,
@@ -425,7 +423,10 @@ mod tests {
     #[test]
     fn decode_grpc_frame_too_short() {
         let err = decode_grpc_frame(&[0, 0, 0]).unwrap_err();
-        assert!(matches!(err, GrpcFrameError::FrameTooShort { got: 3, need: 5 }));
+        assert!(matches!(
+            err,
+            GrpcFrameError::FrameTooShort { got: 3, need: 5 }
+        ));
     }
 
     #[test]
@@ -435,7 +436,10 @@ mod tests {
         let err = decode_grpc_frame(frame).unwrap_err();
         assert!(matches!(
             err,
-            GrpcFrameError::LengthMismatch { declared: 100, available: 0 }
+            GrpcFrameError::LengthMismatch {
+                declared: 100,
+                available: 0
+            }
         ));
     }
 
@@ -609,10 +613,7 @@ mod tests {
         for size in [0, 1, 100, 1024] {
             let payload: Vec<u8> = (0u8..=255).cycle().take(size).collect();
             let frame = wrap_in_grpc_frame(&payload);
-            assert_eq!(
-                frame[0], 0,
-                "compression flag must be 0 for size={size}"
-            );
+            assert_eq!(frame[0], 0, "compression flag must be 0 for size={size}");
         }
     }
 
@@ -621,7 +622,11 @@ mod tests {
     #[test]
     fn grpc_frame_header_length_is_exactly_5() {
         let frame = wrap_in_grpc_frame(&[]);
-        assert_eq!(frame.len(), 5, "empty payload frame must be exactly 5 bytes");
+        assert_eq!(
+            frame.len(),
+            5,
+            "empty payload frame must be exactly 5 bytes"
+        );
     }
 
     // ── varint encode/decode edge cases ─────────────────────────────────
@@ -710,13 +715,19 @@ mod tests {
     #[test]
     fn decode_grpc_frame_empty_returns_too_short() {
         let err = decode_grpc_frame(&[]).unwrap_err();
-        assert!(matches!(err, GrpcFrameError::FrameTooShort { got: 0, need: 5 }));
+        assert!(matches!(
+            err,
+            GrpcFrameError::FrameTooShort { got: 0, need: 5 }
+        ));
     }
 
     #[test]
     fn decode_grpc_frame_4_bytes_returns_too_short() {
         let err = decode_grpc_frame(&[0, 0, 0, 0]).unwrap_err();
-        assert!(matches!(err, GrpcFrameError::FrameTooShort { got: 4, need: 5 }));
+        assert!(matches!(
+            err,
+            GrpcFrameError::FrameTooShort { got: 4, need: 5 }
+        ));
     }
 
     #[test]
@@ -733,13 +744,22 @@ mod tests {
     fn grpc_frame_error_display_mentions_byte_counts() {
         let err = GrpcFrameError::FrameTooShort { got: 3, need: 5 };
         let msg = err.to_string();
-        assert!(msg.contains('3'), "got count missing from error message: {msg}");
-        assert!(msg.contains('5'), "need count missing from error message: {msg}");
+        assert!(
+            msg.contains('3'),
+            "got count missing from error message: {msg}"
+        );
+        assert!(
+            msg.contains('5'),
+            "need count missing from error message: {msg}"
+        );
     }
 
     #[test]
     fn grpc_frame_error_length_mismatch_display() {
-        let err = GrpcFrameError::LengthMismatch { declared: 999, available: 4 };
+        let err = GrpcFrameError::LengthMismatch {
+            declared: 999,
+            available: 4,
+        };
         let msg = err.to_string();
         assert!(msg.contains("999"), "declared length missing: {msg}");
         assert!(msg.contains('4'), "available length missing: {msg}");
@@ -799,7 +819,10 @@ mod tests {
             .iter()
             .map(|(_, b)| String::from_utf8(b.clone()).unwrap())
             .collect();
-        assert_eq!(reconstructed, payload, "payload not preserved when shorter than field count");
+        assert_eq!(
+            reconstructed, payload,
+            "payload not preserved when shorter than field count"
+        );
     }
 
     // ── embed_attack_in_nested depth boundaries ──────────────────────────
@@ -816,12 +839,16 @@ mod tests {
     #[test]
     fn nested_depth_increases_monotonically_with_depth() {
         let payload = "attack payload";
-        let sizes: Vec<usize> = (0..=10u8).map(|d| embed_attack_in_nested(payload, d).len()).collect();
+        let sizes: Vec<usize> = (0..=10u8)
+            .map(|d| embed_attack_in_nested(payload, d).len())
+            .collect();
         for i in 1..sizes.len() {
             assert!(
                 sizes[i] > sizes[i - 1],
                 "depth {i} frame ({}) must be larger than depth {} frame ({})",
-                sizes[i], i - 1, sizes[i - 1]
+                sizes[i],
+                i - 1,
+                sizes[i - 1]
             );
         }
     }

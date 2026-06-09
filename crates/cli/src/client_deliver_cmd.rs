@@ -28,9 +28,7 @@ use std::process::ExitCode;
 
 use clap::Args;
 
-use wafrift_grammar::grammar::equiv::client_channel::{
-    self, ClientChannel, DeliveryAction,
-};
+use wafrift_grammar::grammar::equiv::client_channel::{self, ClientChannel, DeliveryAction};
 
 /// Output format for `client-deliver`.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -236,7 +234,9 @@ mod tests {
     fn scheme_payload_yields_prefix_bypass_deliveries() {
         let r = build_report("https://t/", "javascript:alert(1)", 40);
         assert!(
-            r.deliveries.iter().any(|d| d.rules.contains(&"prefix_bypass".to_string())),
+            r.deliveries
+                .iter()
+                .any(|d| d.rules.contains(&"prefix_bypass".to_string())),
             "a scheme payload must produce prefix-bypass deliveries"
         );
     }
@@ -245,7 +245,9 @@ mod tests {
     fn markup_payload_has_no_prefix_bypass_deliveries() {
         let r = build_report("https://t/", "<img src=x onerror=alert(1)>", 40);
         assert!(
-            !r.deliveries.iter().any(|d| d.rules.contains(&"prefix_bypass".to_string())),
+            !r.deliveries
+                .iter()
+                .any(|d| d.rules.contains(&"prefix_bypass".to_string())),
             "a markup payload needs no prefix bypass (the channel is the bypass)"
         );
         // …but it still covers every channel.

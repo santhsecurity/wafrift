@@ -293,7 +293,7 @@ impl ResponseOracle {
     /// `cf_signal.rule_attribution` is the recommended value to store in
     /// `OracleVerdict.rule_id` for the evolution engine's corpus keying.
     ///
-    /// Equivalent to calling [`classify`] and [`parse_cf_block`] separately
+    /// Equivalent to calling `classify` and [`parse_cf_block`] separately
     /// but avoids parsing headers twice.
     pub fn classify_with_cf_signal(
         &self,
@@ -301,7 +301,11 @@ impl ResponseOracle {
     ) -> (Verdict, Option<CfBlockSignal>) {
         let verdict = self.classify(ctx);
         let cf = parse_cf_block(&ctx.headers, &ctx.body);
-        let cf_opt = if cf.is_cloudflare_response() { Some(cf) } else { None };
+        let cf_opt = if cf.is_cloudflare_response() {
+            Some(cf)
+        } else {
+            None
+        };
         (verdict, cf_opt)
     }
 }
@@ -599,7 +603,6 @@ mod tests {
         )));
     }
 
-
     /// When >= 3 calibration latency samples are present, the statistical
     /// TimingOracle is used (mean + 3*sigma). The oracle is more precise:
     /// 200ms IS anomalous vs 100ms baseline (threshold ~105ms) but would NOT
@@ -620,7 +623,9 @@ mod tests {
         let v = oracle.classify(&ctx);
         let signals = v.signals();
         assert!(
-            signals.iter().any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
+            signals
+                .iter()
+                .any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
             "statistical oracle must flag 200ms anomalous (threshold ~105ms): {:?}",
             signals
         );
@@ -643,7 +648,9 @@ mod tests {
         let v = oracle.classify(&ctx);
         let signals = v.signals();
         assert!(
-            !signals.iter().any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
+            !signals
+                .iter()
+                .any(|s| matches!(s, Signal::ResponseTimeAnomaly { .. })),
             "below min samples, 200ms should not be flagged (3x=300ms): {:?}",
             signals
         );

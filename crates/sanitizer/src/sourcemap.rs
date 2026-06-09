@@ -50,12 +50,20 @@ impl std::fmt::Display for SourceMapError {
         match self {
             Self::Json(e) => write!(f, "source map JSON parse error: {e}"),
             Self::UnsupportedVersion(v) => {
-                write!(f, "unsupported source map version {v} (only v3 is supported)")
+                write!(
+                    f,
+                    "unsupported source map version {v} (only v3 is supported)"
+                )
             }
             Self::BadBase64Char(c) => write!(f, "illegal Base64-VLQ character {c:?} in mappings"),
-            Self::TruncatedVlq => write!(f, "truncated Base64-VLQ value (continuation bit on final digit)"),
+            Self::TruncatedVlq => write!(
+                f,
+                "truncated Base64-VLQ value (continuation bit on final digit)"
+            ),
             Self::VlqOverflow => write!(f, "Base64-VLQ value overflows i64"),
-            Self::BadSegmentArity(n) => write!(f, "source-map segment has {n} fields (must be 1, 4, or 5)"),
+            Self::BadSegmentArity(n) => {
+                write!(f, "source-map segment has {n} fields (must be 1, 4, or 5)")
+            }
         }
     }
 }
@@ -370,7 +378,10 @@ mod tests {
     #[test]
     fn vlq_bad_char_is_rejected() {
         let chars: Vec<char> = "!".chars().collect();
-        assert_eq!(decode_vlq(&chars, 0), Err(SourceMapError::BadBase64Char('!')));
+        assert_eq!(
+            decode_vlq(&chars, 0),
+            Err(SourceMapError::BadBase64Char('!'))
+        );
     }
 
     #[test]
@@ -415,7 +426,10 @@ mod tests {
     #[test]
     fn parse_rejects_non_v3() {
         let json = r#"{"version":2,"sources":[],"mappings":""}"#;
-        assert_eq!(SourceMap::parse(json), Err(SourceMapError::UnsupportedVersion(2)));
+        assert_eq!(
+            SourceMap::parse(json),
+            Err(SourceMapError::UnsupportedVersion(2))
+        );
     }
 
     #[test]
@@ -439,7 +453,13 @@ mod tests {
         let recovered = map.recovered_sources();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].path, "src/sanitize.js");
-        assert!(recovered[0].content.as_deref().unwrap().contains("replace(/<script>/gi"));
+        assert!(
+            recovered[0]
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("replace(/<script>/gi")
+        );
     }
 
     #[test]
@@ -514,10 +534,14 @@ mod tests {
         };
         // Line 0: seg(genCol+0, src+0, line+0, col+0), seg(genCol+5, src+0, line+0, col+3)
         // Line 1: seg(genCol+2, src+0, line+1, col+0)
-        let mappings = format!("{},{};{}", seg(0, 0, 0, 0), seg(5, 0, 0, 3), seg(2, 0, 1, 0));
-        let json = format!(
-            r#"{{"version":3,"sources":["a.js"],"names":[],"mappings":"{mappings}"}}"#
+        let mappings = format!(
+            "{},{};{}",
+            seg(0, 0, 0, 0),
+            seg(5, 0, 0, 3),
+            seg(2, 0, 1, 0)
         );
+        let json =
+            format!(r#"{{"version":3,"sources":["a.js"],"names":[],"mappings":"{mappings}"}}"#);
         let map = SourceMap::parse(&json).unwrap();
         let lines = map.decode_mappings().unwrap();
         assert_eq!(lines.len(), 2);
@@ -565,7 +589,10 @@ mod tests {
         let two = format!("{}{}", encode_vlq(0), encode_vlq(1));
         let json = format!(r#"{{"version":3,"sources":["a.js"],"names":[],"mappings":"{two}"}}"#);
         let map = SourceMap::parse(&json).unwrap();
-        assert_eq!(map.decode_mappings(), Err(SourceMapError::BadSegmentArity(2)));
+        assert_eq!(
+            map.decode_mappings(),
+            Err(SourceMapError::BadSegmentArity(2))
+        );
     }
 
     // ── Property tests ────────────────────────────────────────────────────

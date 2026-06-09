@@ -280,13 +280,14 @@ impl Strategy {
             Self::UnmagicQuotes => &["php", "gbk", "big5", "shift-jis"],
             Self::FullwidthEncode => &["nfkc", "java", "dotnet", "python3", "postgresql"],
             Self::HomoglyphEncode => &[],
-            Self::TagCharEncode | Self::VariationSelectorPad
+            Self::TagCharEncode
+            | Self::VariationSelectorPad
             | Self::VariationSelectorSupplementaryPad
             | Self::SoftHyphenInject
             | Self::WordJoinerWrap => &[],
-            Self::LigatureEncode
-            | Self::CircledLetterEncode
-            | Self::ParenthesizedLetterEncode => &["nfkc"],
+            Self::LigatureEncode | Self::CircledLetterEncode | Self::ParenthesizedLetterEncode => {
+                &["nfkc"]
+            }
         }
     }
 }
@@ -360,7 +361,10 @@ pub fn encode(payload: impl AsRef<[u8]>, strategy: Strategy) -> Result<String, E
         }
         Strategy::MysqlVersionedComment => {
             let text = std::str::from_utf8(payload).map_err(|_| EncodeError::InvalidUtf8)?;
-            Ok(mysql_versioned_comment(text, MYSQL_VERSIONED_COMMENT_VERSION))
+            Ok(mysql_versioned_comment(
+                text,
+                MYSQL_VERSIONED_COMMENT_VERSION,
+            ))
         }
         Strategy::NullByte => Ok(null_byte_inject(payload)?),
         Strategy::OverlongUtf8 => Ok(overlong_utf8(payload)?),
@@ -562,10 +566,7 @@ mod tests {
         // into an existing JSON string field.
         assert_eq!(encode("A<", Strategy::JsonEncode).unwrap(), "A<");
         // Real escape: backslash + control char.
-        assert_eq!(
-            encode("a\\\nb", Strategy::JsonEncode).unwrap(),
-            "a\\\\\\nb"
-        );
+        assert_eq!(encode("a\\\nb", Strategy::JsonEncode).unwrap(), "a\\\\\\nb");
     }
 
     #[test]

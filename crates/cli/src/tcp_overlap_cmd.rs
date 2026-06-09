@@ -10,7 +10,9 @@ use std::process::ExitCode;
 
 use clap::Args;
 
-use wafrift_tcpoverlap::{differential_matrix, differential_plan, DifferentialPlan, ReassemblyPolicy};
+use wafrift_tcpoverlap::{
+    DifferentialPlan, ReassemblyPolicy, differential_matrix, differential_plan,
+};
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PolicyArg {

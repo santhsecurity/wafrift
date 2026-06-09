@@ -15,8 +15,10 @@ mod tests {
 
         let pool = SessionPool::new(PROFILES.iter().collect(), 3);
         let profile = pool.profile_for("example.com");
-        assert!(PROFILES
-            .iter()
-            .any(|candidate| candidate.name == profile.name));
+        assert!(
+            PROFILES
+                .iter()
+                .any(|candidate| candidate.name == profile.name)
+        );
     }
 }

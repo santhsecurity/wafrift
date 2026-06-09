@@ -223,7 +223,9 @@ pub fn detect(
     headers: &[(String, String)],
     body: &[u8],
 ) -> Option<CustomDetection> {
-    let body_str = String::from_utf8_lossy(&body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)]).to_ascii_lowercase();
+    let body_str =
+        String::from_utf8_lossy(&body[..body.len().min(wafrift_types::BLOCK_SCAN_BODY_WINDOW)])
+            .to_ascii_lowercase();
     let mut best: Option<CustomDetection> = None;
     for rule in &rules.waf {
         let mut max_confidence: f64 = 0.0;

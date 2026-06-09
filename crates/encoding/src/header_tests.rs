@@ -71,9 +71,7 @@ mod tests {
     fn whitespace_padding_pad_width_is_in_2_to_5_range() {
         // Pre- and post-fix contract: pad count stays in [2, 5].
         let result = whitespace_pad("X", "y");
-        let after_colon = result
-            .strip_prefix("X:")
-            .expect("starts with 'X:'");
+        let after_colon = result.strip_prefix("X:").expect("starts with 'X:'");
         let left_pad_len = after_colon.chars().take_while(|c| *c == ' ').count();
         assert!(
             (2..=5).contains(&left_pad_len),

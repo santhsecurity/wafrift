@@ -195,10 +195,7 @@ async fn probe_one(target: &str, word: &str, client: &reqwest::Client) -> Option
     // `?&inject=1=wafrift_canary_x9k2`, which probes the wrong
     // parameter and never registers as a hit. Percent-encode the
     // word so any byte sequence is parsed as a single param name.
-    let url = format!(
-        "{target}{sep}{}={CANARY}",
-        urlencoding::encode(word)
-    );
+    let url = format!("{target}{sep}{}={CANARY}", urlencoding::encode(word));
     let start = Instant::now();
     let resp = client.get(&url).send().await.ok()?;
     let status = resp.status().as_u16();
@@ -415,7 +412,11 @@ mod tests {
         let first = mode_status(&statuses);
         assert_eq!(first, 200, "lower code must win on tie");
         for _ in 0..999 {
-            assert_eq!(mode_status(&statuses), first, "mode_status must be deterministic");
+            assert_eq!(
+                mode_status(&statuses),
+                first,
+                "mode_status must be deterministic"
+            );
         }
     }
 }

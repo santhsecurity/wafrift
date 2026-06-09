@@ -60,7 +60,10 @@ struct InlineOracle<'a> {
 impl<'a> AstMctsOracle for InlineOracle<'a> {
     fn eval(&mut self, candidate: &str) -> bool {
         self.candidates.push(candidate.to_string());
-        self.jitter = self.jitter.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.jitter = self
+            .jitter
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         if self.prior_bypass {
             // If we've seen a bypass before, treat even new arms as "blocked"
             // so MCTS keeps exploring (we're in ablation mode, not live-fire).
@@ -174,8 +177,12 @@ impl AstMctsAlgorithm {
             jitter,
         };
 
-        let result: Option<MctsResult> =
-            mcts_search(&self.best_payload, self.mcts_budget, self.ucb1_c, &mut inline);
+        let result: Option<MctsResult> = mcts_search(
+            &self.best_payload,
+            self.mcts_budget,
+            self.ucb1_c,
+            &mut inline,
+        );
 
         // Absorb arm stats for cross-round learning.
         if let Some(ref r) = result {
@@ -205,7 +212,8 @@ impl AstMctsAlgorithm {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Always include the MCTS-best payload if it produced one.
         if let Some(ref r) = result
-            && !r.best_payload.is_empty() && seen.insert(r.best_payload.clone())
+            && !r.best_payload.is_empty()
+            && seen.insert(r.best_payload.clone())
         {
             self.eval_counter = self.eval_counter.saturating_add(1);
             let mut c = self.best.clone();
@@ -416,9 +424,7 @@ mod tests {
         let mut alg = AstMctsAlgorithm::new();
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
-        let seed = Chromosome::new(vec![
-            ("ast_mcts_payload".into(), "'a'='a'".into()),
-        ]);
+        let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "'a'='a'".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
         assert_eq!(alg.best_payload, "'a'='a'");
     }
@@ -428,9 +434,7 @@ mod tests {
         let mut alg = AstMctsAlgorithm::new();
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
-        let seed = Chromosome::new(vec![
-            ("ast_mcts_payload".into(), "1=1".into()),
-        ]);
+        let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
         let candidates = alg.request_evaluations(4, &mut rng);
         // May return fewer than 4 if MCTS produces fewer distinct rewrites.
@@ -453,9 +457,7 @@ mod tests {
         let mut alg = AstMctsAlgorithm::new();
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
-        let seed = Chromosome::new(vec![
-            ("ast_mcts_payload".into(), "1=1".into()),
-        ]);
+        let seed = Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())]);
         alg.initialize(vec![seed], &pool, &mut rng);
 
         let candidates = alg.request_evaluations(3, &mut rng);
@@ -543,7 +545,10 @@ mod tests {
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
         alg.initialize(
-            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            vec![Chromosome::new(vec![(
+                "ast_mcts_payload".into(),
+                "1=1".into(),
+            )])],
             &pool,
             &mut rng,
         );
@@ -583,7 +588,10 @@ mod tests {
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
         alg.initialize(
-            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            vec![Chromosome::new(vec![(
+                "ast_mcts_payload".into(),
+                "1=1".into(),
+            )])],
             &pool,
             &mut rng,
         );
@@ -613,7 +621,10 @@ mod tests {
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
         alg.initialize(
-            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            vec![Chromosome::new(vec![(
+                "ast_mcts_payload".into(),
+                "1=1".into(),
+            )])],
             &pool,
             &mut rng,
         );
@@ -641,7 +652,10 @@ mod tests {
         let pool = GenePool::default_wafrift();
         let mut rng = make_rng();
         alg.initialize(
-            vec![Chromosome::new(vec![("ast_mcts_payload".into(), "1=1".into())])],
+            vec![Chromosome::new(vec![(
+                "ast_mcts_payload".into(),
+                "1=1".into(),
+            )])],
             &pool,
             &mut rng,
         );

@@ -284,13 +284,19 @@ mod tests {
 
     #[test]
     fn validate_rejects_max_attempts_zero() {
-        let cfg = EvasionConfig { max_attempts: 0, ..Default::default() };
+        let cfg = EvasionConfig {
+            max_attempts: 0,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err(), "max_attempts=0 must be rejected");
     }
 
     #[test]
     fn validate_rejects_max_attempts_above_ceiling() {
-        let cfg = EvasionConfig { max_attempts: EvasionConfig::MAX_ATTEMPTS + 1, ..Default::default() };
+        let cfg = EvasionConfig {
+            max_attempts: EvasionConfig::MAX_ATTEMPTS + 1,
+            ..Default::default()
+        };
         let err = cfg.validate().unwrap_err();
         assert!(
             err.contains("max_attempts"),
@@ -300,13 +306,19 @@ mod tests {
 
     #[test]
     fn validate_accepts_max_attempts_at_ceiling() {
-        let cfg = EvasionConfig { max_attempts: EvasionConfig::MAX_ATTEMPTS, ..Default::default() };
+        let cfg = EvasionConfig {
+            max_attempts: EvasionConfig::MAX_ATTEMPTS,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_ok());
     }
 
     #[test]
     fn validate_rejects_body_padding_above_ceiling() {
-        let cfg = EvasionConfig { body_padding_bytes: EvasionConfig::MAX_BODY_PADDING_BYTES + 1, ..Default::default() };
+        let cfg = EvasionConfig {
+            body_padding_bytes: EvasionConfig::MAX_BODY_PADDING_BYTES + 1,
+            ..Default::default()
+        };
         let err = cfg.validate().unwrap_err();
         assert!(
             err.contains("body_padding_bytes"),
@@ -316,13 +328,19 @@ mod tests {
 
     #[test]
     fn validate_accepts_body_padding_at_ceiling() {
-        let cfg = EvasionConfig { body_padding_bytes: EvasionConfig::MAX_BODY_PADDING_BYTES, ..Default::default() };
+        let cfg = EvasionConfig {
+            body_padding_bytes: EvasionConfig::MAX_BODY_PADDING_BYTES,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_ok());
     }
 
     #[test]
     fn validate_rejects_dilution_weight_nan() {
-        let cfg = EvasionConfig { dilution_weight: f64::NAN, ..Default::default() };
+        let cfg = EvasionConfig {
+            dilution_weight: f64::NAN,
+            ..Default::default()
+        };
         let err = cfg.validate().unwrap_err();
         assert!(
             err.contains("dilution_weight"),
@@ -332,7 +350,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_dilution_weight_inf() {
-        let mut cfg = EvasionConfig { dilution_weight: f64::INFINITY, ..Default::default() };
+        let mut cfg = EvasionConfig {
+            dilution_weight: f64::INFINITY,
+            ..Default::default()
+        };
         let err = cfg.validate().unwrap_err();
         assert!(err.contains("dilution_weight"));
         cfg.dilution_weight = f64::NEG_INFINITY;
@@ -342,7 +363,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_dilution_weight_out_of_range() {
-        let mut cfg = EvasionConfig { dilution_weight: 1.1, ..Default::default() };
+        let mut cfg = EvasionConfig {
+            dilution_weight: 1.1,
+            ..Default::default()
+        };
         let err = cfg.validate().unwrap_err();
         assert!(err.contains("dilution_weight"), "got: {err}");
         cfg.dilution_weight = -0.1;
@@ -352,7 +376,10 @@ mod tests {
 
     #[test]
     fn validate_accepts_dilution_weight_boundary_values() {
-        let mut cfg = EvasionConfig { dilution_weight: 0.0, ..Default::default() };
+        let mut cfg = EvasionConfig {
+            dilution_weight: 0.0,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_ok());
         cfg.dilution_weight = 1.0;
         assert!(cfg.validate().is_ok());
@@ -362,7 +389,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_invalid_proxy_scheme() {
-        let cfg = EvasionConfig { proxies: vec!["ftp://bad.proxy:21".to_string()], ..Default::default() };
+        let cfg = EvasionConfig {
+            proxies: vec!["ftp://bad.proxy:21".to_string()],
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err());
     }
 
@@ -376,10 +406,7 @@ mod tests {
             "socks5h://proxy:1080",
         ] {
             cfg.proxies = vec![(*scheme).to_string()];
-            assert!(
-                cfg.validate().is_ok(),
-                "scheme {scheme} should be accepted"
-            );
+            assert!(cfg.validate().is_ok(), "scheme {scheme} should be accepted");
         }
     }
 

@@ -138,11 +138,17 @@ fn assert_triple_exact(pat: &[u8], tag: &str) {
     let d = pat.len() + 3;
 
     let mut w1 = waf(pat);
-    let mut e1 = BoundedExhaustiveEq { max_len: d, max_queries: None };
+    let mut e1 = BoundedExhaustiveEq {
+        max_len: d,
+        max_queries: None,
+    };
     let la = l_star(&mut w1, &body, &a, &mut e1).unwrap().sfa;
 
     let mut w2 = waf(pat);
-    let mut e2 = BoundedExhaustiveEq { max_len: d, max_queries: None };
+    let mut e2 = BoundedExhaustiveEq {
+        max_len: d,
+        max_queries: None,
+    };
     let kv = kv_learn(&mut w2, &body, &a, &mut e2).unwrap().sfa;
 
     let mut w3 = waf(pat);

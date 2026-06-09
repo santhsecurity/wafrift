@@ -66,7 +66,11 @@ pub struct ProbeResponse {
 /// - `2xx` without a block signature → `Allowed`; with one → `Blocked`
 /// - everything else (3xx, other 4xx, non-gateway 5xx) → `Blocked`
 #[must_use]
-pub fn classify_live_response(status: u16, body: &[u8], block_signatures: &[String]) -> LiveVerdict {
+pub fn classify_live_response(
+    status: u16,
+    body: &[u8],
+    block_signatures: &[String],
+) -> LiveVerdict {
     if matches!(status, 429 | 502 | 503 | 504) {
         return LiveVerdict::Transient;
     }
@@ -190,18 +194,27 @@ mod tests {
     #[test]
     fn two_hundred_block_page_is_blocked_not_allowed() {
         let body = b"<html><h1>Access Denied</h1> your request was stopped</html>";
-        assert_eq!(classify_live_response(200, body, &sigs()), LiveVerdict::Blocked);
+        assert_eq!(
+            classify_live_response(200, body, &sigs()),
+            LiveVerdict::Blocked
+        );
     }
 
     #[test]
     fn block_signature_match_is_case_insensitive() {
         let body = b"ACCESS DENIED";
-        assert_eq!(classify_live_response(200, body, &sigs()), LiveVerdict::Blocked);
+        assert_eq!(
+            classify_live_response(200, body, &sigs()),
+            LiveVerdict::Blocked
+        );
     }
 
     #[test]
     fn forbidden_status_is_blocked() {
-        assert_eq!(classify_live_response(403, b"", &sigs()), LiveVerdict::Blocked);
+        assert_eq!(
+            classify_live_response(403, b"", &sigs()),
+            LiveVerdict::Blocked
+        );
     }
 
     #[test]
@@ -217,19 +230,28 @@ mod tests {
 
     #[test]
     fn server_error_500_stays_blocked_not_transient() {
-        assert_eq!(classify_live_response(500, b"", &sigs()), LiveVerdict::Blocked);
+        assert_eq!(
+            classify_live_response(500, b"", &sigs()),
+            LiveVerdict::Blocked
+        );
     }
 
     #[test]
     fn empty_signature_set_never_blocks_a_2xx_on_body() {
-        assert_eq!(classify_live_response(200, b"access denied", &[]), LiveVerdict::Allowed);
+        assert_eq!(
+            classify_live_response(200, b"access denied", &[]),
+            LiveVerdict::Allowed
+        );
     }
 
     #[test]
     fn body_scan_is_bounded_but_still_matches_early_signature() {
         let mut body = b"request blocked".to_vec();
         body.extend(std::iter::repeat_n(b'x', BLOCK_SCAN_BYTES * 2));
-        assert_eq!(classify_live_response(200, &body, &sigs()), LiveVerdict::Blocked);
+        assert_eq!(
+            classify_live_response(200, &body, &sigs()),
+            LiveVerdict::Blocked
+        );
     }
 
     #[test]
@@ -240,7 +262,11 @@ mod tests {
         let out = classify_with_retry(
             || {
                 let status = seq.borrow_mut().remove(0);
-                Ok(ProbeResponse { status, retry_after_secs: None, body: Vec::new() })
+                Ok(ProbeResponse {
+                    status,
+                    retry_after_secs: None,
+                    body: Vec::new(),
+                })
             },
             |r| classify_live_response(r.status, &r.body, &s),
             MAX_TRANSIENT_RETRIES,
@@ -257,7 +283,13 @@ mod tests {
     fn persistent_transient_is_inconclusive_not_a_false_block() {
         let s = sigs();
         let out = classify_with_retry(
-            || Ok(ProbeResponse { status: 429, retry_after_secs: None, body: Vec::new() }),
+            || {
+                Ok(ProbeResponse {
+                    status: 429,
+                    retry_after_secs: None,
+                    body: Vec::new(),
+                })
+            },
             |r| classify_live_response(r.status, &r.body, &s),
             2,
             |_d| {},
@@ -274,9 +306,17 @@ mod tests {
         let _ = classify_with_retry(
             || {
                 if first.replace(false) {
-                    Ok(ProbeResponse { status: 503, retry_after_secs: Some(7), body: Vec::new() })
+                    Ok(ProbeResponse {
+                        status: 503,
+                        retry_after_secs: Some(7),
+                        body: Vec::new(),
+                    })
                 } else {
-                    Ok(ProbeResponse { status: 200, retry_after_secs: None, body: Vec::new() })
+                    Ok(ProbeResponse {
+                        status: 200,
+                        retry_after_secs: None,
+                        body: Vec::new(),
+                    })
                 }
             },
             |r| classify_live_response(r.status, &r.body, &s),

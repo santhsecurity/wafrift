@@ -244,7 +244,10 @@ mod tests {
         );
 
         let (mutated, techs) = apply_ml_evasion_if_applicable(&req, waf, 256, 7);
-        assert!(!techs.is_empty(), "an ML-backed target with a body must mutate");
+        assert!(
+            !techs.is_empty(),
+            "an ML-backed target with a body must mutate"
+        );
         assert_ne!(
             mutated.body.as_deref(),
             Some(original_body.as_slice()),
@@ -258,9 +261,8 @@ mod tests {
         // Regression guard: the old no-op returned the unmutated payload (or
         // None). Pins that an ML-backed target yields a real, different,
         // still-on-manifold payload + the technique tag.
-        let (payload, techs) =
-            ml_evasion_probe_payload("' OR 1=1--", "AWS Bot Control", 256, 7)
-                .expect("ML-backed + attack payload must yield a mutated probe payload");
+        let (payload, techs) = ml_evasion_probe_payload("' OR 1=1--", "AWS Bot Control", 256, 7)
+            .expect("ML-backed + attack payload must yield a mutated probe payload");
         assert_ne!(
             payload, "' OR 1=1--",
             "probe payload must be MUTATED, not the original (no-op regression guard)"
@@ -270,7 +272,9 @@ mod tests {
             "manifold projection must preserve the attack token: {payload:?}"
         );
         assert!(
-            techs.iter().any(|t| matches!(t, Technique::MlEvasion { .. })),
+            techs
+                .iter()
+                .any(|t| matches!(t, Technique::MlEvasion { .. })),
             "must carry the MlEvasion technique"
         );
     }

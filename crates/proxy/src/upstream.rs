@@ -415,7 +415,10 @@ mod tests {
     #[test]
     fn body_too_large_error_got_and_cap_correct() {
         // UpstreamError::BodyTooLarge must carry correct got and cap values.
-        let err = UpstreamError::BodyTooLarge { got: 1024, cap: 512 };
+        let err = UpstreamError::BodyTooLarge {
+            got: 1024,
+            cap: 512,
+        };
         match &err {
             UpstreamError::BodyTooLarge { got, cap } => {
                 assert_eq!(*got, 1024);
@@ -503,11 +506,19 @@ mod tests {
     #[test]
     fn body_too_large_various_sizes() {
         // Spot-check several (got, cap) pairs.
-        let cases = [(1, 0), (100, 50), (1_000_000, 999_999), (usize::MAX, usize::MAX - 1)];
+        let cases = [
+            (1, 0),
+            (100, 50),
+            (1_000_000, 999_999),
+            (usize::MAX, usize::MAX - 1),
+        ];
         for (got, cap) in cases {
             let err = UpstreamError::BodyTooLarge { got, cap };
             let msg = err.to_string();
-            assert!(!msg.is_empty(), "error message must not be empty for got={got} cap={cap}");
+            assert!(
+                !msg.is_empty(),
+                "error message must not be empty for got={got} cap={cap}"
+            );
         }
     }
 }

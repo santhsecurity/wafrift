@@ -419,7 +419,11 @@ mod tests {
         let mut alg = NoveltySearch::new(5, 0.0);
         let pool = GenePool::default_wafrift();
         let mut rng = StdRng::seed_from_u64(50);
-        alg.initialize(vec![dummy_chromosome("UrlEncode", "sqli", "json")], &pool, &mut rng);
+        alg.initialize(
+            vec![dummy_chromosome("UrlEncode", "sqli", "json")],
+            &pool,
+            &mut rng,
+        );
         alg.eval_counter = u64::MAX;
         let _ = alg.request_evaluations(1, &mut rng);
         assert_eq!(

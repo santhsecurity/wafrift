@@ -22,7 +22,10 @@ fn every_bridge_member_reconstructs_the_attack_under_its_declared_sink() {
         "norm_mismatch_html_entity",
         "norm_mismatch_nfkc",
     ] {
-        assert!(tags.contains(&required), "missing sink member {required}; got {tags:?}");
+        assert!(
+            tags.contains(&required),
+            "missing sink member {required}; got {tags:?}"
+        );
     }
     assert!(
         !tags.contains(&"norm_mismatch_bestfit"),
@@ -62,15 +65,22 @@ fn bestfit_member_self_selects_to_a_quoted_sqli_attack() {
         .iter()
         .find(|m| m.rules[0] == "norm_mismatch_bestfit")
         .expect("best-fit must fire on a quoted SQLi attack");
-    assert_ne!(bestfit.payload, attack, "best-fit member must be an evasion, not the raw attack");
+    assert_ne!(
+        bestfit.payload, attack,
+        "best-fit member must be an evasion, not the raw attack"
+    );
     assert!(
         !bestfit.payload.contains('\''),
         "best-fit member must hide the literal single quote: {:?}",
         bestfit.payload
     );
-    let decoded = sink_for_tag("norm_mismatch_bestfit").unwrap().apply(bestfit.payload.as_bytes());
+    let decoded = sink_for_tag("norm_mismatch_bestfit")
+        .unwrap()
+        .apply(bestfit.payload.as_bytes());
     assert!(
-        decoded.windows(attack.len()).any(|w| w == attack.as_bytes()),
+        decoded
+            .windows(attack.len())
+            .any(|w| w == attack.as_bytes()),
         "best-fit member {:?} must coerce back to the injection",
         bestfit.payload
     );
@@ -150,8 +160,8 @@ fn solver_solution_becomes_a_canonical_member() {
         .unwrap()
         .expect("solvable");
 
-    let member = solution_member(&sol, "q")
-        .expect("solution is valid UTF-8 (R54 pass-16 I5 contract)");
+    let member =
+        solution_member(&sol, "q").expect("solution is valid UTF-8 (R54 pass-16 I5 contract)");
     assert_eq!(member.rules, vec!["solver_bypass"]);
     // The member's payload IS the solved double-encoded bypass.
     assert_eq!(member.payload, "%253Cscript%253E");

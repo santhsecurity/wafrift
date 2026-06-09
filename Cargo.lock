@@ -713,7 +713,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "captchaforge"
-version = "0.2.36"
+version = "0.2.38"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6719,7 +6719,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-captchaforge-bridge"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6738,7 +6738,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -6802,7 +6802,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-content-type"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "rand 0.8.5",
@@ -6813,7 +6813,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proxywire",
  "rand 0.8.5",
@@ -6839,7 +6839,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-detect"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aho-corasick",
  "criterion",
@@ -6859,7 +6859,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-encoding"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "brotli",
@@ -6881,7 +6881,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-evolution"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "boundedio",
  "lru 0.18.0",
@@ -6906,7 +6906,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-fingerprint"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "guise",
  "proptest",
@@ -6917,7 +6917,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-genome-registry"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -6933,7 +6933,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-grammar"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "criterion",
  "proptest",
@@ -6952,7 +6952,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-graphql"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "serde_json",
@@ -6960,7 +6960,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-grpc-evasion"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "prost",
@@ -6972,7 +6972,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-http3-evasion"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6988,7 +6988,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-liveoracle"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "serde",
@@ -6998,7 +6998,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-oracle"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7021,7 +7021,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-plugin-api"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dirs",
  "proptest",
@@ -7036,7 +7036,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-proxy"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7082,7 +7082,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-recon"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -7102,7 +7102,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-sanitizer"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "regex",
@@ -7115,7 +7115,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-smuggling"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -7130,7 +7130,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-strategy"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dirs",
  "fs4",
@@ -7159,7 +7159,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-tcpoverlap"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "serde",
@@ -7168,7 +7168,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-transport"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "authjar",
  "base64 0.22.1",
@@ -7199,7 +7199,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-types"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "bogon",
@@ -7214,7 +7214,7 @@ dependencies = [
 
 [[package]]
 name = "wafrift-wafmodel"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "hex",

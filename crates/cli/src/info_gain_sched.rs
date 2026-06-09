@@ -260,7 +260,7 @@ pub(crate) struct ScheduleEntry {
 /// Useful when the caller wants to display *why* a payload was
 /// chosen, not just *that* it was chosen — the `bench-waf
 /// --list-schedule` flag uses this to render an operator-readable
-/// preview table. The plain [`schedule`] function is a thin wrapper
+/// preview table. The plain `schedule` function is a thin wrapper
 /// that discards the diagnostics and returns just the id list.
 #[must_use]
 pub(crate) fn schedule_with_diagnostics<'a, I, S>(
@@ -353,11 +353,11 @@ where
 
 /// Schedule with per-class fairness — every class receives roughly
 /// `budget / num_classes` slots; within each class, payloads are
-/// ordered by descending info gain (same primitive as [`schedule`]).
+/// ordered by descending info gain (same primitive as `schedule`).
 ///
 /// ## Why this exists
 ///
-/// Pure [`schedule`] is class-blind. A corpus with 95% SQL cases and
+/// Pure `schedule` is class-blind. A corpus with 95% SQL cases and
 /// 5% XSS cases will, under budget pressure, deliver an "all SQL"
 /// schedule even though the operator probably wanted some signal on
 /// every class. Per-class fairness prevents that starvation.
@@ -368,7 +368,7 @@ where
 /// remainder `extras = budget % num_classes` distributed one per
 /// class in iteration order (BTreeMap → alphabetical by class name).
 /// This makes the per-class allocation deterministic and reproducible
-/// across runs — critical for the [`schedule`] anti-rig guarantees.
+/// across runs — critical for the `schedule` anti-rig guarantees.
 ///
 /// If a class has fewer payloads than its allocation, the surplus
 /// is NOT redistributed: a class with 2 payloads and a 5-slot
@@ -381,7 +381,7 @@ where
 /// Classes interleave in BTreeMap iteration order (alphabetical),
 /// each class contributing its top picks in descending info_gain
 /// order. The result is NOT globally sorted by info_gain — operators
-/// who want that should call [`schedule`] directly.
+/// who want that should call `schedule` directly.
 ///
 /// Thin wrapper over [`schedule_per_class_with_diagnostics`] that
 /// discards the per-entry diagnostic fields. Use the diagnostic
@@ -404,13 +404,13 @@ pub(crate) fn schedule_per_class(
 }
 
 /// Per-class fairness schedule with diagnostic fields preserved.
-/// Mirror of [`schedule_per_class`] that emits [`ScheduleEntry`]
+/// Mirror of `schedule_per_class` that emits [`ScheduleEntry`]
 /// values instead of bare ids, so the `bench-waf --list-schedule`
 /// preview path can render correct per-case info_gain numbers even
 /// when `--fair-class` is the active mode.
 ///
 /// Same allocation rule + same interleaving order as
-/// [`schedule_per_class`] — the only difference is the return type.
+/// `schedule_per_class` — the only difference is the return type.
 #[must_use]
 pub(crate) fn schedule_per_class_with_diagnostics(
     history: &History,
@@ -449,11 +449,9 @@ pub(crate) fn load_history(path: &std::path::Path) -> Result<History, String> {
     if !path.exists() {
         return Ok(History::new());
     }
-    let text = crate::safe_body::read_bounded_text_file(
-        path,
-        crate::safe_body::GENE_BANK_FILE_MAX_BYTES,
-    )
-    .map_err(|e| format!("history file {} unreadable: {e}", path.display()))?;
+    let text =
+        crate::safe_body::read_bounded_text_file(path, crate::safe_body::GENE_BANK_FILE_MAX_BYTES)
+            .map_err(|e| format!("history file {} unreadable: {e}", path.display()))?;
     Ok(serde_json::from_str::<History>(&text).unwrap_or_else(|e| {
         eprintln!(
             "warn: history file {} parse error ({e}); starting cold",
@@ -1490,7 +1488,10 @@ mod tests {
         tag: u32,
     }
     fn item(tok: &str, tag: u32) -> Item {
-        Item { tok: tok.into(), tag }
+        Item {
+            tok: tok.into(),
+            tag,
+        }
     }
 
     #[test]
@@ -1521,7 +1522,10 @@ mod tests {
         let items = vec![item("blocked", 1), item("uncertain", 2)];
         let out = order_items_by_info_gain(&h, items, 1, |i| i.tok.clone());
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].tok, "uncertain", "budget must spend on the uncertain token");
+        assert_eq!(
+            out[0].tok, "uncertain",
+            "budget must spend on the uncertain token"
+        );
     }
 
     #[test]

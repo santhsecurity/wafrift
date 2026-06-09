@@ -280,8 +280,7 @@ pub(crate) const NEUTRAL_BOUNDARY_PREFIXES: &[&str] = &[
 /// tail provides per-call entropy and collision resistance against
 /// attacker-supplied values (see [`unique_boundary`]).
 fn random_boundary() -> String {
-    let prefix =
-        wafrift_types::pick::pick_from(NEUTRAL_BOUNDARY_PREFIXES, "----WafriftBoundary");
+    let prefix = wafrift_types::pick::pick_from(NEUTRAL_BOUNDARY_PREFIXES, "----WafriftBoundary");
     let mut rng = rand::thread_rng();
     let mut hex = String::with_capacity(32);
     for _ in 0..16 {
@@ -758,7 +757,8 @@ pub fn generate_variants(params: &[(String, String)]) -> Vec<ContentTypeVariant>
             .unwrap_or_else(|_| format!("\"{}\"", k.replace('"', "\\\"")));
         let body = format!(
             "{{{key_json}:\"safe\",{key_json}:{value}}}",
-            value = serde_json::to_string(v).unwrap_or_else(|_| format!("\"{}\"", v.replace('"', "\\\"")))
+            value = serde_json::to_string(v)
+                .unwrap_or_else(|_| format!("\"{}\"", v.replace('"', "\\\"")))
         )
         .into_bytes();
         variants.push(ContentTypeVariant {
@@ -933,40 +933,24 @@ impl wafrift_types::probe::SmuggleProbe for ContentTypeVariant {
         let suffix = match self.technique {
             ContentTypeTechnique::Multipart => "multipart",
             ContentTypeTechnique::MultipartQuotedBoundary => "multipart-quoted-boundary",
-            ContentTypeTechnique::MultipartWhitespaceBoundary => {
-                "multipart-whitespace-boundary"
-            }
-            ContentTypeTechnique::MultipartDuplicateBoundary => {
-                "multipart-duplicate-boundary"
-            }
+            ContentTypeTechnique::MultipartWhitespaceBoundary => "multipart-whitespace-boundary",
+            ContentTypeTechnique::MultipartDuplicateBoundary => "multipart-duplicate-boundary",
             ContentTypeTechnique::MultipartCharsetPrefix => "multipart-charset-prefix",
             ContentTypeTechnique::JsonUnicodeEscape => "json-unicode-escape",
             ContentTypeTechnique::JsonWithComments => "json-with-comments",
             ContentTypeTechnique::XmlNamespace => "xml-namespace",
             ContentTypeTechnique::XmlCdata => "xml-cdata",
             ContentTypeTechnique::MixedContentType => "mixed-content-type",
-            ContentTypeTechnique::MultipartCharsetEarlySection => {
-                "multipart-charset-early-section"
-            }
+            ContentTypeTechnique::MultipartCharsetEarlySection => "multipart-charset-early-section",
             ContentTypeTechnique::JsonDuplicateKey => "json-duplicate-key",
-            ContentTypeTechnique::MultipartFilenameStarEncoded => {
-                "multipart-filename-star-encoded"
-            }
-            ContentTypeTechnique::MultipartDuplicatePartHeader => {
-                "multipart-duplicate-part-header"
-            }
+            ContentTypeTechnique::MultipartFilenameStarEncoded => "multipart-filename-star-encoded",
+            ContentTypeTechnique::MultipartDuplicatePartHeader => "multipart-duplicate-part-header",
             ContentTypeTechnique::MultipartPreambleSmuggle => "multipart-preamble-smuggle",
             ContentTypeTechnique::MultipartEpilogueSmuggle => "multipart-epilogue-smuggle",
-            ContentTypeTechnique::MultipartPartialCloseReopen => {
-                "multipart-partial-close-reopen"
-            }
+            ContentTypeTechnique::MultipartPartialCloseReopen => "multipart-partial-close-reopen",
             ContentTypeTechnique::MultipartNestedEnvelope => "multipart-nested-envelope",
-            ContentTypeTechnique::MultipartLfOnlyDelimiters => {
-                "multipart-lf-only-delimiters"
-            }
-            ContentTypeTechnique::MultipartEmptyBoundaryParam => {
-                "multipart-empty-boundary-param"
-            }
+            ContentTypeTechnique::MultipartLfOnlyDelimiters => "multipart-lf-only-delimiters",
+            ContentTypeTechnique::MultipartEmptyBoundaryParam => "multipart-empty-boundary-param",
         };
         format!("content-type.{suffix}")
     }

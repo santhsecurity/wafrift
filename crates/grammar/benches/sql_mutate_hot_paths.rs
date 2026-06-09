@@ -52,8 +52,8 @@
 //!      applied (pre-pad approach had +2.5% overhead for small sample counts).
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use wafrift_grammar::grammar::sql::mutate;
 use wafrift_grammar::grammar::equiv::wafmodel::{FEATURES, WafModel, featurize};
+use wafrift_grammar::grammar::sql::mutate;
 
 // ── Realistic payloads ───────────────────────────────────────────────────────
 
@@ -67,15 +67,13 @@ const UNION_SELECT: &str = "' UNION SELECT username,password,NULL FROM users--";
 const TIME_BLIND: &str = "'; IF(1=1,WAITFOR DELAY '0:0:5',0)--";
 
 /// Error-based exfiltration (structured, ~70 bytes).
-const ERROR_BASED: &str =
-    "' AND extractvalue(1,concat(0x7e,(SELECT user()),0x7e))--";
+const ERROR_BASED: &str = "' AND extractvalue(1,concat(0x7e,(SELECT user()),0x7e))--";
 
 /// Stacked query (structured, ~50 bytes).
 const STACKED: &str = "'; DROP TABLE users; INSERT INTO log VALUES(1)--";
 
 /// Long payload with many mutation targets (~200 bytes).
-const COMPLEX: &str =
-    "' OR (SELECT SUBSTRING(password,1,1) FROM users WHERE \
+const COMPLEX: &str = "' OR (SELECT SUBSTRING(password,1,1) FROM users WHERE \
      username='admin')='a' UNION SELECT NULL,NULL,NULL FROM \
      information_schema.tables WHERE table_schema=database()--";
 
@@ -95,27 +93,19 @@ fn bench_sql_mutate(c: &mut Criterion) {
 
     for (name, payload) in payloads {
         // Budget 32: typical scan budget per payload.
-        group.bench_with_input(
-            BenchmarkId::new("budget_32", name),
-            payload,
-            |b, p| {
-                b.iter(|| {
-                    let r = mutate(black_box(p), black_box(32));
-                    black_box(r)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("budget_32", name), payload, |b, p| {
+            b.iter(|| {
+                let r = mutate(black_box(p), black_box(32));
+                black_box(r)
+            });
+        });
         // Budget 64: aggressive mutation mode.
-        group.bench_with_input(
-            BenchmarkId::new("budget_64", name),
-            payload,
-            |b, p| {
-                b.iter(|| {
-                    let r = mutate(black_box(p), black_box(64));
-                    black_box(r)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("budget_64", name), payload, |b, p| {
+            b.iter(|| {
+                let r = mutate(black_box(p), black_box(64));
+                black_box(r)
+            });
+        });
     }
     group.finish();
 }
@@ -175,9 +165,9 @@ fn bench_featurize(c: &mut Criterion) {
     let mut group = c.benchmark_group("featurize");
 
     let payloads: &[(&str, &str, usize)] = &[
-        ("tautology_20b", TAUTOLOGY, 7),    // query arm
+        ("tautology_20b", TAUTOLOGY, 7),       // query arm
         ("union_select_55b", UNION_SELECT, 0), // multipart_file arm
-        ("complex_200b", COMPLEX, 3),       // json_no_ct arm
+        ("complex_200b", COMPLEX, 3),          // json_no_ct arm
         ("comment_split", "1' UNION/**/SELECT a,b FROM users-- -", 1), // comment-stripping path
     ];
 
@@ -239,5 +229,11 @@ fn bench_waf_model_learn(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_sql_mutate, bench_anti_rig_gate, bench_featurize, bench_waf_model_learn);
+criterion_group!(
+    benches,
+    bench_sql_mutate,
+    bench_anti_rig_gate,
+    bench_featurize,
+    bench_waf_model_learn
+);
 criterion_main!(benches);

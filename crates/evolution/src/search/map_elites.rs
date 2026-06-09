@@ -428,7 +428,10 @@ mod tests {
             cell_fitness.is_finite(),
             "NaN cell must be evictable: got {cell_fitness}"
         );
-        assert!(cell_fitness > 0.0, "healer must have replaced poisoned cell");
+        assert!(
+            cell_fitness > 0.0,
+            "healer must have replaced poisoned cell"
+        );
     }
 
     #[test]

@@ -176,7 +176,10 @@ mod tests {
         assert_eq!(da.target, "http://target/");
         assert_eq!(da.param, "p");
         assert_eq!(da.payload, "<script>alert(1)</script>");
-        assert_eq!(da.class, "xss", "the --class selector must survive the round-trip");
+        assert_eq!(
+            da.class, "xss",
+            "the --class selector must survive the round-trip"
+        );
         assert_eq!(da.format, "json");
         assert_eq!(da.delay_ms, 50);
         assert!(da.insecure);

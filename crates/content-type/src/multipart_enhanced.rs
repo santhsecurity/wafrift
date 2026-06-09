@@ -23,7 +23,10 @@ mod tests {
     #[test]
     fn first_variant_is_original_filename() {
         let variants = generate_variants("shell.php");
-        assert_eq!(&variants[0], "shell.php", "first variant must be the original");
+        assert_eq!(
+            &variants[0], "shell.php",
+            "first variant must be the original"
+        );
     }
 
     #[test]

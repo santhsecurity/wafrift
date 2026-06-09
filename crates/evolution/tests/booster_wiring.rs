@@ -44,7 +44,10 @@ fn no_booster_flag_disables_scorer() {
     assert!(engine.no_booster);
     // Batch should still work correctly.
     let batch = engine.batch_candidates(4);
-    assert!(!batch.is_empty(), "batch_candidates must work with no_booster=true");
+    assert!(
+        !batch.is_empty(),
+        "batch_candidates must work with no_booster=true"
+    );
 }
 
 // ── Test 3: booster is updated on block observation ───────────────────────────
@@ -182,7 +185,10 @@ fn booster_accumulates_across_multiple_submits() {
         if batch.is_empty() {
             break;
         }
-        let results: Vec<_> = batch.iter().map(|(id, _)| (*id, blocked_verdict())).collect();
+        let results: Vec<_> = batch
+            .iter()
+            .map(|(id, _)| (*id, blocked_verdict()))
+            .collect();
         let _ = engine.submit_batch(results);
         feature_counts.push(engine.booster.feature_count());
         engine.evolve();

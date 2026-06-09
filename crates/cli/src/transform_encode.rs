@@ -493,7 +493,7 @@ fn b32_encode(data: &[u8]) -> String {
         buf <<= 8 * (5 - chunk.len());
         // 5 input bytes → 8 output symbols; emit only the symbols backed by
         // input bits, pad the rest with '='.
-        let symbols = (chunk.len() * 8 + 4) / 5;
+        let symbols = (chunk.len() * 8).div_ceil(5);
         for i in 0..8 {
             if i < symbols {
                 let idx = ((buf >> (35 - 5 * i)) & 0x1f) as usize;
@@ -569,7 +569,7 @@ mod tests {
         assert!(!e.contains('+') && !e.contains('/') && !e.contains('='));
         // Restore padding the way the origin does, then decode.
         let mut s = e.replace('-', "+").replace('_', "/");
-        while s.len() % 4 != 0 {
+        while !s.len().is_multiple_of(4) {
             s.push('=');
         }
         let d = base64::engine::general_purpose::STANDARD

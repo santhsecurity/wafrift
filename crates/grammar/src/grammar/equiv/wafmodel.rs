@@ -28,30 +28,30 @@ use wafrift_types::hash::{FNV_OFFSET_64, FNV_PRIME_64, fnv1a_64};
 /// must never be reordered (only appended) — it is a serialisation
 /// contract.
 pub const FEATURES: &[&str] = &[
-    "has_union",             // 0
-    "has_select",            // 1
-    "has_or",                // 2
-    "has_and",               // 3
-    "has_squote",            // 4
-    "has_dquote",            // 5
-    "has_comment_dashdash",  // 6
-    "has_comment_hash",      // 7
-    "has_block_comment",     // 8
-    "has_mysql_cond_comment",// 9
-    "has_hex_literal",       // 10
-    "has_sleep",             // 11
-    "has_benchmark",         // 12
-    "has_extractvalue",      // 13
-    "has_updatexml",         // 14
-    "has_concat",            // 15
-    "has_paren",             // 16
-    "has_equals",            // 17
-    "has_semicolon",         // 18
-    "has_union_select",      // 19
-    "has_information_schema",// 20
-    "has_scientific",        // 21
-    "len_gt_24",             // 22
-    "len_gt_64",             // 23
+    "has_union",              // 0
+    "has_select",             // 1
+    "has_or",                 // 2
+    "has_and",                // 3
+    "has_squote",             // 4
+    "has_dquote",             // 5
+    "has_comment_dashdash",   // 6
+    "has_comment_hash",       // 7
+    "has_block_comment",      // 8
+    "has_mysql_cond_comment", // 9
+    "has_hex_literal",        // 10
+    "has_sleep",              // 11
+    "has_benchmark",          // 12
+    "has_extractvalue",       // 13
+    "has_updatexml",          // 14
+    "has_concat",             // 15
+    "has_paren",              // 16
+    "has_equals",             // 17
+    "has_semicolon",          // 18
+    "has_union_select",       // 19
+    "has_information_schema", // 20
+    "has_scientific",         // 21
+    "len_gt_24",              // 22
+    "len_gt_64",              // 23
     // delivery shape one-hot (must match equiv::sql::delivery_kind_label)
     "dlv_multipart_file",    // 24
     "dlv_path_segment",      // 25
@@ -595,7 +595,10 @@ mod tests {
         assert_eq!(feat::DLV_JSON_NESTED_DEEP, pos("dlv_json_nested_deep"));
         assert_eq!(feat::DLV_GRAPHQL, pos("dlv_graphql"));
         // Guard: every constant is in-bounds for the current FEATURES array.
-        assert!(feat::DLV_GRAPHQL < FEATURES.len(), "DLV_GRAPHQL out of bounds");
+        assert!(
+            feat::DLV_GRAPHQL < FEATURES.len(),
+            "DLV_GRAPHQL out of bounds"
+        );
     }
 
     /// MySQL conditional comments (`/*!...*/`) must retain the `has_mysql_cond_comment`
@@ -606,7 +609,11 @@ mod tests {
         // `/*!50000UNION*/` is a MySQL conditional: preserved, keywords visible.
         let f = featurize("/*!50000UNION*/ SELECT 1", 7);
         let idx = |n: &str| FEATURES.iter().position(|x| *x == n).unwrap();
-        assert_eq!(f[idx("has_mysql_cond_comment")], 1.0, "/*!...*/  not detected");
+        assert_eq!(
+            f[idx("has_mysql_cond_comment")],
+            1.0,
+            "/*!...*/  not detected"
+        );
         // The union keyword inside /*!...*/ is preserved in norm for detection.
         assert_eq!(f[idx("has_union")], 1.0, "union inside /*!*/ not detected");
         assert_eq!(f[idx("has_select")], 1.0);
@@ -812,7 +819,11 @@ mod tests {
     fn feature_sig_is_stable_and_order_sensitive() {
         assert_eq!(feature_sig(), feature_sig(), "feature_sig not stable");
         // Sanity: it actually depends on the names (non-zero, not the seed).
-        assert_ne!(feature_sig(), FNV_OFFSET_64, "feature_sig must not be the bare seed — it must depend on FEATURES content");
+        assert_ne!(
+            feature_sig(),
+            FNV_OFFSET_64,
+            "feature_sig must not be the bare seed — it must depend on FEATURES content"
+        );
     }
 
     #[test]

@@ -3,8 +3,8 @@
 //! Records benign and blocked baseline fingerprints for a target,
 //! then uses them to classify subsequent responses.
 
-use serde::{Deserialize, Serialize};
 use crate::timing::TimingOracle;
+use serde::{Deserialize, Serialize};
 
 /// Minimum number of latency samples before we prefer the statistical
 /// TimingOracle over the heuristic 3x ratio oracle.
@@ -168,7 +168,6 @@ impl DriftScore {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,7 +244,9 @@ mod tests {
         for ms in [100u64, 110, 105] {
             cal.record_benign_with_latency(200, &[], b"ok", ms);
         }
-        let oracle = cal.build_timing_oracle().expect("3 samples must yield oracle");
+        let oracle = cal
+            .build_timing_oracle()
+            .expect("3 samples must yield oracle");
         // Normal jitter -- not anomalous.
         assert!(!oracle.is_anomalous(120.0));
         // 9 second delay -- clearly anomalous.
@@ -262,14 +263,19 @@ mod tests {
         for ms in [98u64, 100, 101, 99, 102] {
             cal.record_benign_with_latency(200, &[], b"ok", ms);
         }
-        let oracle = cal.build_timing_oracle().expect("5 samples must yield oracle");
+        let oracle = cal
+            .build_timing_oracle()
+            .expect("5 samples must yield oracle");
         let threshold = oracle.threshold_ms();
         // 3x ratio would give 300 ms; statistical oracle gives ~105 ms.
         assert!(
             threshold < 200.0,
             "stat threshold {threshold} must be < 200 (3x heuristic gives 300)"
         );
-        assert!(oracle.is_anomalous(200.0), "200ms must be anomalous with ~105ms threshold");
+        assert!(
+            oracle.is_anomalous(200.0),
+            "200ms must be anomalous with ~105ms threshold"
+        );
     }
 
     /// All accumulated samples contribute -- not just the last one.
@@ -286,6 +292,4 @@ mod tests {
         // 1100 ms is within normal jitter for this baseline.
         assert!(!oracle.is_anomalous(1_100.0));
     }
-
-
 }

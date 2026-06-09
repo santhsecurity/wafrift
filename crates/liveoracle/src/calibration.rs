@@ -105,10 +105,18 @@ pub fn calibrate(benign: Baseline, malicious: Vec<Baseline>) -> Option<Calibrati
             continue;
         }
         if benign.status != m.status {
-            return Some(Calibration { benign, blocked: m, by: Discriminator::Status });
+            return Some(Calibration {
+                benign,
+                blocked: m,
+                by: Discriminator::Status,
+            });
         }
         if body_similarity(&benign.body, &m.body) <= DISTINCT_MAX_SIMILARITY {
-            return Some(Calibration { benign, blocked: m, by: Discriminator::Body });
+            return Some(Calibration {
+                benign,
+                blocked: m,
+                by: Discriminator::Body,
+            });
         }
     }
     None
@@ -191,17 +199,29 @@ mod tests {
     use super::*;
 
     fn b(status: u16, body: &str) -> Baseline {
-        Baseline { status, body: body.as_bytes().to_vec(), control: Vec::new() }
+        Baseline {
+            status,
+            body: body.as_bytes().to_vec(),
+            control: Vec::new(),
+        }
     }
 
     fn b_ctl(status: u16, body: &str, control: &str) -> Baseline {
-        Baseline { status, body: body.as_bytes().to_vec(), control: control.as_bytes().to_vec() }
+        Baseline {
+            status,
+            body: body.as_bytes().to_vec(),
+            control: control.as_bytes().to_vec(),
+        }
     }
 
     #[test]
     fn a_reflected_malicious_control_is_not_mistaken_for_a_block() {
         let benign = b_ctl(200, "you searched for benignval template", "benignval");
-        let reflected = b_ctl(200, "<script>alert(1)</script>", "<script>alert(1)</script>");
+        let reflected = b_ctl(
+            200,
+            "<script>alert(1)</script>",
+            "<script>alert(1)</script>",
+        );
         assert!(
             calibrate(benign, vec![reflected]).is_none(),
             "a reflecting (non-blocking) target must not be calibrated as blocking"
@@ -211,7 +231,11 @@ mod tests {
     #[test]
     fn a_real_block_still_calibrates_even_among_reflected_controls() {
         let benign = b_ctl(200, "search results template footer", "benignval");
-        let reflected = b_ctl(200, "<script>alert(1)</script>", "<script>alert(1)</script>");
+        let reflected = b_ctl(
+            200,
+            "<script>alert(1)</script>",
+            "<script>alert(1)</script>",
+        );
         let blocked = b_ctl(403, "forbidden", "1' OR '1'='1");
         let cal = calibrate(benign, vec![reflected, blocked]).expect("the 403 control calibrates");
         assert_eq!(cal.classify(403, b""), Some(LiveVerdict::Blocked));
@@ -222,16 +246,28 @@ mod tests {
         let cal = calibrate(b(200, "welcome home page"), vec![b(403, "forbidden")])
             .expect("a 200-vs-403 target is calibratable");
         assert_eq!(cal.classify(403, b"anything"), Some(LiveVerdict::Blocked));
-        assert_eq!(cal.classify(200, b"some normal page"), Some(LiveVerdict::Allowed));
+        assert_eq!(
+            cal.classify(200, b"some normal page"),
+            Some(LiveVerdict::Allowed)
+        );
     }
 
     #[test]
     fn calibrates_on_a_custom_200_block_page_with_no_known_signature() {
-        let benign = b(200, "search results for your query item one item two item three");
-        let malicious = b(200, "go away robot you are not welcome attack detected nope");
+        let benign = b(
+            200,
+            "search results for your query item one item two item three",
+        );
+        let malicious = b(
+            200,
+            "go away robot you are not welcome attack detected nope",
+        );
         let cal = calibrate(benign, vec![malicious]).expect("distinct bodies are calibratable");
         assert_eq!(
-            cal.classify(200, b"go away robot you are not welcome attack detected nope"),
+            cal.classify(
+                200,
+                b"go away robot you are not welcome attack detected nope"
+            ),
             Some(LiveVerdict::Blocked)
         );
         assert_eq!(
@@ -244,7 +280,10 @@ mod tests {
     fn declines_when_target_does_not_distinguish_benign_from_malicious() {
         let page = "the same identical application landing page for every request";
         let cal = calibrate(b(200, page), vec![b(200, page), b(200, page)]);
-        assert!(cal.is_none(), "an undiscriminating target must decline calibration");
+        assert!(
+            cal.is_none(),
+            "an undiscriminating target must decline calibration"
+        );
     }
 
     #[test]
@@ -261,22 +300,36 @@ mod tests {
         let benign = b(200, "alpha bravo charlie delta echo foxtrot");
         let malicious = b(200, "one two three four five six seven eight");
         let cal = calibrate(benign, vec![malicious]).expect("calibratable");
-        assert_eq!(cal.classify(200, b"completely unrelated zulu yankee xray words"), None);
+        assert_eq!(
+            cal.classify(200, b"completely unrelated zulu yankee xray words"),
+            None
+        );
     }
 
     #[test]
     fn body_similarity_is_one_for_identical_and_low_for_disjoint() {
-        assert!((body_similarity(b"the quick brown fox", b"the quick brown fox") - 1.0).abs() < 1e-9);
+        assert!(
+            (body_similarity(b"the quick brown fox", b"the quick brown fox") - 1.0).abs() < 1e-9
+        );
         assert!(body_similarity(b"alpha bravo charlie", b"xxx yyy zzz") < 0.2);
     }
 
     #[test]
     fn reflection_noise_does_not_flip_an_allowed_probe() {
-        let benign = b(200, "you searched for benignvalue here are results template footer nav");
-        let malicious = b(200, "blocked request id 9931 contact support reference number");
+        let benign = b(
+            200,
+            "you searched for benignvalue here are results template footer nav",
+        );
+        let malicious = b(
+            200,
+            "blocked request id 9931 contact support reference number",
+        );
         let cal = calibrate(benign, vec![malicious]).expect("calibratable");
         assert_eq!(
-            cal.classify(200, b"you searched for someotherthing here are results template footer nav"),
+            cal.classify(
+                200,
+                b"you searched for someotherthing here are results template footer nav"
+            ),
             Some(LiveVerdict::Allowed),
         );
     }

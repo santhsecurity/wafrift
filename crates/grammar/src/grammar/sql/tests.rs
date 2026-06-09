@@ -399,6 +399,10 @@ fn mutate_is_deterministic_across_calls() {
     let b = mutate("' OR 1=1--", 30);
     assert_eq!(a.len(), b.len(), "mutation count must be stable");
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
-        assert_eq!(x.payload, y.payload, "mutation {i} payload diverged: {} vs {}", x.payload, y.payload);
+        assert_eq!(
+            x.payload, y.payload,
+            "mutation {i} payload diverged: {} vs {}",
+            x.payload, y.payload
+        );
     }
 }

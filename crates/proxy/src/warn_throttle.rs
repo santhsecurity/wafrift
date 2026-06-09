@@ -59,10 +59,8 @@ impl WarnThrottle {
             // Still over? Drop the oldest entry (insertion-order isn't
             // available on HashMap, so use the smallest Instant).
             if map.len() >= MAX_THROTTLE_ENTRIES
-                && let Some(oldest_key) = map
-                    .iter()
-                    .min_by_key(|(_, t)| **t)
-                    .map(|(k, _)| k.clone())
+                && let Some(oldest_key) =
+                    map.iter().min_by_key(|(_, t)| **t).map(|(k, _)| k.clone())
             {
                 map.remove(&oldest_key);
             }
@@ -70,7 +68,6 @@ impl WarnThrottle {
         map.insert(key.to_string(), now);
         true
     }
-
 }
 
 #[cfg(test)]

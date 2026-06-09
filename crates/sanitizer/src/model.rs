@@ -1,6 +1,6 @@
 //! Sanitizer behaviour model + the [`WafOracle`] adapter the learner drives.
 //!
-//! [`SanitizerModel`](crate::extract::SanitizerModel) describes *what* a
+//! [`SanitizerModel`] describes *what* a
 //! sanitizer allows and forbids; this module makes it *executable*:
 //! [`SanitizerModel::sanitize`] simulates the sanitizer on an input string, and
 //! [`SanitizerOracle`] wraps that simulation in the [`WafOracle`] contract so the
@@ -41,7 +41,8 @@ fn tag_re() -> &'static Regex {
 fn handler_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?i)[\s/]on[a-z0-9_]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)"#).expect("handler regex")
+        Regex::new(r#"(?i)[\s/]on[a-z0-9_]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)"#)
+            .expect("handler regex")
     })
 }
 
@@ -65,7 +66,11 @@ fn js_to_rust_regex(src: &str) -> String {
 impl SanitizerModel {
     /// Is `tag_name` (already lowercased) permitted to survive?
     fn tag_allowed(&self, tag_name_lc: &str) -> bool {
-        if self.forbidden_tags.iter().any(|t| t.eq_ignore_ascii_case(tag_name_lc)) {
+        if self
+            .forbidden_tags
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(tag_name_lc))
+        {
             return false;
         }
         match &self.allowed_tags {
@@ -121,7 +126,8 @@ impl SanitizerModel {
     /// the hot path ([`SanitizerOracle`]) compiles once and calls this per query.
     #[must_use]
     pub fn sanitize_with(&self, input: &str, strip_res: &[Regex]) -> String {
-        let scrubbed = tag_re().replace_all(input, |caps: &regex::Captures| self.scrub_tag(&caps[0]));
+        let scrubbed =
+            tag_re().replace_all(input, |caps: &regex::Captures| self.scrub_tag(&caps[0]));
         let mut out = scrubbed.into_owned();
         for re in strip_res {
             out = re.replace_all(&out, "").into_owned();
@@ -189,7 +195,7 @@ fn neutralize_scheme(tag: &str, scheme: &str) -> String {
 /// judge executability on the two **unambiguous** markup vectors — a surviving
 /// `<script>` tag and a surviving `on*=` event handler on a tag. URL-scheme
 /// execution (`javascript:` in `href`) depends on the specific tag/sink and is
-/// modelled separately by [defanging](neutralize_scheme) in `sanitize`; treating
+/// modelled separately by defanging (`neutralize_scheme`) in `sanitize`; treating
 /// a bare `javascript:` string as executable here would over-report (plain text
 /// `javascript:` and `<b href=javascript:>` are both inert). scald confirms the
 /// scheme vectors in a real browser; this detector stays sound by construction.
@@ -221,7 +227,11 @@ impl SanitizerOracle {
     #[must_use]
     pub fn new(model: SanitizerModel) -> Self {
         let strip_res = model.compiled_strip_patterns();
-        Self { model, strip_res, queries: 0 }
+        Self {
+            model,
+            strip_res,
+            queries: 0,
+        }
     }
 
     /// The model being decompiled.
@@ -238,11 +248,13 @@ impl WafOracle for SanitizerOracle {
             .body_bytes()
             .map(|b| String::from_utf8_lossy(b).into_owned())
             .unwrap_or_default();
-        Ok(if self.model.survives_executable_with(&input, &self.strip_res) {
-            Outcome::Pass // an executable vector survived ⇒ bypass
-        } else {
-            Outcome::Block // sanitized away
-        })
+        Ok(
+            if self.model.survives_executable_with(&input, &self.strip_res) {
+                Outcome::Pass // an executable vector survived ⇒ bypass
+            } else {
+                Outcome::Block // sanitized away
+            },
+        )
     }
 
     fn queries(&self) -> u64 {
@@ -255,7 +267,11 @@ mod tests {
     use super::*;
     use crate::extract::{SanitizerKind, SanitizerModel};
 
-    fn dompurify(forbidden: &[&str], allowed: Option<&[&str]>, strip_handlers: bool) -> SanitizerModel {
+    fn dompurify(
+        forbidden: &[&str],
+        allowed: Option<&[&str]>,
+        strip_handlers: bool,
+    ) -> SanitizerModel {
         SanitizerModel {
             kind: SanitizerKind::DomPurify,
             allowed_tags: allowed.map(|a| a.iter().map(|s| s.to_string()).collect()),
@@ -321,13 +337,22 @@ mod tests {
         let mut m = dompurify(&[], Some(&["a"]), false);
         m.blocked_schemes = vec!["javascript".to_string()];
         let out = m.sanitize("<a href=javascript:alert(1)>x</a>");
-        assert!(!out.to_ascii_lowercase().contains("javascript:"), "scheme must be defanged: {out}");
-        assert!(out.contains("%3a") || out.contains("%3A"), "defanged colon expected: {out}");
+        assert!(
+            !out.to_ascii_lowercase().contains("javascript:"),
+            "scheme must be defanged: {out}"
+        );
+        assert!(
+            out.contains("%3a") || out.contains("%3A"),
+            "defanged colon expected: {out}"
+        );
     }
 
     #[test]
     fn custom_strip_pattern_removes_matches() {
-        let mut m = SanitizerModel { kind: SanitizerKind::CustomRegexStrip, ..Default::default() };
+        let mut m = SanitizerModel {
+            kind: SanitizerKind::CustomRegexStrip,
+            ..Default::default()
+        };
         m.strip_patterns = vec!["<script[^>]*>".to_string()];
         // The strip removes the opening tag; nothing executable remains.
         assert!(!m.survives_executable("<script src=x>"));
@@ -340,7 +365,9 @@ mod tests {
         assert!(is_executable_html("<script>x</script>"));
         assert!(is_executable_html("<img src=x onerror=alert(1)>"));
         assert!(!is_executable_html("<b>safe</b> plain text"));
-        assert!(!is_executable_html("on its own this onload word is not a handler"));
+        assert!(!is_executable_html(
+            "on its own this onload word is not a handler"
+        ));
         // A bare scheme string is NOT executable in a markup sink (no over-report).
         assert!(!is_executable_html("javascript:alert(1)"));
         assert!(!is_executable_html("<b href=javascript:alert(1)>inert</b>"));

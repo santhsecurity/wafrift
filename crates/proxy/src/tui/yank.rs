@@ -604,8 +604,8 @@ mod tests {
                 .unwrap_or(0)
         ));
         std::fs::write(&path, b"pre-existing").expect("seed");
-        let err = super::write_new_only(&path, b"new content")
-            .expect_err("must refuse to overwrite");
+        let err =
+            super::write_new_only(&path, b"new content").expect_err("must refuse to overwrite");
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
         // Original content must be preserved.
         let got = std::fs::read(&path).expect("read back");
@@ -634,8 +634,8 @@ mod tests {
         let link = base.join("yank.curl");
         std::os::unix::fs::symlink(&target, &link).expect("symlink");
 
-        let err = super::write_new_only(&link, b"ATTACKER-CONTENT")
-            .expect_err("must refuse symlink");
+        let err =
+            super::write_new_only(&link, b"ATTACKER-CONTENT").expect_err("must refuse symlink");
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
         let got = std::fs::read(&target).expect("target intact");
         assert_eq!(got, b"OPERATOR-SECRET", "symlink target was clobbered");

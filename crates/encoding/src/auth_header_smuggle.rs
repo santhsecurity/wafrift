@@ -133,28 +133,19 @@ impl AuthSmuggleProbe {
 
     /// `Bearer<token>` — no whitespace between scheme and token.
     #[must_use]
-    pub fn no_whitespace_after_scheme(
-        header_name: &str,
-        scheme: &str,
-        token: &str,
-    ) -> Self {
+    pub fn no_whitespace_after_scheme(header_name: &str, scheme: &str, token: &str) -> Self {
         let value = format!("{}{}", scheme, sanitise_token(token));
         Self::finalise(
             AuthHeaderVariant::NoWhitespaceAfterScheme,
             vec![(header_name.to_string(), value)],
-            "No SP between scheme and token — RFC 7235 §2.1 violation, lenient parsers join"
-                .into(),
+            "No SP between scheme and token — RFC 7235 §2.1 violation, lenient parsers join".into(),
         )
     }
 
     /// `Bearer\t<token>` — TAB instead of SP between scheme and
     /// token.
     #[must_use]
-    pub fn tab_between_scheme_and_token(
-        header_name: &str,
-        scheme: &str,
-        token: &str,
-    ) -> Self {
+    pub fn tab_between_scheme_and_token(header_name: &str, scheme: &str, token: &str) -> Self {
         let value = format!("{}\t{}", scheme, sanitise_token(token));
         Self::finalise(
             AuthHeaderVariant::TabBetweenSchemeAndToken,
@@ -165,11 +156,7 @@ impl AuthSmuggleProbe {
 
     /// `Bearer   <token>` — 3-7 spaces between scheme and token.
     #[must_use]
-    pub fn multiple_spaces_after_scheme(
-        header_name: &str,
-        scheme: &str,
-        token: &str,
-    ) -> Self {
+    pub fn multiple_spaces_after_scheme(header_name: &str, scheme: &str, token: &str) -> Self {
         let mut rng = rand::thread_rng();
         let n = rng.gen_range(3..=7);
         let value = format!("{}{}{}", scheme, " ".repeat(n), sanitise_token(token));
@@ -194,12 +181,8 @@ impl AuthSmuggleProbe {
         let v2 = format!("{} {}", scheme, sanitise_token(smuggle_token));
         Self::finalise(
             AuthHeaderVariant::DuplicateHeaderFirstWinsBenign,
-            vec![
-                (header_name.to_string(), v1),
-                (header_name.to_string(), v2),
-            ],
-            "Duplicate Authorization headers — nginx-vs-Apache first/last-wins differential"
-                .into(),
+            vec![(header_name.to_string(), v1), (header_name.to_string(), v2)],
+            "Duplicate Authorization headers — nginx-vs-Apache first/last-wins differential".into(),
         )
     }
 
@@ -233,19 +216,14 @@ impl AuthSmuggleProbe {
         Self::finalise(
             AuthHeaderVariant::TrailingJunkAfterToken,
             vec![(header_name.to_string(), value)],
-            "Trailing bytes after token — parser stops at SP vs WAF scans whole value"
-                .into(),
+            "Trailing bytes after token — parser stops at SP vs WAF scans whole value".into(),
         )
     }
 
     /// `Bearer <token-with-ctl>` — control byte injected at the
     /// token midpoint. CTL pool randomised per call.
     #[must_use]
-    pub fn control_byte_in_token(
-        header_name: &str,
-        scheme: &str,
-        token: &str,
-    ) -> Self {
+    pub fn control_byte_in_token(header_name: &str, scheme: &str, token: &str) -> Self {
         let clean = sanitise_token(token);
         let ctl = pick_from(CONTROL_BYTE_POOL, b'\t');
         // §15 panic fix (sibling of cookie_smuggle::control_byte_in_value):
@@ -279,7 +257,9 @@ impl SmuggleProbe for AuthSmuggleProbe {
             AuthHeaderVariant::NoWhitespaceAfterScheme => "no-whitespace-after-scheme",
             AuthHeaderVariant::TabBetweenSchemeAndToken => "tab-between-scheme-and-token",
             AuthHeaderVariant::MultipleSpacesAfterScheme => "multiple-spaces-after-scheme",
-            AuthHeaderVariant::DuplicateHeaderFirstWinsBenign => "duplicate-header-first-wins-benign",
+            AuthHeaderVariant::DuplicateHeaderFirstWinsBenign => {
+                "duplicate-header-first-wins-benign"
+            }
             AuthHeaderVariant::QuotedScheme => "quoted-scheme",
             AuthHeaderVariant::TrailingJunkAfterToken => "trailing-junk-after-token",
             AuthHeaderVariant::ControlByteInToken => "control-byte-in-token",
@@ -366,11 +346,7 @@ mod tests {
 
     #[test]
     fn no_whitespace_probe_has_no_sp_between_scheme_and_token() {
-        let p = AuthSmuggleProbe::no_whitespace_after_scheme(
-            "Authorization",
-            "Bearer",
-            "Token",
-        );
+        let p = AuthSmuggleProbe::no_whitespace_after_scheme("Authorization", "Bearer", "Token");
         let (_, v) = &p.header_lines[0];
         // First SP would split into scheme + token; the probe MUST
         // not have one in the wire form.
@@ -383,8 +359,7 @@ mod tests {
 
     #[test]
     fn tab_probe_uses_tab_not_space() {
-        let p =
-            AuthSmuggleProbe::tab_between_scheme_and_token("Authorization", "Bearer", "T");
+        let p = AuthSmuggleProbe::tab_between_scheme_and_token("Authorization", "Bearer", "T");
         let (_, v) = &p.header_lines[0];
         assert!(v.contains('\t'), "expected TAB in header value: {v:?}");
         assert!(
@@ -395,11 +370,7 @@ mod tests {
 
     #[test]
     fn multiple_spaces_probe_has_three_to_seven_spaces() {
-        let p = AuthSmuggleProbe::multiple_spaces_after_scheme(
-            "Authorization",
-            "Bearer",
-            "T",
-        );
+        let p = AuthSmuggleProbe::multiple_spaces_after_scheme("Authorization", "Bearer", "T");
         let (_, v) = &p.header_lines[0];
         // Count consecutive spaces between "Bearer" and "T".
         let after_bearer = v.trim_start_matches("Bearer");
@@ -448,12 +419,8 @@ mod tests {
 
     #[test]
     fn trailing_junk_probe_appends_extra_bytes_after_token() {
-        let p = AuthSmuggleProbe::trailing_junk_after_token(
-            "Authorization",
-            "Bearer",
-            "TOK",
-            "EXTRA",
-        );
+        let p =
+            AuthSmuggleProbe::trailing_junk_after_token("Authorization", "Bearer", "TOK", "EXTRA");
         let (_, v) = &p.header_lines[0];
         // Format is "Bearer <token> <junk>" so two SPs split into 3
         // segments.
@@ -466,8 +433,7 @@ mod tests {
 
     #[test]
     fn ctl_probe_injects_a_byte_from_the_pool() {
-        let p =
-            AuthSmuggleProbe::control_byte_in_token("Authorization", "Bearer", "ABCDEF");
+        let p = AuthSmuggleProbe::control_byte_in_token("Authorization", "Bearer", "ABCDEF");
         let (_, v) = &p.header_lines[0];
         let bytes = v.as_bytes();
         assert!(
@@ -480,8 +446,7 @@ mod tests {
     fn sanitise_strips_cr_lf_nul_from_token() {
         // Anti-rig: CR/LF/NUL must NEVER reach the wire even when the
         // probe explores lax parsers — they break framing universally.
-        let p =
-            AuthSmuggleProbe::lowercase_scheme("Authorization", "Bearer", "to\rke\nn\0X");
+        let p = AuthSmuggleProbe::lowercase_scheme("Authorization", "Bearer", "to\rke\nn\0X");
         let (_, v) = &p.header_lines[0];
         assert!(!v.contains('\r'));
         assert!(!v.contains('\n'));
@@ -520,12 +485,7 @@ mod tests {
         let _ = AuthSmuggleProbe::no_whitespace_after_scheme("Authorization", "", "");
         let _ = AuthSmuggleProbe::tab_between_scheme_and_token("Authorization", "", "");
         let _ = AuthSmuggleProbe::multiple_spaces_after_scheme("Authorization", "", "");
-        let _ = AuthSmuggleProbe::duplicate_header_first_wins_benign(
-            "Authorization",
-            "",
-            "",
-            "",
-        );
+        let _ = AuthSmuggleProbe::duplicate_header_first_wins_benign("Authorization", "", "", "");
         let _ = AuthSmuggleProbe::quoted_scheme("Authorization", "", "");
         let _ = AuthSmuggleProbe::trailing_junk_after_token("Authorization", "", "", "");
         // control_byte_in_token's `mid = clean.len() / 2 = 0`; slice

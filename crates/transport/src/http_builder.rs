@@ -42,7 +42,7 @@ const MIN_TIMEOUT_SECS: u64 = 1;
 /// Build a reqwest `ClientBuilder` pre-configured with the wafrift
 /// floor:
 /// - `timeout(timeout_secs.max(1) seconds)` — minimum 1 s; 0 is clamped
-///   (see [`MIN_TIMEOUT_SECS`])
+///   (see `MIN_TIMEOUT_SECS`)
 /// - `danger_accept_invalid_certs(insecure)` when `insecure == true`
 /// - `user_agent(user_agent)` when `Some` (callers pass `None` to
 ///   inherit reqwest's default UA, or the configured wafrift UA
@@ -117,7 +117,7 @@ pub fn base_client_builder_with_egress(
 /// delegates here, so there is exactly ONE implementation — in the HTTP
 /// layer where it belongs — protecting the core `EvasionClient`, not just
 /// the CLI commands that build their own clients (§15 SSRF). The decision
-/// is factored into the pure [`redirect_decision`] so the SSRF logic is
+/// is factored into the pure `redirect_decision` so the SSRF logic is
 /// unit-testable — `reqwest::redirect::Attempt` has no public constructor,
 /// but `reqwest::Url` does.
 #[must_use]
@@ -154,7 +154,7 @@ enum RedirectDecision {
 /// True when `u`'s host is an IP literal in a bogon range (loopback /
 /// RFC1918 / link-local metadata / IPv6 ULA). Hostnames — even ones that
 /// would resolve to a bogon — return `false` here; the cross-origin guard
-/// in [`redirect_decision`] is what stops hostname-based pivots, since any
+/// in `redirect_decision` is what stops hostname-based pivots, since any
 /// redirect to a *different* host is cross-origin and halted regardless.
 fn is_bogon_literal(u: &reqwest::Url) -> bool {
     u.host_str()

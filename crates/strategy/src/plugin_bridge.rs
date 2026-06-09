@@ -76,10 +76,10 @@ mod tests {
         // We can't reset it, but we can verify the function doesn't panic
         // and returns a Vec (possibly non-empty if real plugins exist on disk).
         let result = apply_all_plugins("SELECT 1");
-        // All results must be non-empty strings.
-        for (name, transformed) in &result {
+        // Every plugin must report a non-empty name. A plugin transform may
+        // legitimately return an empty string, so the output is unconstrained.
+        for (name, _transformed) in &result {
             assert!(!name.is_empty());
-            assert!(!transformed.is_empty() || true); // empty output is valid
         }
     }
 

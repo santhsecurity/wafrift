@@ -69,10 +69,16 @@ mod tests {
         // 1 byte compression flag + 4 bytes length prefix.
         let encoded = serialize("hello");
         assert!(encoded.len() >= 5);
-        assert_eq!(encoded[0], 0x00, "compression flag must be 0 (no compression)");
+        assert_eq!(
+            encoded[0], 0x00,
+            "compression flag must be 0 (no compression)"
+        );
         let claimed_len = u32::from_be_bytes([encoded[1], encoded[2], encoded[3], encoded[4]]);
-        assert_eq!(claimed_len as usize + 5, encoded.len(),
-            "length field must equal total_len - 5");
+        assert_eq!(
+            claimed_len as usize + 5,
+            encoded.len(),
+            "length field must equal total_len - 5"
+        );
     }
 
     #[test]

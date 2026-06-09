@@ -518,10 +518,7 @@ fn encode_layered_all_strategies() {
                 "cap rejection must prove expansion: actual={actual} input={}",
                 input.len()
             );
-            assert!(
-                max > 0,
-                "cap must be a positive byte budget: max={max}"
-            );
+            assert!(max > 0, "cap must be a positive byte budget: max={max}");
         }
         Err(e) => panic!("unexpected error variant from layered pipeline: {e:?}"),
     }

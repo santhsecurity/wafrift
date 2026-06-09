@@ -24,7 +24,7 @@
 //!   Backends that NFKC see the keyword; WAFs that don't, don't.
 //! - **Soft hyphen / format chars (U+00AD, U+200B–U+200D, U+2060,
 //!   U+FEFF).** Some of these already live in
-//!   [`super::unicode::zero_width_inject`] for selective injection. This
+//!   `unicode::zero_width_inject` for selective injection. This
 //!   module exposes them as a Strategy-compatible whole-string encoder
 //!   too, for cases where the engine wants to swap encoders rather than
 //!   compose them.
@@ -290,7 +290,10 @@ mod tests {
     #[test]
     fn tag_char_preserves_non_ascii() {
         let encoded = tag_char_encode("SELECT' OR Ä");
-        assert!(encoded.contains('Ä'), "non-ASCII passes through: {encoded:?}");
+        assert!(
+            encoded.contains('Ä'),
+            "non-ASCII passes through: {encoded:?}"
+        );
     }
 
     #[test]
@@ -337,7 +340,10 @@ mod tests {
             .filter(|c| (0xE0100..=0xE01EF).contains(&(*c as u32)))
             .collect();
         assert_eq!(selectors.len(), 2);
-        assert_ne!(selectors[0], selectors[1], "selectors must differ per position");
+        assert_ne!(
+            selectors[0], selectors[1],
+            "selectors must differ per position"
+        );
     }
 
     #[test]
@@ -444,7 +450,10 @@ mod tests {
             let out = enc(payload);
             // Must be valid UTF-8 (String guarantees this, but assert
             // length-positive on non-empty input).
-            assert!(!out.is_empty(), "encoder #{i} produced empty on non-empty input");
+            assert!(
+                !out.is_empty(),
+                "encoder #{i} produced empty on non-empty input"
+            );
         }
     }
 

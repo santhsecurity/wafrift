@@ -103,10 +103,7 @@ pub async fn from_graphql(
 /// `DiscoveryError` — `IntrospectionDisabled` when the body parses as
 /// JSON containing the standard `errors` array (the introspection-off
 /// pattern), `GraphQlEndpointNotFound` otherwise. Pure / testable.
-pub fn classify_non_success_response(
-    body: &[u8],
-    endpoint: &str,
-) -> DiscoveryError {
+pub fn classify_non_success_response(body: &[u8], endpoint: &str) -> DiscoveryError {
     let Ok(json) = serde_json::from_slice::<Value>(body) else {
         return DiscoveryError::GraphQlEndpointNotFound {
             url: endpoint.to_string(),
@@ -337,8 +334,7 @@ mod tests {
     // chasing a "wrong URL" they actually had correct.
     #[test]
     fn classify_400_with_errors_body_is_introspection_disabled() {
-        let body =
-            br#"{"errors":[{"message":"GraphQL introspection is not allowed"}]}"#;
+        let body = br#"{"errors":[{"message":"GraphQL introspection is not allowed"}]}"#;
         let err = classify_non_success_response(body, "https://api.example.com/graphql");
         assert!(matches!(err, DiscoveryError::IntrospectionDisabled { .. }));
     }
@@ -355,7 +351,10 @@ mod tests {
         // A 404 with an HTML body (not JSON) means the URL is wrong.
         let body = b"<html><body>404 Not Found</body></html>";
         let err = classify_non_success_response(body, "https://x/wrong");
-        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+        assert!(matches!(
+            err,
+            DiscoveryError::GraphQlEndpointNotFound { .. }
+        ));
     }
 
     #[test]
@@ -366,7 +365,10 @@ mod tests {
         // was the issue.
         let body = br#"{"message":"server error"}"#;
         let err = classify_non_success_response(body, "https://x/graphql");
-        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+        assert!(matches!(
+            err,
+            DiscoveryError::GraphQlEndpointNotFound { .. }
+        ));
     }
 
     #[test]
@@ -375,19 +377,24 @@ mod tests {
         // that key is malformed and not the introspection-off signal.
         let body = br#"{"errors":"oops"}"#;
         let err = classify_non_success_response(body, "https://x/graphql");
-        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+        assert!(matches!(
+            err,
+            DiscoveryError::GraphQlEndpointNotFound { .. }
+        ));
     }
 
     #[test]
     fn classify_empty_body_is_endpoint_not_found() {
         let err = classify_non_success_response(b"", "https://x/graphql");
-        assert!(matches!(err, DiscoveryError::GraphQlEndpointNotFound { .. }));
+        assert!(matches!(
+            err,
+            DiscoveryError::GraphQlEndpointNotFound { .. }
+        ));
     }
 
     #[test]
     fn classify_url_is_echoed_in_either_error_variant() {
-        let intro =
-            classify_non_success_response(br#"{"errors":[]}"#, "https://t/intro-off");
+        let intro = classify_non_success_response(br#"{"errors":[]}"#, "https://t/intro-off");
         match intro {
             DiscoveryError::IntrospectionDisabled { url } => {
                 assert_eq!(url, "https://t/intro-off");

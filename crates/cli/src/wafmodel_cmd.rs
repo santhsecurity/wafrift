@@ -18,10 +18,10 @@ use std::sync::Arc;
 use wafrift_types::Request;
 use wafrift_wafmodel::normalize::Transform;
 use wafrift_wafmodel::{
-    Channel, ChannelSet, DecodeGap, FilterProfile, FnReflector, Outcome, Pipeline, ReflectionOracle,
-    Rule, SimRegexWaf, Stage, TokenProbe, Verdict, WafModelError, WafOracle, characterize,
-    default_crs_ruleset, default_filter_battery, norm_mismatch_members, probe_decode_gaps,
-    scan_origin, solve_bypass,
+    Channel, ChannelSet, DecodeGap, FilterProfile, FnReflector, Outcome, Pipeline,
+    ReflectionOracle, Rule, SimRegexWaf, Stage, TokenProbe, Verdict, WafModelError, WafOracle,
+    characterize, default_crs_ruleset, default_filter_battery, norm_mismatch_members,
+    probe_decode_gaps, scan_origin, solve_bypass,
 };
 
 /// CRS-class rulesets are kilobytes (the embedded core CRS is <500 KiB
@@ -616,7 +616,7 @@ fn run_harden_inner(args: HardenArgs) -> u8 {
 // ── fingerprint: live origin-normalization decompilation ────────────────────
 
 /// Human/JSON label for a detected origin stage. Only the stages
-/// [`detect_origin_normalization`] can return are named; anything else falls
+/// `detect_origin_normalization` can return are named; anything else falls
 /// back to the `Debug` form so a newly-added stage is never silently mislabeled.
 fn stage_label(s: &Stage) -> String {
     match s {
@@ -671,29 +671,24 @@ fn build_http_reflector(
             urlencoding::encode_binary(probe)
         );
         let client2 = client.clone();
-        let body = rt
-            .block_on(async move {
-                let resp = client2
-                    .get(&probe_url)
-                    .send()
-                    .await
-                    .map_err(|e| WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}")))?;
-                // Observe the reflection in the headers AND the body: an origin
-                // that decodes/normalizes the param into a `Location`/`Set-Cookie`
-                // header (redirects don't carry a body) would otherwise read as
-                // "no reflection". Headers are captured before the body is
-                // streamed (read_bounded consumes the response). Redirects are
-                // not followed (Policy::none), so the 3xx Location is preserved.
-                let mut observed = crate::safe_body::header_bytes(&resp);
-                let body = crate::safe_body::read_bounded(
-                    resp,
-                    crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES,
-                )
-                .await
-                .map_err(|e| WafModelError::Oracle(format!("reading reflection body: {e}")))?;
-                observed.extend_from_slice(&body);
-                Ok::<Vec<u8>, WafModelError>(observed)
+        let body = rt.block_on(async move {
+            let resp = client2.get(&probe_url).send().await.map_err(|e| {
+                WafModelError::Oracle(format!("HTTP error probing {probe_url}: {e}"))
             })?;
+            // Observe the reflection in the headers AND the body: an origin
+            // that decodes/normalizes the param into a `Location`/`Set-Cookie`
+            // header (redirects don't carry a body) would otherwise read as
+            // "no reflection". Headers are captured before the body is
+            // streamed (read_bounded consumes the response). Redirects are
+            // not followed (Policy::none), so the 3xx Location is preserved.
+            let mut observed = crate::safe_body::header_bytes(&resp);
+            let body =
+                crate::safe_body::read_bounded(resp, crate::safe_body::DEFAULT_MAX_RESPONSE_BYTES)
+                    .await
+                    .map_err(|e| WafModelError::Oracle(format!("reading reflection body: {e}")))?;
+            observed.extend_from_slice(&body);
+            Ok::<Vec<u8>, WafModelError>(observed)
+        })?;
         Ok(body)
     }))
 }
@@ -735,15 +730,18 @@ fn run_fingerprint_inner(args: FingerprintArgs) -> u8 {
         None
     };
 
-    let mut reflector =
-        match build_http_reflector(rt.clone(), args.url.clone(), args.param.clone(), args.insecure)
-        {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return 2;
-            }
-        };
+    let mut reflector = match build_http_reflector(
+        rt.clone(),
+        args.url.clone(),
+        args.param.clone(),
+        args.insecure,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 2;
+        }
+    };
     let scan = match scan_origin(&mut reflector) {
         Ok(s) => s,
         Err(e) => {
@@ -824,7 +822,10 @@ fn run_fingerprint_inner(args: FingerprintArgs) -> u8 {
                         "param": args.param,
                     }));
                 }
-                Ok(BypassOutcome::Bypassed { payload_b64, sink_view }) => {
+                Ok(BypassOutcome::Bypassed {
+                    payload_b64,
+                    sink_view,
+                }) => {
                     bypass_human = Some(format!(
                         "verified bypass found — deliver `{}={}` (payload base64: {})",
                         args.param,
@@ -964,8 +965,7 @@ fn run_filter_characterization(
     // First: which tokens are policed at all. Then, for the (usually few)
     // policed tokens, which encodings the WAF fails to decode before matching —
     // the candidate bypass surface. `&carrier` is reused across both probes.
-    let profile =
-        characterize(&mut oracle, &battery, &carrier).map_err(|e| e.to_string())?;
+    let profile = characterize(&mut oracle, &battery, &carrier).map_err(|e| e.to_string())?;
     let gaps = probe_decode_gaps(&mut oracle, &profile, &carrier).map_err(|e| e.to_string())?;
 
     // Fold this run's outcomes back into the posterior so the next run's ordering
@@ -1027,7 +1027,13 @@ fn filter_profile_json(pg: &(FilterProfile, Vec<DecodeGap>)) -> serde_json::Valu
 /// Print the operator-facing filter characterization summary.
 fn print_filter_profile_human(pg: &(FilterProfile, Vec<DecodeGap>)) {
     let (p, gaps) = pg;
-    let join = |v: Vec<&str>| if v.is_empty() { "(none)".to_string() } else { v.join(", ") };
+    let join = |v: Vec<&str>| {
+        if v.is_empty() {
+            "(none)".to_string()
+        } else {
+            v.join(", ")
+        }
+    };
     let policed: Vec<&str> = p.policed().map(|f| f.token.as_str()).collect();
     let unpoliced: Vec<&str> = p.unpoliced().map(|f| f.token.as_str()).collect();
     let gated: Vec<&str> = p.carrier_gated().map(|f| f.token.as_str()).collect();
@@ -1038,9 +1044,16 @@ fn print_filter_profile_human(pg: &(FilterProfile, Vec<DecodeGap>)) {
         println!("  carrier-gated (chars/len) : {}", join(gated));
     }
     if !gaps.is_empty() {
-        println!("  WAF decode-gaps (candidate bypass encodings — origin must apply the transform):");
+        println!(
+            "  WAF decode-gaps (candidate bypass encodings — origin must apply the transform):"
+        );
         for g in gaps {
-            println!("    {} via {} — try `{}`", g.token, g.stage, String::from_utf8_lossy(&g.encoded_preimage));
+            println!(
+                "    {} via {} — try `{}`",
+                g.token,
+                g.stage,
+                String::from_utf8_lossy(&g.encoded_preimage)
+            );
         }
     }
     if p.transport_errors > 0 {
@@ -1070,7 +1083,10 @@ enum BypassOutcome {
     NotPoliced,
     /// A live-verified bypass: deliver `payload_b64` and the origin's detected
     /// pipeline reconstructs the attack at the sink.
-    Bypassed { payload_b64: String, sink_view: Vec<u8> },
+    Bypassed {
+        payload_b64: String,
+        sink_view: Vec<u8>,
+    },
     /// The raw attack is blocked, but no structural preimage of the detected
     /// pipeline passed the live WAF — the WAF holds. Honest non-result.
     Unbypassable,
@@ -1103,7 +1119,8 @@ fn build_solved_bypass(
     // Control probe: is the raw attack actually blocked? If it already passes,
     // there is nothing to bypass — report NotPoliced and never fabricate one.
     let raw_blocked = matches!(
-        waf.classify(&build(attack.as_bytes())).map_err(|e| e.to_string())?,
+        waf.classify(&build(attack.as_bytes()))
+            .map_err(|e| e.to_string())?,
         Outcome::Block
     );
     if !raw_blocked {
@@ -1115,7 +1132,10 @@ fn build_solved_bypass(
         Some(sol) => {
             use base64::Engine;
             let payload_b64 = base64::engine::general_purpose::STANDARD.encode(&sol.input);
-            Ok(BypassOutcome::Bypassed { payload_b64, sink_view: sol.sink_view })
+            Ok(BypassOutcome::Bypassed {
+                payload_b64,
+                sink_view: sol.sink_view,
+            })
         }
         None => Ok(BypassOutcome::Unbypassable),
     }
@@ -1169,7 +1189,10 @@ mod tests {
         };
         let mut h = crate::info_gain_sched::History::new();
         observe_findings_into_history(&mut h, &profile);
-        assert!(h.is_empty(), "Inconclusive must not create a posterior entry");
+        assert!(
+            h.is_empty(),
+            "Inconclusive must not create a posterior entry"
+        );
     }
 
     #[test]
@@ -1197,7 +1220,10 @@ mod tests {
         let s = h.stats("drift");
         assert_eq!(s.n_blocked, 1);
         assert_eq!(s.n_passed, 1);
-        assert!((s.theta_estimate() - 0.5).abs() < 1e-12, "drifting token → θ=0.5");
+        assert!(
+            (s.theta_estimate() - 0.5).abs() < 1e-12,
+            "drifting token → θ=0.5"
+        );
     }
 
     // ── run_audit ────────────────────────────────────────────────────────
@@ -1519,7 +1545,10 @@ mod tests {
 
     #[test]
     fn attack_classes_loader_rejects_empty_set() {
-        assert!(attack_classes_from_toml("").is_err(), "empty data must fail closed");
+        assert!(
+            attack_classes_from_toml("").is_err(),
+            "empty data must fail closed"
+        );
         assert!(
             attack_classes_from_toml("# only a comment\n").is_err(),
             "a file with no [[class]] must fail closed"
@@ -1531,11 +1560,20 @@ mod tests {
         // A class whose tokens don't detect its attacks would make harden's proof
         // vacuous — the loader must reject an empty side rather than weaken it.
         let no_tokens = "[[class]]\nname = \"xss\"\nattacks = [\"<script>\"]\ntokens = []\n";
-        assert!(attack_classes_from_toml(no_tokens).is_err(), "empty tokens must fail");
+        assert!(
+            attack_classes_from_toml(no_tokens).is_err(),
+            "empty tokens must fail"
+        );
         let no_attacks = "[[class]]\nname = \"xss\"\nattacks = []\ntokens = [\"<script\"]\n";
-        assert!(attack_classes_from_toml(no_attacks).is_err(), "empty attacks must fail");
+        assert!(
+            attack_classes_from_toml(no_attacks).is_err(),
+            "empty attacks must fail"
+        );
         let no_name = "[[class]]\nname = \"\"\nattacks = [\"x\"]\ntokens = [\"y\"]\n";
-        assert!(attack_classes_from_toml(no_name).is_err(), "blank name must fail");
+        assert!(
+            attack_classes_from_toml(no_name).is_err(),
+            "blank name must fail"
+        );
     }
 
     #[test]
@@ -1698,7 +1736,9 @@ score = 5
         // emit). If a new detectable stage is added without a label, this drift
         // guard fails because the label equals the Debug form.
         let detectable = [
-            Stage::UrlDecode { plus_is_space: false },
+            Stage::UrlDecode {
+                plus_is_space: false,
+            },
             Stage::Base64Decode,
             Stage::HexDecode,
             Stage::OverlongUtf8Decode,
@@ -1760,21 +1800,21 @@ score = 5
                 None => return Vec::new(),
             };
             for pair in q.split(|&b| b == b'&') {
-                if let Some(eq) = pair.iter().position(|&b| b == b'=') {
-                    if &pair[..eq] == name {
-                        return pair[eq + 1..].to_vec();
-                    }
+                if let Some(eq) = pair.iter().position(|&b| b == b'=')
+                    && &pair[..eq] == name
+                {
+                    return pair[eq + 1..].to_vec();
                 }
             }
             Vec::new()
         }
 
+        /// Byte transform an echo origin applies to the decoded query value.
+        type EchoTransform = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
+
         /// Spawn an echo origin on `rt` that reflects `transform(framework_url_decode(q))`.
         /// Returns the bound address. The server runs until `rt` is dropped.
-        fn spawn_echo_origin(
-            rt: &tokio::runtime::Runtime,
-            transform: Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>,
-        ) -> SocketAddr {
+        fn spawn_echo_origin(rt: &tokio::runtime::Runtime, transform: EchoTransform) -> SocketAddr {
             rt.block_on(async move {
                 let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
                 let addr = listener.local_addr().expect("addr");
@@ -1837,8 +1877,7 @@ score = 5
 
             let cli_rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
             let url = format!("http://{addr}/");
-            let mut reflector =
-                build_http_reflector(cli_rt, url, "q".to_string(), false).unwrap();
+            let mut reflector = build_http_reflector(cli_rt, url, "q".to_string(), false).unwrap();
             let scan = scan_origin(&mut reflector).unwrap();
             assert!(
                 scan.reflection_observed,
@@ -1872,8 +1911,7 @@ score = 5
 
             let cli_rt = Arc::new(tokio::runtime::Runtime::new().unwrap());
             let url = format!("http://{addr}/");
-            let mut reflector =
-                build_http_reflector(cli_rt, url, "q".to_string(), false).unwrap();
+            let mut reflector = build_http_reflector(cli_rt, url, "q".to_string(), false).unwrap();
             let scan = scan_origin(&mut reflector).unwrap();
             assert!(scan.reflection_observed);
             assert!(!scan.marker_collision);

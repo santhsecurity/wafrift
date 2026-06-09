@@ -266,10 +266,8 @@ mod tests {
     fn save_leaves_no_temp_file_on_success() {
         let mut t = TrustList::new();
         t.allow_hex("aabbcc", "carol");
-        let path = std::env::temp_dir().join(format!(
-            "wafrift-trust-atomic-{}.toml",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("wafrift-trust-atomic-{}.toml", std::process::id()));
         t.save(&path).expect("save");
         // The directory should contain the target but NO .tmp sibling.
         let parent = path.parent().unwrap_or(Path::new("."));
@@ -303,7 +301,11 @@ mod tests {
         t2.save(&path).expect("second save");
 
         let loaded = TrustList::load(&path).expect("load after overwrite");
-        assert_eq!(loaded.publishers().len(), 1, "must have exactly one publisher");
+        assert_eq!(
+            loaded.publishers().len(),
+            1,
+            "must have exactly one publisher"
+        );
         assert!(
             loaded.contains("222222"),
             "second version must be present after overwrite"
@@ -318,10 +320,8 @@ mod tests {
     /// `save` must create intermediate parent directories.
     #[test]
     fn save_creates_parent_dirs() {
-        let base = std::env::temp_dir().join(format!(
-            "wafrift-trust-mkdir-{}-deep",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("wafrift-trust-mkdir-{}-deep", std::process::id()));
         let path = base.join("nested").join("trusted-keys.toml");
         let mut t = TrustList::new();
         t.allow_hex("deadbeef", "test");
@@ -337,10 +337,8 @@ mod tests {
     /// silently returning an empty trust list (which would accept any bundle).
     #[test]
     fn load_corrupted_file_returns_error_not_empty_list() {
-        let path = std::env::temp_dir().join(format!(
-            "wafrift-trust-corrupt-{}.toml",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("wafrift-trust-corrupt-{}.toml", std::process::id()));
         std::fs::write(&path, b"this is not valid toml %@!").unwrap();
         let result = TrustList::load(&path);
         assert!(

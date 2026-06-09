@@ -21,9 +21,12 @@
 
 use wafrift_grammar::grammar::{cassandra, elastic, ldap, mongo, redis};
 
+/// `(label, mutate-fn)` pair for a NoSQL/LDAP mutator family.
+type MutateFamily = (&'static str, fn(&str) -> Vec<String>);
+
 /// (label, mutate-fn) for the structural invariants every NoSQL/LDAP mutator
 /// must satisfy.
-fn families() -> Vec<(&'static str, fn(&str) -> Vec<String>)> {
+fn families() -> Vec<MutateFamily> {
     vec![
         ("mongo", mongo::mutate as fn(&str) -> Vec<String>),
         ("elastic", elastic::mutate),
@@ -130,7 +133,9 @@ fn mongo_auth_payload_keeps_its_operator_mutation_not_just_canned_probes() {
     // still present, i.e. the canned set does not displace the real mutation.
     let variants = mongo::mutate(r#"{"username": {"$ne": null}}"#);
     assert!(
-        variants.iter().any(|v| v.contains("$nin") || v.contains("$not")),
+        variants
+            .iter()
+            .any(|v| v.contains("$nin") || v.contains("$not")),
         "mongo dropped the real $ne-operator mutation in favour of canned \
          probes only: {variants:?}"
     );

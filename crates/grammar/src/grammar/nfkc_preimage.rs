@@ -1,5 +1,5 @@
 //! NFKC-preimage homoglyph engine — the principled, exhaustive generalization
-//! of the four hand-rolled transforms in [`super::unicode_norm`].
+//! of the four hand-rolled transforms in `super::unicode_norm`.
 //!
 //! ## The WAF↔origin normalization gap
 //!
@@ -15,7 +15,7 @@
 //!   ＜ﬃ𝚌𝓻𝕚𝖕𝓽＞   ──NFKC──▶   <script>      (WAF saw none of the literal bytes)
 //! ```
 //!
-//! [`super::unicode_norm`] exploits this with **four** hand-picked styles
+//! `super::unicode_norm` exploits this with **four** hand-picked styles
 //! (fullwidth, math-bold, math-monospace, mixed). Unicode defines ~30 NFKC
 //! styles per Latin letter (bold, italic, bold-italic, script, bold-script,
 //! fraktur, bold-fraktur, double-struck, sans, sans-bold, sans-italic,
@@ -31,7 +31,7 @@
 //!
 //! Variant generation (style passes, minimal single-codepoint perturbation,
 //! alternating) and the `NFKC(v) == payload` soundness gate live in the shared
-//! [`super::homoglyph_gen`] — this module supplies only the inverse map and the
+//! `super::homoglyph_gen` — this module supplies only the inverse map and the
 //! NFKC origin transform.
 
 use std::collections::HashMap;
@@ -63,7 +63,9 @@ fn preimage_map() -> &'static HashMap<char, Vec<char>> {
     MAP.get_or_init(|| {
         let mut m: HashMap<char, Vec<char>> = HashMap::new();
         for cp in 0xA0u32..=SCAN_CEIL {
-            let Some(c) = char::from_u32(cp) else { continue };
+            let Some(c) = char::from_u32(cp) else {
+                continue;
+            };
             if c.is_ascii() {
                 continue;
             }
@@ -92,7 +94,9 @@ fn multi_preimage_map() -> &'static HashMap<String, Vec<char>> {
     MAP.get_or_init(|| {
         let mut m: HashMap<String, Vec<char>> = HashMap::new();
         for cp in 0xA0u32..=SCAN_CEIL {
-            let Some(c) = char::from_u32(cp) else { continue };
+            let Some(c) = char::from_u32(cp) else {
+                continue;
+            };
             if c.is_ascii() {
                 continue;
             }
@@ -154,7 +158,7 @@ pub fn variants(payload: &str, max: usize) -> Vec<String> {
 }
 
 /// How many distinct codepoints NFKC-fold to `c` (0 for non-foldable ASCII).
-/// Exposed for diagnostics / tests; the engine itself uses [`preimage_map`].
+/// Exposed for diagnostics / tests; the engine itself uses `preimage_map`.
 #[must_use]
 pub fn preimage_count(c: char) -> usize {
     preimage_map().get(&c).map_or(0, Vec::len)
@@ -183,7 +187,7 @@ pub fn normalize(s: &str) -> String {
 }
 
 /// Layered NFKC + percent-encoding variants — a normalization variant that is
-/// *also* `%XX`-encoded. See [`super::homoglyph_gen::generate_composed`]. Only
+/// *also* `%XX`-encoded. See `super::homoglyph_gen::generate_composed`. Only
 /// an origin that url-decodes THEN NFKC-normalizes reconstructs the attack.
 #[must_use]
 pub fn composed_variants(payload: &str, max: usize) -> Vec<String> {
@@ -274,7 +278,11 @@ mod tests {
             non_ascii == 1
         });
         let m = minimal.expect("expected a single-codepoint minimal-perturbation variant");
-        assert_eq!(normalize(m), attack, "minimal variant must still fold to the attack");
+        assert_eq!(
+            normalize(m),
+            attack,
+            "minimal variant must still fold to the attack"
+        );
         assert!(!m.contains("select"));
         assert!(m.chars().filter(|c| c.is_ascii()).count() >= attack.len() - 1);
     }
@@ -295,9 +303,12 @@ mod tests {
             let ascii_letters = v.chars().filter(char::is_ascii_alphabetic).count();
             non_ascii >= 2 && ascii_letters >= 1
         });
-        let m = alternating
-            .expect("engine must emit an alternating partial-fold (mixed) variant");
-        assert_eq!(normalize(m), attack, "alternating variant must still fold to the attack");
+        let m = alternating.expect("engine must emit an alternating partial-fold (mixed) variant");
+        assert_eq!(
+            normalize(m),
+            attack,
+            "alternating variant must still fold to the attack"
+        );
         assert_ne!(m.as_str(), attack);
     }
 
@@ -323,7 +334,10 @@ mod tests {
         assert!(!vs.is_empty());
         for v in &vs {
             // A WAF that NFKC-normalizes but does NOT url-decode sees inert %XX.
-            assert!(v.contains('%'), "composed form must carry a percent layer: {v:?}");
+            assert!(
+                v.contains('%'),
+                "composed form must carry a percent layer: {v:?}"
+            );
             assert_ne!(
                 normalize(v),
                 attack,

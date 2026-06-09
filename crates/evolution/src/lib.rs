@@ -53,45 +53,45 @@
 pub mod advisor;
 pub mod ast_mcts;
 pub mod body_padding;
-/// Minimum Bypass Set computer — greedy set-cover on bypassing payloads.
-/// Computes the smallest subset that collectively exercises every WAF rule
-/// class reachable by the full input. Used to produce forensically minimal
-/// payload sets for security reports.
-pub mod min_bypass_set;
 pub mod coverage_feedback;
 pub mod custom_rules;
 pub mod differential;
 pub mod dilution;
-pub mod evolution;
-pub mod intelligence;
-pub mod lineage;
-/// Persistent per-rule bypass corpus — accumulates rule-level bypass records
-/// across hunt rounds and surfaces them to the genome-registry submission gate.
-pub mod rule_corpus;
-/// Single-call adapter from oracle verdicts → rule_corpus writes.
-/// Hunt / bench / model-evade route every probe result through one
-/// fn so corpus-key changes propagate without per-consumer churn.
-pub mod hunt_corpus_bridge;
-/// HackerOne submission-dedup fingerprint. Stable hash of
-/// (rule_id, encoding-chain-shape, payload-skeleton) so the
-/// submission queue rejects bypasses already filed in the public
-/// CumulusFire archive.
-pub mod h1_dedup;
-/// Encoding-stack lattice search — enumerate compositions of N
-/// encoders to find chains that defeat a target WAF rule. The
-/// systematic-search engine the hunt loop uses to fill the
-/// (rule × class) cells of the corpus.
-pub mod encoding_lattice;
 /// Cross-region CF edge-POP coverage map. Tracks
 /// `(egress_label, target_host) → seen-POPs` so the hunt loop can
 /// bias rotation toward egresses that haven't yet hit a given POP,
 /// detect anycast pinning early, and report total POP coverage.
 pub mod edge_pop_coverage;
+/// Encoding-stack lattice search — enumerate compositions of N
+/// encoders to find chains that defeat a target WAF rule. The
+/// systematic-search engine the hunt loop uses to fill the
+/// (rule × class) cells of the corpus.
+pub mod encoding_lattice;
+pub mod evolution;
+/// HackerOne submission-dedup fingerprint. Stable hash of
+/// (rule_id, encoding-chain-shape, payload-skeleton) so the
+/// submission queue rejects bypasses already filed in the public
+/// CumulusFire archive.
+pub mod h1_dedup;
+/// Single-call adapter from oracle verdicts → rule_corpus writes.
+/// Hunt / bench / model-evade route every probe result through one
+/// fn so corpus-key changes propagate without per-consumer churn.
+pub mod hunt_corpus_bridge;
+pub mod intelligence;
+pub mod lineage;
+/// Minimum Bypass Set computer — greedy set-cover on bypassing payloads.
+/// Computes the smallest subset that collectively exercises every WAF rule
+/// class reachable by the full input. Used to produce forensically minimal
+/// payload sets for security reports.
+pub mod min_bypass_set;
 /// Per-rule L\* alphabet inference. Picks the bytes most
 /// discriminative for a given CF rule from its observed corpus
 /// (blocks vs bypasses) so the L\* learner explores tight,
 /// rule-scoped symbolic automata instead of a generic alphabet.
 pub mod rule_alphabet;
+/// Persistent per-rule bypass corpus — accumulates rule-level bypass records
+/// across hunt rounds and surfaces them to the genome-registry submission gate.
+pub mod rule_corpus;
 pub mod search;
 pub mod types;
 

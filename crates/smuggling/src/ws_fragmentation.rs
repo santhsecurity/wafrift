@@ -138,7 +138,11 @@ pub fn text_frame(payload: &[u8]) -> Vec<u8> {
 
 /// Build a PING control frame (FIN=1, opcode=0x9, payload ≤125 bytes).
 fn ping_frame(payload: &[u8]) -> Vec<u8> {
-    let p = if payload.len() > 125 { &payload[..125] } else { payload };
+    let p = if payload.len() > 125 {
+        &payload[..125]
+    } else {
+        payload
+    };
     build_frame(true, 0, opcode::PING, None, p, None)
 }
 
@@ -184,7 +188,11 @@ pub fn text_split_with_attack_bytes(
 
     for i in 0..n {
         let is_last = i == n - 1;
-        let take = if is_last { remaining.len() } else { chunk_len.min(remaining.len()) };
+        let take = if is_last {
+            remaining.len()
+        } else {
+            chunk_len.min(remaining.len())
+        };
         let chunk = &remaining[..take];
         remaining = &remaining[take..];
 
@@ -253,7 +261,11 @@ pub fn ping_interleaved_fragmented_text(
 
     for i in 0..n {
         let is_last = i == n - 1;
-        let take = if is_last { remaining.len() } else { chunk_len.min(remaining.len()) };
+        let take = if is_last {
+            remaining.len()
+        } else {
+            chunk_len.min(remaining.len())
+        };
         let chunk = &remaining[..take];
         remaining = &remaining[take..];
 
@@ -314,7 +326,14 @@ pub struct BogusLengthFrame {
 /// the connection; some stall waiting for more data — this is the DoS vector.
 #[must_use]
 pub fn bogus_payload_length_frame(actual_payload: &[u8], declared_len: u64) -> BogusLengthFrame {
-    let wire = build_frame(true, 0, opcode::TEXT, None, actual_payload, Some(declared_len));
+    let wire = build_frame(
+        true,
+        0,
+        opcode::TEXT,
+        None,
+        actual_payload,
+        Some(declared_len),
+    );
     let actual_len = actual_payload.len();
     BogusLengthFrame {
         wire_bytes: wire,
@@ -330,8 +349,18 @@ pub fn bogus_payload_length_frame(actual_payload: &[u8], declared_len: u64) -> B
 /// Parsers that truncate to `declared_len` bytes miss the tail; parsers that
 /// read a full frame boundary see the next frame header at an unexpected offset.
 #[must_use]
-pub fn undercount_payload_length_frame(actual_payload: &[u8], declared_len: u64) -> BogusLengthFrame {
-    let wire = build_frame(true, 0, opcode::TEXT, None, actual_payload, Some(declared_len));
+pub fn undercount_payload_length_frame(
+    actual_payload: &[u8],
+    declared_len: u64,
+) -> BogusLengthFrame {
+    let wire = build_frame(
+        true,
+        0,
+        opcode::TEXT,
+        None,
+        actual_payload,
+        Some(declared_len),
+    );
     BogusLengthFrame {
         wire_bytes: wire,
         declared_len,
@@ -392,7 +421,14 @@ pub fn rsv_bit_frames(payload: &[u8]) -> Vec<RsvBitFrame> {
 pub fn rsv_on_continuation_frame(first_chunk: &[u8], second_chunk: &[u8]) -> Vec<u8> {
     let mut wire = Vec::new();
     // TEXT frame, FIN=0, no RSV
-    wire.extend_from_slice(&build_frame(false, 0, opcode::TEXT, None, first_chunk, None));
+    wire.extend_from_slice(&build_frame(
+        false,
+        0,
+        opcode::TEXT,
+        None,
+        first_chunk,
+        None,
+    ));
     // CONTINUATION frame, FIN=1, RSV1 set (invalid per RFC)
     wire.extend_from_slice(&build_frame(
         true,
@@ -551,7 +587,14 @@ mod tests {
 
     #[test]
     fn build_frame_with_mask_sets_mask_bit() {
-        let f = build_frame(true, 0, opcode::TEXT, Some([0x01, 0x02, 0x03, 0x04]), b"x", None);
+        let f = build_frame(
+            true,
+            0,
+            opcode::TEXT,
+            Some([0x01, 0x02, 0x03, 0x04]),
+            b"x",
+            None,
+        );
         assert_ne!(f[1] & 0x80, 0, "MASK bit must be set");
         // After 2-byte header, masking key is 4 bytes at offset 2..6
         assert_eq!(&f[2..6], &[0x01, 0x02, 0x03, 0x04]);
@@ -645,9 +688,7 @@ mod tests {
             offset += hs + dl as usize;
         }
         let last_payload = &w[last_payload_start..last_payload_start + last_declared_len as usize];
-        let contains_attack = last_payload
-            .windows(attack.len())
-            .any(|w| w == attack);
+        let contains_attack = last_payload.windows(attack.len()).any(|w| w == attack);
         assert!(
             !contains_attack,
             "attack bytes must not appear in the final CONTINUATION frame"
@@ -669,7 +710,11 @@ mod tests {
     fn ping_interleaved_first_frame_is_text() {
         let r = ping_interleaved_fragmented_text(b"HELLO", b"p", 2);
         assert_eq!(r.wire_bytes[0] & 0x0F, 0x01, "first frame must be TEXT");
-        assert_eq!(r.wire_bytes[0] & 0x80, 0x00, "TEXT frame FIN=0 for multi-frame");
+        assert_eq!(
+            r.wire_bytes[0] & 0x80,
+            0x00,
+            "TEXT frame FIN=0 for multi-frame"
+        );
     }
 
     #[test]
@@ -739,7 +784,10 @@ mod tests {
         let frames = rsv_bit_frames(b"payload");
         for f in &frames {
             let rsv_in_wire = f.wire_bytes[0] & 0x70;
-            assert_eq!(rsv_in_wire, f.rsv_mask, "RSV bits in wire must match declared mask");
+            assert_eq!(
+                rsv_in_wire, f.rsv_mask,
+                "RSV bits in wire must match declared mask"
+            );
         }
     }
 
@@ -793,7 +841,11 @@ mod tests {
         assert_eq!(wire[0] & 0x80, 0x00);
         // Find frame 2 start: 2 + 7 = 9
         let f2 = 2 + 7;
-        assert_eq!(wire[f2] & 0x0F, 0x03, "middle frame must be reserved opcode 0x3");
+        assert_eq!(
+            wire[f2] & 0x0F,
+            0x03,
+            "middle frame must be reserved opcode 0x3"
+        );
         // Frame 3: CONTINUATION, FIN=1
         let f3 = f2 + 2 + 8; // 2-byte header + 8 bytes "reserved"
         assert_eq!(wire[f3] & 0x0F, 0x00, "last frame must be CONTINUATION");
@@ -826,11 +878,15 @@ mod tests {
             let (declared_len, header_size) = if len7 <= 125 {
                 (len7, 2usize)
             } else if len7 == 126 {
-                if offset + 4 > bytes.len() { break; }
+                if offset + 4 > bytes.len() {
+                    break;
+                }
                 let l = ((bytes[offset + 2] as u64) << 8) | bytes[offset + 3] as u64;
                 (l, 4)
             } else {
-                if offset + 10 > bytes.len() { break; }
+                if offset + 10 > bytes.len() {
+                    break;
+                }
                 let l = ((bytes[offset + 2] as u64) << 56)
                     | ((bytes[offset + 3] as u64) << 48)
                     | ((bytes[offset + 4] as u64) << 40)
@@ -842,7 +898,9 @@ mod tests {
                 (l, 10)
             };
             let mask_overhead = if mask_bit { 4 } else { 0 };
-            if op == target_opcode { count += 1; }
+            if op == target_opcode {
+                count += 1;
+            }
             offset += header_size + mask_overhead + declared_len as usize;
         }
         count

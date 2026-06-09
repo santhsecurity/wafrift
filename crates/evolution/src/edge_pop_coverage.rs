@@ -55,7 +55,7 @@ use std::path::Path;
 pub const DEFAULT_EXHAUSTION_THRESHOLD: usize = 8;
 
 /// Schema version. Bumped if the on-disk shape changes. Backwards
-/// compatibility is preserved via [`load_or_default`].
+/// compatibility is preserved via `load_or_default`.
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Per (egress_label, target_host) record of which POPs have been
@@ -77,7 +77,7 @@ pub struct EgressTargetPops {
 /// The composite key is encoded as `egress_label \u{1F} target_host`
 /// (ASCII unit separator). `BTreeMap` over the joined key gives stable
 /// iteration order for deterministic save/load. Operators read the
-/// map via [`pops_for`] / [`uncovered_pops`] without seeing the
+/// map via `pops_for` / `uncovered_pops` without seeing the
 /// internal key encoding.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EdgePopCoverage {
@@ -272,7 +272,7 @@ impl EdgePopCoverage {
 
     /// Load from disk; on missing file or corrupt JSON return
     /// `default()`. Same forgiveness contract as
-    /// [`rule_corpus::load_or_default`] — operator data is precious
+    /// `rule_corpus::load_or_default` — operator data is precious
     /// but a corrupt coverage map shouldn't crash a hunt round.
     #[must_use]
     pub fn load_or_default(path: &Path) -> Self {
@@ -466,8 +466,9 @@ mod tests {
         c.record("egress-a", "other.example", "LHR");
         c.record("egress-b", "target.example", "NRT");
         let labels = c.egress_labels();
-        let want: HashSet<String> =
-            ["egress-a".to_string(), "egress-b".to_string()].into_iter().collect();
+        let want: HashSet<String> = ["egress-a".to_string(), "egress-b".to_string()]
+            .into_iter()
+            .collect();
         let got: HashSet<String> = labels.into_iter().collect();
         assert_eq!(got, want);
     }
@@ -481,8 +482,7 @@ mod tests {
         c.record("egress-b", "target.example", "NRT");
         c.record_no_pop("egress-c", "target.example");
 
-        let tmp = std::env::temp_dir()
-            .join(format!("wafrift_pop_cov_{}.json", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("wafrift_pop_cov_{}.json", std::process::id()));
         c.save_atomic(&tmp).unwrap();
         let loaded = EdgePopCoverage::load_or_default(&tmp);
         assert_eq!(loaded.schema_version, c.schema_version);
@@ -512,8 +512,10 @@ mod tests {
 
     #[test]
     fn load_corrupt_file_returns_default() {
-        let tmp = std::env::temp_dir()
-            .join(format!("wafrift_pop_cov_corrupt_{}.json", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "wafrift_pop_cov_corrupt_{}.json",
+            std::process::id()
+        ));
         std::fs::write(&tmp, b"this is not json {{{ ").unwrap();
         let loaded = EdgePopCoverage::load_or_default(&tmp);
         assert!(loaded.entries.is_empty());
@@ -522,10 +524,7 @@ mod tests {
 
     #[test]
     fn save_creates_parent_directory() {
-        let dir = std::env::temp_dir().join(format!(
-            "wafrift_pop_cov_dir_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("wafrift_pop_cov_dir_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let nested = dir.join("nested").join("coverage.json");
         let mut c = EdgePopCoverage::new();

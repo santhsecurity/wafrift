@@ -725,7 +725,9 @@ mod tests {
 
         for i in 0u64..500 {
             // LCG: cheap deterministic noise in [40, 60] ms range.
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             let noise = ((seed >> 33) % 21) as f64; // 0..20
             let rt = 40.0 + noise;
 
@@ -819,7 +821,10 @@ mod tests {
                 break;
             }
         }
-        assert!(!fired, "tiny single-signal nudge must not fire with high threshold");
+        assert!(
+            !fired,
+            "tiny single-signal nudge must not fire with high threshold"
+        );
     }
 
     // ── 7. Window-size boundary: detector still works at minimum window ───
@@ -828,7 +833,10 @@ mod tests {
     fn minimum_window_size_respected() {
         // window_size=0 is clamped to 8 internally.
         let mut det = DriftDetector::new(0, 2.0);
-        assert_eq!(det.window_size, 8, "window_size must be clamped to minimum 8");
+        assert_eq!(
+            det.window_size, 8,
+            "window_size must be clamped to minimum 8"
+        );
 
         // Should still detect a gross step change.
         feed_stationary(&mut det, 20, 20.0, false, 0x1234);
@@ -839,7 +847,10 @@ mod tests {
                 break;
             }
         }
-        assert!(fired, "detector with minimum window must still detect step changes");
+        assert!(
+            fired,
+            "detector with minimum window must still detect step changes"
+        );
     }
 
     // ── 8. Threshold sensitivity: lower threshold = faster detection ──────
@@ -912,7 +923,10 @@ mod tests {
                 break;
             }
         }
-        assert!(body_entropy_fired, "body entropy signal must increase on hash diversity");
+        assert!(
+            body_entropy_fired,
+            "body entropy signal must increase on hash diversity"
+        );
     }
 
     // ── 11. has_baseline returns false before window/2 probes ────────────
@@ -928,7 +942,10 @@ mod tests {
         assert!(!det.has_baseline(), "baseline not ready at 19/40 probes");
 
         det.observe(pass_obs(50.0)); // 20th probe = window_size/2
-        assert!(det.has_baseline(), "baseline must be ready at window_size/2 probes");
+        assert!(
+            det.has_baseline(),
+            "baseline must be ready at window_size/2 probes"
+        );
     }
 
     // ── 12. probe_count saturates at u64::MAX ────────────────────────────
@@ -939,7 +956,11 @@ mod tests {
         // Inject a near-max count directly (can't loop 2^64 times).
         det.probe_count = u64::MAX - 1;
         det.observe(pass_obs(50.0));
-        assert_eq!(det.probe_count, u64::MAX, "probe_count must saturate at u64::MAX");
+        assert_eq!(
+            det.probe_count,
+            u64::MAX,
+            "probe_count must saturate at u64::MAX"
+        );
         det.observe(pass_obs(50.0));
         assert_eq!(
             det.probe_count,
@@ -957,7 +978,10 @@ mod tests {
         let snap = det.signal_snapshot();
         assert_eq!(snap.len(), 4);
         for v in &snap {
-            assert!(v.is_finite(), "all signal values must be finite at zero state");
+            assert!(
+                v.is_finite(),
+                "all signal values must be finite at zero state"
+            );
         }
 
         // After observations the snapshot must update.
@@ -978,8 +1002,14 @@ mod tests {
     #[test]
     fn bypass_monitor_empty_window_returns_none() {
         let monitor = BypassRateMonitor::new(50, 0.05, 0.5);
-        assert!(monitor.current_rate().is_none(), "no rate before window fills");
-        assert!(monitor.baseline_rate().is_none(), "no baseline before window fills");
+        assert!(
+            monitor.current_rate().is_none(),
+            "no rate before window fills"
+        );
+        assert!(
+            monitor.baseline_rate().is_none(),
+            "no baseline before window fills"
+        );
     }
 
     // ── BRM-2. Monotone good rate (30% bypass, steady) → NO alarm ─────────
@@ -1016,7 +1046,10 @@ mod tests {
                 break;
             }
         }
-        assert!(fired, "zero bypass rate after 50% baseline must trigger alarm");
+        assert!(
+            fired,
+            "zero bypass rate after 50% baseline must trigger alarm"
+        );
     }
 
     // ── BRM-4. Bimodal pattern: alarm at the break ─────────────────────────
@@ -1205,7 +1238,9 @@ mod tests {
         for i in 0..10usize {
             monitor.observe(i < 7);
         }
-        let rate = monitor.current_rate().expect("rate must be available after window fills");
+        let rate = monitor
+            .current_rate()
+            .expect("rate must be available after window fills");
         assert!(
             (rate - 0.7).abs() < 0.01,
             "current_rate must be ~70% but got {rate:.3}"

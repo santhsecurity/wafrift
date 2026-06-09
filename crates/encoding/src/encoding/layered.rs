@@ -1,6 +1,6 @@
 //! Multi-strategy encoding chains and aggressiveness scoring.
 
-use super::strategy::{Strategy, all_strategies, encode, MAX_PAYLOAD_SIZE};
+use super::strategy::{MAX_PAYLOAD_SIZE, Strategy, all_strategies, encode};
 use crate::error::EncodeError;
 
 /// Maximum accumulated output size for layered encoding.

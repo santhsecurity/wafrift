@@ -1145,7 +1145,7 @@ pub(crate) async fn run_scan(
         {
             primary_pf.candidate.source = "cli_primary";
             surface_alternatives.push(primary_pf);
-            surface_alternatives.sort_by(|a, b| b.score.cmp(&a.score));
+            surface_alternatives.sort_by_key(|p| std::cmp::Reverse(p.score));
         }
         let primary_pf = surface_alternatives
             .iter()
@@ -1157,26 +1157,24 @@ pub(crate) async fn run_scan(
                 .filter(|p| p.candidate.source != "cli_primary" && p.score > primary_score)
                 .max_by_key(|p| p.score)
         });
-        if let Some(best) = pick {
-            if best.candidate.url != effective_url || best.candidate.param != scan_param {
-                if scan_text {
-                    eprintln!(
-                        "  {} → {} ?{}={} ({}, score={})",
-                        "Auto-escalate".yellow().bold(),
-                        best.candidate.url,
-                        best.candidate.param,
-                        "…",
-                        best.report.level.as_str(),
-                        best.score
-                    );
-                }
-                escalated_to_json = Some(surface_probe::to_json_preflight(best));
-                effective_url = best.candidate.url.trim_end_matches('/').to_string();
-                scan_param = best.candidate.param.clone();
-                scan_delivery = injection_delivery::InjectionDelivery::from_surface_method(
-                    best.candidate.method,
+        if let Some(best) = pick
+            && (best.candidate.url != effective_url || best.candidate.param != scan_param)
+        {
+            if scan_text {
+                eprintln!(
+                    "  {} → {} ?{}=… ({}, score={})",
+                    "Auto-escalate".yellow().bold(),
+                    best.candidate.url,
+                    best.candidate.param,
+                    best.report.level.as_str(),
+                    best.score
                 );
             }
+            escalated_to_json = Some(surface_probe::to_json_preflight(best));
+            effective_url = best.candidate.url.trim_end_matches('/').to_string();
+            scan_param = best.candidate.param.clone();
+            scan_delivery =
+                injection_delivery::InjectionDelivery::from_surface_method(best.candidate.method);
         }
     }
 

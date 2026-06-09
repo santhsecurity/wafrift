@@ -180,9 +180,9 @@ mod tests {
 
     #[test]
     fn collect_connection_headers_from_hyper_single_value() {
+        use hyper::HeaderMap;
         use hyper::header::CONNECTION;
         use hyper::header::HeaderValue;
-        use hyper::HeaderMap;
         let mut map = HeaderMap::new();
         map.insert(CONNECTION, HeaderValue::from_static("keep-alive, X-Hop"));
         let conn = collect_connection_header_names_hyper(&map);

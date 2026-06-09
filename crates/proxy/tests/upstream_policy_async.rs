@@ -58,9 +58,12 @@ async fn forward_loopback_v4_blocked() {
 #[tokio::test]
 async fn forward_imds_169_254_169_254_blocked() {
     // AWS / GCP / Azure IMDS — the canonical SSRF target.
-    let err = assert_forward_url_allowed("http://169.254.169.254/latest/meta-data/", &default_policy())
-        .await
-        .expect_err("IMDS must be rejected");
+    let err = assert_forward_url_allowed(
+        "http://169.254.169.254/latest/meta-data/",
+        &default_policy(),
+    )
+    .await
+    .expect_err("IMDS must be rejected");
     assert!(
         err.contains("169.254.169.254"),
         "error must name the IMDS address, got: {err}"
@@ -393,7 +396,10 @@ async fn connect_public_literal_ip_allowed() {
         .await
         .expect("public literal IP must be allowed");
     assert_eq!(addrs.len(), 1);
-    assert_eq!(addrs[0], SocketAddr::from(("1.1.1.1".parse::<IpAddr>().expect("parse"), 443)));
+    assert_eq!(
+        addrs[0],
+        SocketAddr::from(("1.1.1.1".parse::<IpAddr>().expect("parse"), 443))
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

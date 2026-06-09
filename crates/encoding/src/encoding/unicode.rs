@@ -290,7 +290,7 @@ pub fn math_bold_encode(payload: &str) -> String {
 /// CONSTANT in an earlier Unicode revision). We substitute U+210E so
 /// the round-trip stays NFKC-correct.
 ///
-/// Reference: https://ibrahimsql.com/posts/waf-bypass-unicode
+/// Reference: <https://ibrahimsql.com/posts/waf-bypass-unicode>
 #[must_use]
 pub fn math_italic_encode(payload: &str) -> String {
     let mut out = String::with_capacity(payload.len() * 4);
@@ -980,7 +980,8 @@ pub fn zero_width_inject(payload: &str, invisible_char: char) -> String {
 
 /// Recommended cycle of invisible characters for zero-width injection.
 /// `[U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM, U+034F CGJ]`.
-pub const ZERO_WIDTH_DEFAULTS: [char; 5] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}', '\u{034F}'];
+pub const ZERO_WIDTH_DEFAULTS: [char; 5] =
+    ['\u{200B}', '\u{200C}', '\u{200D}', '\u{FEFF}', '\u{034F}'];
 
 /// Inject a combining diacritical mark after each letter of `payload`.
 ///
@@ -1531,10 +1532,7 @@ mod tests {
         // `&#x0000000000000041;` — 14 leading zeros. Pin the exact
         // byte sequence so a future change to the cap is visible
         // (and intentional).
-        assert_eq!(
-            html_entity_zero_pad("A", 100, true),
-            "&#x0000000000000041;"
-        );
+        assert_eq!(html_entity_zero_pad("A", 100, true), "&#x0000000000000041;");
     }
 
     #[test]
@@ -1748,7 +1746,11 @@ mod tests {
         assert!(encoded.contains('\u{2112}'));
         // S has no letterlike-block equivalent; falls back to circled
         // Latin (U+24CE).
-        assert!(encoded.chars().any(|c| c as u32 >= 0x24B6 && c as u32 <= 0x24E9));
+        assert!(
+            encoded
+                .chars()
+                .any(|c| c as u32 >= 0x24B6 && c as u32 <= 0x24E9)
+        );
     }
 
     #[test]
@@ -1783,7 +1785,11 @@ mod tests {
         let letter = letterlike_encode(s);
         let outputs = [bold, italic, script, fraktur, dstruck, letter];
         let set: std::collections::BTreeSet<&String> = outputs.iter().collect();
-        assert_eq!(set.len(), outputs.len(), "two encoders produced identical output");
+        assert_eq!(
+            set.len(),
+            outputs.len(),
+            "two encoders produced identical output"
+        );
     }
 
     // ── zero-width + combining-mark injection tests ────────────────────
@@ -1883,7 +1889,10 @@ mod tests {
 
     #[test]
     fn overlong_utf8_2byte_dot_slash_replaces() {
-        assert_eq!(overlong_utf8_path("../etc/passwd", 2), "%c0%ae%c0%ae%c0%afetc%c0%afpasswd");
+        assert_eq!(
+            overlong_utf8_path("../etc/passwd", 2),
+            "%c0%ae%c0%ae%c0%afetc%c0%afpasswd"
+        );
     }
 
     #[test]
@@ -1907,7 +1916,10 @@ mod tests {
 
     #[test]
     fn overlong_utf8_handles_backslash() {
-        assert_eq!(overlong_utf8_path("..\\windows", 2), "%c0%ae%c0%ae%c0%5cwindows");
+        assert_eq!(
+            overlong_utf8_path("..\\windows", 2),
+            "%c0%ae%c0%ae%c0%5cwindows"
+        );
     }
 
     // ── bidi_inject tests ──────────────────────────────────────────────
@@ -2362,8 +2374,8 @@ mod tests {
         assert!(out.contains("admin"));
         assert!(out.contains("secret"));
         assert!(out.contains("txt"));
-        assert!(!out.contains('.'));  // dots replaced
-        assert!(!out.contains('/'));  // slashes replaced
+        assert!(!out.contains('.')); // dots replaced
+        assert!(!out.contains('/')); // slashes replaced
     }
 
     #[test]

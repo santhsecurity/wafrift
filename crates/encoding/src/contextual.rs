@@ -1,5 +1,5 @@
-use crate::encoding::strategy::MAX_PAYLOAD_SIZE;
 use crate::encoding::Strategy;
+use crate::encoding::strategy::MAX_PAYLOAD_SIZE;
 use wafrift_types::injection_context::{ContextualEncodeError, InjectionContext};
 
 pub fn encode_in_context(
@@ -312,9 +312,7 @@ pub fn validate_in_context(
                 }
                 if c == '&' {
                     let lookahead: String = chars.clone().take(6).collect();
-                    if let Some(matched) =
-                        ENTITIES.iter().find(|e| lookahead.starts_with(*e))
-                    {
+                    if let Some(matched) = ENTITIES.iter().find(|e| lookahead.starts_with(*e)) {
                         // Consume exactly the entity body (name + `;`). The
                         // rest of the payload stays in `chars` for the next
                         // iteration so every other byte is still validated.
@@ -623,11 +621,8 @@ mod tests {
         // The fix must not over-correct: a payload of nothing-but-
         // entities still passes.
         assert!(
-            validate_in_context(
-                "&amp;&lt;&gt;&quot;&apos;",
-                InjectionContext::XmlAttribute,
-            )
-            .is_ok(),
+            validate_in_context("&amp;&lt;&gt;&quot;&apos;", InjectionContext::XmlAttribute,)
+                .is_ok(),
             "chain of well-formed entities must pass validation"
         );
     }
@@ -637,8 +632,7 @@ mod tests {
         // escape_for_context must produce &apos; for `'` so that the escaped
         // output then passes validate_in_context.
         let escaped =
-            escape_for_context("don't break my attribute", InjectionContext::XmlAttribute)
-                .unwrap();
+            escape_for_context("don't break my attribute", InjectionContext::XmlAttribute).unwrap();
         assert!(
             escaped.contains("&apos;"),
             "expected &apos; in escaped output, got: {escaped}"
@@ -851,10 +845,9 @@ mod tests {
         for payload in &payloads {
             let escaped = escape_for_context(payload, InjectionContext::XmlAttribute)
                 .unwrap_or_else(|e| panic!("escape_for_context failed for {payload:?}: {e}"));
-            validate_in_context(&escaped, InjectionContext::XmlAttribute)
-                .unwrap_or_else(|e| panic!(
-                    "round-trip validation failed for {payload:?}: {e}\n  escaped: {escaped}"
-                ));
+            validate_in_context(&escaped, InjectionContext::XmlAttribute).unwrap_or_else(|e| {
+                panic!("round-trip validation failed for {payload:?}: {e}\n  escaped: {escaped}")
+            });
         }
     }
 
@@ -864,13 +857,39 @@ mod tests {
         // pure deterministic function: applying it twice always produces the
         // same result as applying it twice on a second call.
         let payload = "' OR 1=1--";
-        let run1_once = encode_in_context(payload.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
-        let run1_twice = encode_in_context(run1_once.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
-        let run2_once = encode_in_context(payload.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
-        let run2_twice = encode_in_context(run2_once.as_bytes(), Strategy::UrlEncode, InjectionContext::UrlQuery).unwrap();
-        assert_eq!(run1_twice, run2_twice, "URL-encode applied twice must be deterministic across calls");
+        let run1_once = encode_in_context(
+            payload.as_bytes(),
+            Strategy::UrlEncode,
+            InjectionContext::UrlQuery,
+        )
+        .unwrap();
+        let run1_twice = encode_in_context(
+            run1_once.as_bytes(),
+            Strategy::UrlEncode,
+            InjectionContext::UrlQuery,
+        )
+        .unwrap();
+        let run2_once = encode_in_context(
+            payload.as_bytes(),
+            Strategy::UrlEncode,
+            InjectionContext::UrlQuery,
+        )
+        .unwrap();
+        let run2_twice = encode_in_context(
+            run2_once.as_bytes(),
+            Strategy::UrlEncode,
+            InjectionContext::UrlQuery,
+        )
+        .unwrap();
+        assert_eq!(
+            run1_twice, run2_twice,
+            "URL-encode applied twice must be deterministic across calls"
+        );
         // double-encoded result must differ from single-encoded (% is re-encoded to %25)
-        assert_ne!(run1_once, run1_twice, "URL-encode applied twice must produce a different (double-encoded) result");
+        assert_ne!(
+            run1_once, run1_twice,
+            "URL-encode applied twice must produce a different (double-encoded) result"
+        );
     }
 
     #[test]
@@ -879,7 +898,10 @@ mod tests {
         let original = "' OR 1=1--";
         let encoded = crate::encoding::encode(original.as_bytes(), Strategy::UrlEncode).unwrap();
         let decoded = urlencoding::decode(&encoded).unwrap();
-        assert_eq!(decoded, original, "URL encode → decode round-trip must equal original");
+        assert_eq!(
+            decoded, original,
+            "URL encode → decode round-trip must equal original"
+        );
     }
 
     #[test]

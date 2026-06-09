@@ -19,8 +19,10 @@ mod tests {
                 .count(),
             1
         );
-        assert!(headers
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case("accept")));
+        assert!(
+            headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("accept"))
+        );
     }
 }

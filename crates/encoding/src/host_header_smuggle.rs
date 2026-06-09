@@ -45,7 +45,7 @@ pub enum HostSmuggleTechnique {
     /// for backward compat (Windows hostnames, internal services).
     HostWithUnderscoreSubdomain,
     /// `Host: <target with fullwidth dot>` — U+FF0E replaces ASCII
-    /// `.`. Backends NFKC-normalize and resolve to <target>; WAFs
+    /// `.`. Backends NFKC-normalize and resolve to `<target>`; WAFs
     /// see a different UTF-8 byte sequence.
     HostWithFullwidthDot,
     /// `Host: <target>\t<wafrift>` — TAB byte inside the value.
@@ -86,15 +86,11 @@ impl HostSmuggleTechnique {
             Self::HostWithTrailingDot => {
                 "Trailing-dot FQDN — DNS-equivalent, byte-different differential"
             }
-            Self::HostWithCaseMix => {
-                "Mixed-case host — case-sensitivity differential"
-            }
+            Self::HostWithCaseMix => "Mixed-case host — case-sensitivity differential",
             Self::HostWithUnderscoreSubdomain => {
                 "Underscore in subdomain — RFC 3986 forbidden, accepted by lenient parsers"
             }
-            Self::HostWithFullwidthDot => {
-                "U+FF0E fullwidth dot — NFKC normalization differential"
-            }
+            Self::HostWithFullwidthDot => "U+FF0E fullwidth dot — NFKC normalization differential",
             Self::HostWithEmbeddedTab => {
                 "Embedded TAB in host value — strip-vs-reject differential"
             }
@@ -105,11 +101,7 @@ impl HostSmuggleTechnique {
 /// Benign decoy hostnames used for the duplicate-header variant's
 /// first slot. Operators reading the JSON can swap if the target
 /// uses one of these.
-const BENIGN_HOST_POOL: &[&str] = &[
-    "www.example.com",
-    "cdn.example.org",
-    "static.example.net",
-];
+const BENIGN_HOST_POOL: &[&str] = &["www.example.com", "cdn.example.org", "static.example.net"];
 
 /// One Host-header parser-differential smuggle probe.
 #[derive(Debug, Clone)]
@@ -256,10 +248,7 @@ mod tests {
 
     #[test]
     fn duplicate_header_variant_emits_two_pairs() {
-        let p = HostSmuggleProbe::new(
-            HostSmuggleTechnique::DuplicateHostHeaderLastWins,
-            TARGET,
-        );
+        let p = HostSmuggleProbe::new(HostSmuggleTechnique::DuplicateHostHeaderLastWins, TARGET);
         match p.artifact() {
             SmuggleArtifact::Headers(hs) => {
                 assert_eq!(hs.len(), 2);
@@ -275,11 +264,7 @@ mod tests {
     #[test]
     fn default_port_variant_appends_443() {
         let p = HostSmuggleProbe::new(HostSmuggleTechnique::HostWithDefaultPort, TARGET);
-        assert!(
-            p.headers[0].1.ends_with(":443"),
-            "got {:?}",
-            p.headers[0].1
-        );
+        assert!(p.headers[0].1.ends_with(":443"), "got {:?}", p.headers[0].1);
     }
 
     #[test]
@@ -306,10 +291,7 @@ mod tests {
 
     #[test]
     fn underscore_subdomain_variant_contains_underscore() {
-        let p = HostSmuggleProbe::new(
-            HostSmuggleTechnique::HostWithUnderscoreSubdomain,
-            TARGET,
-        );
+        let p = HostSmuggleProbe::new(HostSmuggleTechnique::HostWithUnderscoreSubdomain, TARGET);
         assert!(p.headers[0].1.contains('_'));
     }
 
@@ -333,8 +315,7 @@ mod tests {
     #[test]
     fn canaries_are_unique_per_probe() {
         let probes = all_variants(TARGET);
-        let tokens: HashSet<String> =
-            probes.iter().map(|p| p.canary().token.clone()).collect();
+        let tokens: HashSet<String> = probes.iter().map(|p| p.canary().token.clone()).collect();
         assert_eq!(tokens.len(), probes.len());
     }
 

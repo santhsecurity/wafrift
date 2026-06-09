@@ -66,10 +66,7 @@ impl WafClass {
     pub fn is_ml_backed(self) -> bool {
         matches!(
             self,
-            Self::AwsBotControl
-                | Self::CloudflareBotMgmt
-                | Self::AkamaiBotManager
-                | Self::Datadome
+            Self::AwsBotControl | Self::CloudflareBotMgmt | Self::AkamaiBotManager | Self::Datadome
         )
     }
 
@@ -181,7 +178,10 @@ mod tests {
 
     #[test]
     fn from_waf_name_unknown() {
-        assert_eq!(WafClass::from_waf_name("SomeUnknownThing"), WafClass::Unknown);
+        assert_eq!(
+            WafClass::from_waf_name("SomeUnknownThing"),
+            WafClass::Unknown
+        );
     }
 
     #[test]

@@ -96,10 +96,7 @@ pub fn pipelined_h1_coalesce(
 /// any stream id is even (per RFC 7540 §5.1.1 client streams must be
 /// odd).
 #[must_use]
-pub fn h2_last_byte_sync_frames(
-    stream_ids: &[u32],
-    final_bytes: &[u8],
-) -> Option<Vec<u8>> {
+pub fn h2_last_byte_sync_frames(stream_ids: &[u32], final_bytes: &[u8]) -> Option<Vec<u8>> {
     if stream_ids.len() != final_bytes.len() {
         return None;
     }

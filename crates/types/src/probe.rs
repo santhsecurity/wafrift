@@ -169,8 +169,7 @@ impl ComposedArtifact {
             // mismatch the body shape and break parsing.
             req.headers
                 .retain(|(n, _)| !n.eq_ignore_ascii_case("content-type"));
-            req.headers
-                .push(("Content-Type".to_string(), ct.clone()));
+            req.headers.push(("Content-Type".to_string(), ct.clone()));
             req.body = Some(body.clone());
         }
         self.frames.clone()
@@ -220,9 +219,7 @@ pub fn compose_artifacts(probes: &[&dyn SmuggleProbe]) -> ComposedArtifact {
 /// constituent family is empty (the cartesian product of an empty
 /// set is empty).
 #[must_use]
-pub fn compose_n_product(
-    families: &[&[Box<dyn SmuggleProbe>]],
-) -> Vec<ComposedArtifact> {
+pub fn compose_n_product(families: &[&[Box<dyn SmuggleProbe>]]) -> Vec<ComposedArtifact> {
     if families.is_empty() || families.iter().any(|f| f.is_empty()) {
         return Vec::new();
     }
@@ -383,7 +380,10 @@ mod tests {
         let probes: Vec<&dyn SmuggleProbe> = vec![&a, &b];
         let composed = compose_artifacts(&probes);
         assert_eq!(composed.headers.len(), 2);
-        assert_eq!(composed.headers[0], ("Cookie".into(), "session=evil".into()));
+        assert_eq!(
+            composed.headers[0],
+            ("Cookie".into(), "session=evil".into())
+        );
         assert_eq!(
             composed.headers[1],
             ("Authorization".into(), "Bearer T".into())
@@ -466,7 +466,10 @@ mod tests {
         req.add_header("Accept", "*/*");
         let leftover_frames = composed.apply_to_request(&mut req);
 
-        assert!(leftover_frames.is_empty(), "header-only compose returns no frames");
+        assert!(
+            leftover_frames.is_empty(),
+            "header-only compose returns no frames"
+        );
         // Original Accept + two composed headers = 3 total.
         assert_eq!(req.headers.len(), 3);
         assert!(req.headers.iter().any(|(n, v)| n == "Accept" && v == "*/*"));
@@ -722,8 +725,7 @@ mod tests {
         let h1 = header_probe("Cookie", "x", "cookie.a");
         let h2 = header_probe("Cookie", "y", "cookie.b");
         let h3 = header_probe("Cookie", "z", "cookie.c");
-        let one: Vec<Box<dyn SmuggleProbe>> =
-            vec![Box::new(h1), Box::new(h2), Box::new(h3)];
+        let one: Vec<Box<dyn SmuggleProbe>> = vec![Box::new(h1), Box::new(h2), Box::new(h3)];
         let out = compose_n_product(&[&one]);
         assert_eq!(out.len(), 3);
         for c in &out {
@@ -759,8 +761,7 @@ mod tests {
 
     #[test]
     fn compose_cross_product_empty_inputs_yield_empty_output() {
-        let empty: Vec<Box<dyn SmuggleProbe>> =
-            vec![Box::new(header_probe("X", "1", "t.x"))];
+        let empty: Vec<Box<dyn SmuggleProbe>> = vec![Box::new(header_probe("X", "1", "t.x"))];
         let none: Vec<Box<dyn SmuggleProbe>> = vec![];
         assert!(compose_cross_product(&none, &empty).is_empty());
         assert!(compose_cross_product(&empty, &none).is_empty());

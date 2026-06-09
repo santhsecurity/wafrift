@@ -68,21 +68,9 @@ pub fn mutate(payload: &str) -> Vec<String> {
     // ── Whitespace reflow variants ─────────────────────────────────
     // Apache mod_include tokenises on any run of whitespace — extra
     // spaces, tabs, and newlines around tokens parse identically.
-    push(
-        format!("<!--#  {inner}  -->"),
-        &mut out,
-        &mut seen,
-    );
-    push(
-        format!("<!--#\t{inner}\t-->"),
-        &mut out,
-        &mut seen,
-    );
-    push(
-        format!("<!--#\n{inner}\n-->"),
-        &mut out,
-        &mut seen,
-    );
+    push(format!("<!--#  {inner}  -->"), &mut out, &mut seen);
+    push(format!("<!--#\t{inner}\t-->"), &mut out, &mut seen);
+    push(format!("<!--#\n{inner}\n-->"), &mut out, &mut seen);
 
     // ── Quote-style rotation (single ↔ double) ─────────────────────
     if inner.contains('"') {
@@ -122,11 +110,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
     if let Some((head, tail)) = inner.split_once(' ') {
         let upper = head.to_ascii_uppercase();
         if upper != head {
-            push(
-                format!("<!--#{upper} {tail} -->"),
-                &mut out,
-                &mut seen,
-            );
+            push(format!("<!--#{upper} {tail} -->"), &mut out, &mut seen);
         }
         // Mixed case: capitalised first letter only.
         let mut mixed = head.to_ascii_lowercase();
@@ -134,11 +118,7 @@ pub fn mutate(payload: &str) -> Vec<String> {
             first.make_ascii_uppercase();
         }
         if mixed != head {
-            push(
-                format!("<!--#{mixed} {tail} -->"),
-                &mut out,
-                &mut seen,
-            );
+            push(format!("<!--#{mixed} {tail} -->"), &mut out, &mut seen);
         }
     }
 
@@ -264,14 +244,8 @@ mod tests {
         let muts = mutate(r#"<!--#exec cmd="ls" -->"#);
         for m in &muts {
             let t = m.trim();
-            assert!(
-                t.starts_with("<!--#"),
-                "mutation lost opener: {m:?}"
-            );
-            assert!(
-                t.ends_with(">"),
-                "mutation lost close marker: {m:?}"
-            );
+            assert!(t.starts_with("<!--#"), "mutation lost opener: {m:?}");
+            assert!(t.ends_with(">"), "mutation lost close marker: {m:?}");
         }
     }
 
@@ -325,11 +299,7 @@ mod tests {
         let p = r#"<!--#exec cmd="ls" -->"#;
         let a = mutate(p);
         let b = mutate(p);
-        assert_eq!(
-            a.len(),
-            b.len(),
-            "mutation count must be stable"
-        );
+        assert_eq!(a.len(), b.len(), "mutation count must be stable");
         assert_eq!(a, b, "mutation order + content must be stable");
     }
 
@@ -343,7 +313,10 @@ mod tests {
         for m in &muts {
             // None of the printenv variants should introduce a quote
             // (we only rotate existing quotes, never inject new ones).
-            let original_quotes = "<!--#printenv -->".chars().filter(|c| *c == '"' || *c == '\'').count();
+            let original_quotes = "<!--#printenv -->"
+                .chars()
+                .filter(|c| *c == '"' || *c == '\'')
+                .count();
             let mut_quotes = m.chars().filter(|c| *c == '"' || *c == '\'').count();
             assert!(
                 mut_quotes >= original_quotes,

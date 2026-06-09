@@ -131,11 +131,7 @@ impl RuleGroup {
             groups.push(Self::RemoteCodeExecution);
         }
         // Scanner probe signals
-        if t.contains("nmap")
-            || t.contains("nikto")
-            || t.contains("sqlmap")
-            || t.contains("burp")
-        {
+        if t.contains("nmap") || t.contains("nikto") || t.contains("sqlmap") || t.contains("burp") {
             groups.push(Self::ScannerProbe);
         }
         if groups.is_empty() {
@@ -194,7 +190,12 @@ impl SubScoreEstimator {
         for &g in RuleGroup::ALL {
             coeffs.insert(g, initial_coeff);
         }
-        Self { coeffs, alpha: alpha.clamp(0.001, 0.999), n_obs: 0, baseline: 0.0 }
+        Self {
+            coeffs,
+            alpha: alpha.clamp(0.001, 0.999),
+            n_obs: 0,
+            baseline: 0.0,
+        }
     }
 
     /// Incorporate a new oracle observation.
@@ -223,7 +224,10 @@ impl SubScoreEstimator {
     /// Predict the total score for a set of triggered groups.
     #[must_use]
     pub fn predict(&self, groups: &[RuleGroup]) -> f64 {
-        let group_score: f64 = groups.iter().map(|g| self.coeffs.get(g).copied().unwrap_or(0.0)).sum();
+        let group_score: f64 = groups
+            .iter()
+            .map(|g| self.coeffs.get(g).copied().unwrap_or(0.0))
+            .sum();
         self.baseline + group_score
     }
 
@@ -317,7 +321,10 @@ pub struct DilutionPlanner {
 impl DilutionPlanner {
     #[must_use]
     pub fn new(estimator: SubScoreEstimator, threshold: f64) -> Self {
-        Self { estimator, threshold }
+        Self {
+            estimator,
+            threshold,
+        }
     }
 
     /// Plan strategies for a payload that currently triggers `active_groups`.
@@ -341,8 +348,8 @@ impl DilutionPlanner {
                 .collect();
 
             // Predicted score = baseline + attack_group_contribution.
-            let predicted_total = self.estimator.baseline
-                + self.estimator.group_contribution(attack_group);
+            let predicted_total =
+                self.estimator.baseline + self.estimator.group_contribution(attack_group);
 
             let mutations = self.build_suppression_mutations(payload, &suppress, attack_group);
 
@@ -407,9 +414,7 @@ impl DilutionPlanner {
                     let predicted = self.estimator.predict(&[attack_group]);
                     mutations.push(DilutionMutation {
                         payload: suppressed,
-                        description: format!(
-                            "LFI tokens obfuscated (suppress {})", group.name()
-                        ),
+                        description: format!("LFI tokens obfuscated (suppress {})", group.name()),
                         predicted_score: predicted,
                     });
                 }
@@ -484,11 +489,11 @@ fn suppress_sqli_tokens(payload: &str) -> String {
 /// Obfuscate XSS tokens to suppress the XSS rule group signal.
 fn suppress_xss_tokens(payload: &str) -> String {
     let replacements: &[(&str, &str)] = &[
-        ("<script>", "<scr\x00ipt>"),     // null byte split (for raw contexts)
+        ("<script>", "<scr\x00ipt>"), // null byte split (for raw contexts)
         ("</script>", "</scr\x00ipt>"),
-        ("onerror=", "onerror\t="),         // tab before equals
+        ("onerror=", "onerror\t="), // tab before equals
         ("onload=", "on\x00load="),
-        ("alert(", "\u{FF41}lert("),        // fullwidth 'a' (unicode-norm bypass)
+        ("alert(", "\u{FF41}lert("), // fullwidth 'a' (unicode-norm bypass)
         ("javascript:", "java\x09script:"), // tab in scheme
         ("<svg", "<sv\x00g"),
         ("<img", "<i\x00mg"),
@@ -524,7 +529,9 @@ fn suppress_rce_tokens(payload: &str) -> String {
 
 /// Strip scanner/bot fingerprint tokens.
 fn strip_scanner_tokens(payload: &str) -> String {
-    let to_remove = ["nmap", "nikto", "sqlmap", "burp", "NMAP", "NIKTO", "SQLMAP", "BURP"];
+    let to_remove = [
+        "nmap", "nikto", "sqlmap", "burp", "NMAP", "NIKTO", "SQLMAP", "BURP",
+    ];
     let mut out = payload.to_string();
     for token in to_remove {
         out = out.replace(token, "");
@@ -767,7 +774,10 @@ mod tests {
     fn suppress_sqli_tokens_splits_keywords() {
         let payload = "SELECT * FROM users WHERE 1=1";
         let suppressed = suppress_sqli_tokens(payload);
-        assert!(!suppressed.to_uppercase().contains("SELECT "), "SELECT must be split");
+        assert!(
+            !suppressed.to_uppercase().contains("SELECT "),
+            "SELECT must be split"
+        );
         assert!(suppressed.contains("/**/"), "must contain comment split");
     }
 
@@ -776,21 +786,30 @@ mod tests {
         let payload = "<script>alert(1)</script>";
         let suppressed = suppress_xss_tokens(payload);
         // The literal "<script>" must be gone (replaced with null-byte split).
-        assert!(!suppressed.contains("<script>"), "raw <script> must be obfuscated");
+        assert!(
+            !suppressed.contains("<script>"),
+            "raw <script> must be obfuscated"
+        );
     }
 
     #[test]
     fn suppress_lfi_tokens_obfuscates_path() {
         let payload = "../../../etc/passwd";
         let suppressed = suppress_lfi_tokens(payload);
-        assert!(!suppressed.contains("/etc/passwd"), "bare path must be obfuscated");
+        assert!(
+            !suppressed.contains("/etc/passwd"),
+            "bare path must be obfuscated"
+        );
     }
 
     #[test]
     fn dilute_returns_result_for_sqli() {
         let est = SubScoreEstimator::new(5.0, 0.1);
         let result = dilute("' UNION SELECT--", &est, 40.0);
-        assert!(result.is_some(), "must return a result for known attack payload");
+        assert!(
+            result.is_some(),
+            "must return a result for known attack payload"
+        );
     }
 
     #[test]

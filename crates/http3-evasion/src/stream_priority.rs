@@ -238,8 +238,11 @@ impl H3PriorityAttack {
                     pf.stream_id,
                     pf.urgency,
                     pf.incremental,
-                    if pf.extra_params.is_empty() { "".to_string() }
-                    else { format!("extra_params={}", pf.extra_params.len()) }
+                    if pf.extra_params.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("extra_params={}", pf.extra_params.len())
+                    }
                 ),
                 technique: EvasionTechnique::StreamPriorityTopology,
                 stream_id: 2, // control stream
@@ -275,8 +278,7 @@ mod tests {
 
     #[test]
     fn priority_field_value_extra_params() {
-        let frame = PriorityUpdateFrame::new(0, 1, false)
-            .with_extra_param("x-bypass", "1");
+        let frame = PriorityUpdateFrame::new(0, 1, false).with_extra_param("x-bypass", "1");
         let val = frame.priority_field_value();
         assert!(val.contains("u=1"));
         assert!(val.contains("x-bypass=1"));
@@ -301,7 +303,10 @@ mod tests {
         let bytes = frame.to_bytes();
         // "u=5" must appear in the bytes
         let as_str = String::from_utf8_lossy(&bytes);
-        assert!(as_str.contains("u=5"), "frame bytes must contain urgency value");
+        assert!(
+            as_str.contains("u=5"),
+            "frame bytes must contain urgency value"
+        );
     }
 
     #[test]
@@ -309,7 +314,10 @@ mod tests {
         let frame = PriorityUpdateFrame::new(4, 3, true);
         let bytes = frame.to_bytes();
         let as_str = String::from_utf8_lossy(&bytes);
-        assert!(as_str.contains(", i") || as_str.contains("i"), "incremental flag must appear");
+        assert!(
+            as_str.contains(", i") || as_str.contains("i"),
+            "incremental flag must appear"
+        );
     }
 
     // ── Urgency storm ─────────────────────────────────────────────────────
@@ -342,7 +350,11 @@ mod tests {
     fn incremental_desync_alternates_flag() {
         let attack = H3PriorityAttack::incremental_desync(4, 6);
         for (i, frame) in attack.frames.iter().enumerate() {
-            assert_eq!(frame.incremental, i % 2 == 0, "incremental must alternate even/odd");
+            assert_eq!(
+                frame.incremental,
+                i % 2 == 0,
+                "incremental must alternate even/odd"
+            );
         }
     }
 
@@ -360,7 +372,10 @@ mod tests {
     fn phantom_stream_ids_are_far_ahead() {
         let attack = H3PriorityAttack::phantom_stream_priority(4, 3);
         for frame in &attack.frames {
-            assert!(frame.stream_id > 1000, "phantom streams must be far beyond current");
+            assert!(
+                frame.stream_id > 1000,
+                "phantom streams must be far beyond current"
+            );
         }
     }
 
@@ -378,15 +393,20 @@ mod tests {
     fn unknown_param_has_extra_members() {
         let attack = H3PriorityAttack::unknown_param_injection(8);
         let frame = &attack.frames[0];
-        assert!(!frame.extra_params.is_empty(), "unknown-param attack must have extra params");
+        assert!(
+            !frame.extra_params.is_empty(),
+            "unknown-param attack must have extra params"
+        );
     }
 
     #[test]
     fn unknown_param_field_value_contains_unknown_keys() {
         let attack = H3PriorityAttack::unknown_param_injection(0);
         let fv = attack.frames[0].priority_field_value();
-        assert!(fv.contains("waf-bypass") || fv.contains("x-secret"),
-            "field value must contain injected unknown keys");
+        assert!(
+            fv.contains("waf-bypass") || fv.contains("x-secret"),
+            "field value must contain injected unknown keys"
+        );
     }
 
     // ── Urgency flapping ──────────────────────────────────────────────────
@@ -396,7 +416,11 @@ mod tests {
         let attack = H3PriorityAttack::urgency_flapping(4, 6);
         for (i, frame) in attack.frames.iter().enumerate() {
             let expected = if i % 2 == 0 { 0 } else { 7 };
-            assert_eq!(frame.urgency, expected, "urgency must alternate 0/7 at index {}", i);
+            assert_eq!(
+                frame.urgency, expected,
+                "urgency must alternate 0/7 at index {}",
+                i
+            );
         }
     }
 
@@ -414,7 +438,10 @@ mod tests {
         let attack = H3PriorityAttack::urgency_storm(2);
         let fs = attack.to_frame_set();
         for frame in &fs.frames {
-            assert_eq!(frame.stream_id, 2, "PRIORITY_UPDATE frames must be on control stream (2)");
+            assert_eq!(
+                frame.stream_id, 2,
+                "PRIORITY_UPDATE frames must be on control stream (2)"
+            );
         }
     }
 

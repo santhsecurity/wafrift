@@ -1,7 +1,7 @@
 //! Decompile a client sanitizer and mine the inputs that survive it.
 //!
 //! This is the payoff of the crate: it drives the **same** L*/SFA decompiler
-//! that learns a server WAF over a [`SanitizerOracle`](crate::model::SanitizerOracle),
+//! that learns a server WAF over a [`SanitizerOracle`],
 //! then intersects the learned "survives-executable" language with an XSS attack
 //! grammar to mine concrete bypass candidates — inputs that stay executable
 //! after this exact sanitizer config runs.
@@ -13,11 +13,11 @@
 //! dropped, never reported. Surviving candidates are flagged for live scald DOM
 //! confirmation — the model proposes, the browser disposes.
 
+use wafrift_types::Request;
 use wafrift_wafmodel::{
     Alphabet, BoundedExhaustiveEq, EquivalenceOracle, Result as WafResult, Sfa, WafOracle,
     attack_grammar, l_star, mine_bypasses,
 };
-use wafrift_types::Request;
 
 use crate::extract::SanitizerModel;
 use crate::model::SanitizerOracle;
@@ -208,9 +208,11 @@ pub fn decompile_and_mine(
     // re-verified against the concrete model, only genuine survivors kept, deduped.
     let mut seen = std::collections::HashSet::new();
     let mut bypasses = Vec::new();
-    let candidates = canonical_vectors()
-        .into_iter()
-        .chain(mined.iter().map(|c| String::from_utf8_lossy(c).into_owned()));
+    let candidates = canonical_vectors().into_iter().chain(
+        mined
+            .iter()
+            .map(|c| String::from_utf8_lossy(c).into_owned()),
+    );
     for payload in candidates {
         if model.survives_executable(&payload) && seen.insert(payload.clone()) {
             let vector = vector_class(&payload);
@@ -275,7 +277,10 @@ mod tests {
             "a handler-leaking sanitizer must yield a bypass; mined={}",
             result.mined_before_verify
         );
-        assert!(result.membership_queries > 0, "the learner must have queried the oracle");
+        assert!(
+            result.membership_queries > 0,
+            "the learner must have queried the oracle"
+        );
     }
 
     #[test]
@@ -283,7 +288,9 @@ mod tests {
         // Forbid every dangerous tag AND strip handlers → the soundness gate must
         // leave zero reported bypasses (anti-rig: no fabricated survivors).
         let m = model(
-            &["script", "svg", "img", "iframe", "math", "a", "object", "embed"],
+            &[
+                "script", "svg", "img", "iframe", "math", "a", "object", "embed",
+            ],
             Some(&["b", "i", "em", "p"]),
             true,
         );
@@ -304,7 +311,9 @@ mod tests {
         // patterns once, and the EQ round is query-bounded (`EQ_QUERY_BUDGET`).
         // This is the exact CLI default-parameter case that hung the e2e.
         let mut m = model(
-            &["script", "svg", "img", "iframe", "math", "a", "object", "embed"],
+            &[
+                "script", "svg", "img", "iframe", "math", "a", "object", "embed",
+            ],
             Some(&["b", "i", "em", "p"]),
             true,
         );

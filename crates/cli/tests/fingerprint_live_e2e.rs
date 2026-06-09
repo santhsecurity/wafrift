@@ -45,10 +45,10 @@ fn extract_q(path: &[u8]) -> Vec<u8> {
         None => return Vec::new(),
     };
     for pair in q.split(|&b| b == b'&') {
-        if let Some(eq) = pair.iter().position(|&b| b == b'=') {
-            if &pair[..eq] == b"q" {
-                return pair[eq + 1..].to_vec();
-            }
+        if let Some(eq) = pair.iter().position(|&b| b == b'=')
+            && &pair[..eq] == b"q"
+        {
+            return pair[eq + 1..].to_vec();
         }
     }
     Vec::new()
@@ -70,7 +70,10 @@ fn handle(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let raw = extract_q(path);
     let decoded = pct_decode_once(&raw); // framework baseline url-decode
@@ -214,7 +217,10 @@ fn handle_header_reflect(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let raw = extract_q(path);
     let decoded = pct_decode_once(&raw); // framework baseline url-decode
@@ -249,7 +255,15 @@ fn fingerprint_binary_detects_base64_origin_reflected_only_in_a_header() {
     let url = format!("http://{addr}/");
     let bin = env!("CARGO_BIN_EXE_wafrift");
     let output = Command::new(bin)
-        .args(["fingerprint", "--url", &url, "--param", "q", "--format", "json"])
+        .args([
+            "fingerprint",
+            "--url",
+            &url,
+            "--param",
+            "q",
+            "--format",
+            "json",
+        ])
         .output()
         .expect("invoke wafrift fingerprint");
 
@@ -296,7 +310,10 @@ fn handle_script_blocking_waf(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
     let blocked = decoded
@@ -338,7 +355,10 @@ fn handle_base64_reflect_no_block(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
     // Base64-decode the param (the detectable origin normalization), then echo —
@@ -438,8 +458,15 @@ fn fingerprint_characterize_filter_isolates_the_policed_token() {
         serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("bad JSON {e}: {stdout}"));
 
     let fp = &report["filter_profile"];
-    assert!(!fp.is_null(), "filter_profile must be present when requested: {report}");
-    assert_eq!(fp["transport_errors"], serde_json::json!(0), "no transport errors expected");
+    assert!(
+        !fp.is_null(),
+        "filter_profile must be present when requested: {report}"
+    );
+    assert_eq!(
+        fp["transport_errors"],
+        serde_json::json!(0),
+        "no transport errors expected"
+    );
 
     let policed: Vec<&str> = fp["policed"]
         .as_array()
@@ -501,7 +528,10 @@ fn handle_eviltag_blocking_waf(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
     let blocked = decoded.windows(7).any(|w| w == b"EVILTAG");
@@ -600,7 +630,10 @@ fn handle_bespoke_200_block_waf(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
     let lower = String::from_utf8_lossy(&decoded).to_ascii_lowercase();
@@ -650,10 +683,13 @@ fn fingerprint_calibration_detects_a_bespoke_200_block_with_no_signature() {
         .output()
         .expect("invoke wafrift fingerprint");
 
-    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let report: serde_json::Value =
-        serde_json::from_str(String::from_utf8(output.stdout).unwrap().trim())
-            .expect("valid JSON");
+        serde_json::from_str(String::from_utf8(output.stdout).unwrap().trim()).expect("valid JSON");
     let policed: Vec<&str> = report["filter_profile"]["policed"]
         .as_array()
         .expect("policed array")
@@ -683,10 +719,15 @@ fn handle_custom_marker_block_waf(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
-    let blocked = decoded.windows(8).any(|w| w.eq_ignore_ascii_case(b"<script>"));
+    let blocked = decoded
+        .windows(8)
+        .any(|w| w.eq_ignore_ascii_case(b"<script>"));
     let body: Vec<u8> = if blocked {
         b"<html>CUSTOM-WAF-WALL: denied</html>".to_vec()
     } else {
@@ -734,10 +775,13 @@ fn fingerprint_custom_block_signature_overrides_default_detection() {
         .expect("invoke wafrift fingerprint --block-signatures");
     let _ = std::fs::remove_file(&sig_path);
 
-    assert!(output.status.success(), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let report: serde_json::Value =
-        serde_json::from_str(String::from_utf8(output.stdout).unwrap().trim())
-            .expect("valid JSON");
+        serde_json::from_str(String::from_utf8(output.stdout).unwrap().trim()).expect("valid JSON");
     let policed: Vec<&str> = report["filter_profile"]["policed"]
         .as_array()
         .expect("policed array")
@@ -769,10 +813,15 @@ fn handle_two_hundred_block_page_waf(mut stream: TcpStream) {
             Err(_) => return,
         }
     }
-    let line_end = buf.windows(2).position(|w| w == b"\r\n").unwrap_or(buf.len());
+    let line_end = buf
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(buf.len());
     let path = buf[..line_end].split(|&b| b == b' ').nth(1).unwrap_or(b"");
     let decoded = pct_decode_once(&extract_q(path));
-    let blocked = decoded.windows(8).any(|w| w.eq_ignore_ascii_case(b"<script>"));
+    let blocked = decoded
+        .windows(8)
+        .any(|w| w.eq_ignore_ascii_case(b"<script>"));
     // ALWAYS HTTP 200 — the block is signalled only in the body.
     let body: Vec<u8> = if blocked {
         b"<html><h1>Access Denied</h1><p>This request was blocked.</p></html>".to_vec()
@@ -847,7 +896,15 @@ fn fingerprint_binary_reports_no_reflection_on_non_echoing_target() {
     let url = format!("http://{addr}/");
     let bin = env!("CARGO_BIN_EXE_wafrift");
     let output = Command::new(bin)
-        .args(["fingerprint", "--url", &url, "--param", "q", "--format", "json"])
+        .args([
+            "fingerprint",
+            "--url",
+            &url,
+            "--param",
+            "q",
+            "--format",
+            "json",
+        ])
         .output()
         .expect("invoke wafrift fingerprint");
 
@@ -868,7 +925,9 @@ fn fingerprint_binary_reports_no_reflection_on_non_echoing_target() {
         "must report reflection_observed=false, got {report}"
     );
     assert!(
-        report["detected_stages"].as_array().is_some_and(|a| a.is_empty()),
+        report["detected_stages"]
+            .as_array()
+            .is_some_and(|a| a.is_empty()),
         "no stages may be reported when no reflection was observed: {report}"
     );
 }
@@ -935,7 +994,7 @@ fn fingerprint_filter_budget_caps_probes_and_history_persists() {
     let count = |k: &str| fp[k].as_array().map_or(0, Vec::len);
     let findings = count("policed") + count("unpoliced") + count("carrier_gated");
     assert!(
-        findings <= 3 && findings >= 1,
+        (1..=3).contains(&findings),
         "budget 3 must yield at most 3 findings, got {findings}: {fp}"
     );
 
@@ -951,7 +1010,11 @@ fn fingerprint_filter_budget_caps_probes_and_history_persists() {
     // Run 2: warm-start from the same history must not crash and must accumulate
     // (each probed token now has ≥1 more trial than after run 1).
     let out2 = run("3");
-    assert!(out2.status.success(), "warm-start run failed: {}", String::from_utf8_lossy(&out2.stderr));
+    assert!(
+        out2.status.success(),
+        "warm-start run failed: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
     let text2 = std::fs::read_to_string(&hist).expect("history persisted after run 2");
     let h2: serde_json::Value = serde_json::from_str(&text2).expect("history json 2");
     let total_trials = |v: &serde_json::Value| -> u64 {

@@ -11,8 +11,6 @@ pub mod calibration;
 pub mod canary;
 pub mod config;
 pub mod discovery;
-pub mod pick;
-pub mod probe;
 pub mod entropy;
 pub mod escalation;
 pub mod explanation;
@@ -22,6 +20,8 @@ pub mod hash;
 pub mod injection_context;
 pub mod loaders;
 pub mod oob;
+pub mod pick;
+pub mod probe;
 pub mod request;
 pub mod result;
 pub mod session;
@@ -256,7 +256,6 @@ pub use technique::Technique;
 pub use verdict::{BlockReason, ConnectionBehavior, Signal, Verdict};
 pub use waf_class::WafClass;
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,9 +376,7 @@ mod tests {
         assert_eq!(DEFAULT_SMUGGLE_COMPOSED_CAP, 64);
         assert_eq!(DEFAULT_SMUGGLE_FIRE_DELAY_MS, 200);
         assert_eq!(DEFAULT_SMUGGLE_FIRE_TIMEOUT_SECS, 10);
-        assert!(
-            (DEFAULT_SMUGGLE_BODY_DIVERGENCE_THRESHOLD - 0.05).abs() < f64::EPSILON
-        );
+        assert!((DEFAULT_SMUGGLE_BODY_DIVERGENCE_THRESHOLD - 0.05).abs() < f64::EPSILON);
         assert_eq!(DEFAULT_SMUGGLE_FIRE_PARALLEL, 1);
     }
 

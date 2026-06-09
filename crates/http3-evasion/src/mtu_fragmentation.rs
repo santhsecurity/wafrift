@@ -250,10 +250,7 @@ impl MtuFragmentationAttack {
     /// and once with malicious data at the same offset. Many QUIC
     /// implementations accept the first copy (legitimate) and ignore
     /// the duplicate. A buggy WAF might process the second copy instead.
-    pub fn duplicate_fragment(
-        legitimate_data: &[u8],
-        malicious_override: &[u8],
-    ) -> Self {
+    pub fn duplicate_fragment(legitimate_data: &[u8], malicious_override: &[u8]) -> Self {
         let normal = QuicCryptoFragment {
             offset: 0,
             data: legitimate_data.to_vec(),
@@ -262,7 +259,8 @@ impl MtuFragmentationAttack {
         };
         let dup = QuicCryptoFragment {
             offset: 0, // same offset = duplicate
-            data: malicious_override[..legitimate_data.len().min(malicious_override.len())].to_vec(),
+            data: malicious_override[..legitimate_data.len().min(malicious_override.len())]
+                .to_vec(),
             pad_to_mtu: false,
             mtu: 1500,
         };
@@ -338,7 +336,11 @@ mod tests {
         let bytes = frag.to_crypto_frame_bytes();
         // Find the data at the end (after type, offset varint, length varint).
         let tail = &bytes[bytes.len() - data.len()..];
-        assert_eq!(tail, data.as_slice(), "CRYPTO frame must contain original data");
+        assert_eq!(
+            tail,
+            data.as_slice(),
+            "CRYPTO frame must contain original data"
+        );
     }
 
     #[test]
@@ -350,7 +352,11 @@ mod tests {
             mtu: 100,
         };
         let bytes = frag.to_crypto_frame_bytes();
-        assert_eq!(bytes.len(), 100, "padded frame must reach exactly MTU bytes");
+        assert_eq!(
+            bytes.len(),
+            100,
+            "padded frame must reach exactly MTU bytes"
+        );
     }
 
     #[test]
@@ -375,7 +381,11 @@ mod tests {
     fn byte_per_packet_fragment_count() {
         let data = b"hello";
         let attack = MtuFragmentationAttack::byte_per_packet(data);
-        assert_eq!(attack.fragments.len(), 5, "must produce one fragment per byte");
+        assert_eq!(
+            attack.fragments.len(),
+            5,
+            "must produce one fragment per byte"
+        );
     }
 
     #[test]
@@ -400,7 +410,11 @@ mod tests {
     fn byte_per_packet_data_content_preserved() {
         let data = b"abc";
         let attack = MtuFragmentationAttack::byte_per_packet(data);
-        let reassembled: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        let reassembled: Vec<u8> = attack
+            .fragments
+            .iter()
+            .flat_map(|f| f.data.iter().copied())
+            .collect();
         assert_eq!(reassembled, data);
     }
 
@@ -409,8 +423,15 @@ mod tests {
     #[test]
     fn off_by_one_covers_all_data() {
         let attack = MtuFragmentationAttack::off_by_one(SAMPLE_TLS, 10);
-        let reassembled: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
-        assert_eq!(reassembled, SAMPLE_TLS, "all data must be present when reassembled");
+        let reassembled: Vec<u8> = attack
+            .fragments
+            .iter()
+            .flat_map(|f| f.data.iter().copied())
+            .collect();
+        assert_eq!(
+            reassembled, SAMPLE_TLS,
+            "all data must be present when reassembled"
+        );
     }
 
     #[test]
@@ -419,7 +440,10 @@ mod tests {
         let attack = MtuFragmentationAttack::off_by_one(data, 5);
         let mut expected_offset = 0u64;
         for frag in &attack.fragments {
-            assert_eq!(frag.offset, expected_offset, "fragment offset must be cumulative");
+            assert_eq!(
+                frag.offset, expected_offset,
+                "fragment offset must be cumulative"
+            );
             expected_offset += frag.data.len() as u64;
         }
     }
@@ -438,7 +462,11 @@ mod tests {
     #[test]
     fn mtu_padded_data_is_preserved() {
         let attack = MtuFragmentationAttack::mtu_padded(SAMPLE_TLS, 2, 200);
-        let reassembled: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        let reassembled: Vec<u8> = attack
+            .fragments
+            .iter()
+            .flat_map(|f| f.data.iter().copied())
+            .collect();
         assert_eq!(reassembled, SAMPLE_TLS);
     }
 
@@ -475,22 +503,28 @@ mod tests {
     #[test]
     fn duplicate_fragment_has_two_fragments() {
         let attack = MtuFragmentationAttack::duplicate_fragment(b"legit", b"evil!");
-        assert_eq!(attack.fragments.len(), 2, "must have exactly 2 fragments (original + dup)");
+        assert_eq!(
+            attack.fragments.len(),
+            2,
+            "must have exactly 2 fragments (original + dup)"
+        );
     }
 
     #[test]
     fn duplicate_fragment_both_at_offset_0() {
         let attack = MtuFragmentationAttack::duplicate_fragment(b"hello", b"world");
         assert_eq!(attack.fragments[0].offset, 0);
-        assert_eq!(attack.fragments[1].offset, 0, "duplicate must be at same offset");
+        assert_eq!(
+            attack.fragments[1].offset, 0,
+            "duplicate must be at same offset"
+        );
     }
 
     #[test]
     fn duplicate_fragment_data_differs() {
         let attack = MtuFragmentationAttack::duplicate_fragment(b"legit", b"evil!");
         assert_ne!(
-            attack.fragments[0].data,
-            attack.fragments[1].data,
+            attack.fragments[0].data, attack.fragments[1].data,
             "original and duplicate must have different data"
         );
     }
@@ -515,10 +549,26 @@ mod tests {
 
     #[test]
     fn empty_input_produces_no_fragments_and_never_panics() {
-        assert!(MtuFragmentationAttack::byte_per_packet(b"").fragments.is_empty());
-        assert!(MtuFragmentationAttack::off_by_one(b"", 8).fragments.is_empty());
-        assert!(MtuFragmentationAttack::mtu_padded(b"", 4, 200).fragments.is_empty());
-        assert!(MtuFragmentationAttack::reverse_order(b"", 4).fragments.is_empty());
+        assert!(
+            MtuFragmentationAttack::byte_per_packet(b"")
+                .fragments
+                .is_empty()
+        );
+        assert!(
+            MtuFragmentationAttack::off_by_one(b"", 8)
+                .fragments
+                .is_empty()
+        );
+        assert!(
+            MtuFragmentationAttack::mtu_padded(b"", 4, 200)
+                .fragments
+                .is_empty()
+        );
+        assert!(
+            MtuFragmentationAttack::reverse_order(b"", 4)
+                .fragments
+                .is_empty()
+        );
     }
 
     #[test]
@@ -527,7 +577,11 @@ mod tests {
         // and never emit a zero-length fragment that loops forever.
         let data = b"abcdefghij";
         let attack = MtuFragmentationAttack::off_by_one(data, 0);
-        let re: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        let re: Vec<u8> = attack
+            .fragments
+            .iter()
+            .flat_map(|f| f.data.iter().copied())
+            .collect();
         assert_eq!(re, data);
         assert!(attack.fragments.iter().all(|f| !f.data.is_empty()));
     }
@@ -536,7 +590,11 @@ mod tests {
     fn off_by_one_boundary_larger_than_data_still_covers_everything() {
         let data = b"short";
         let attack = MtuFragmentationAttack::off_by_one(data, 9999);
-        let re: Vec<u8> = attack.fragments.iter().flat_map(|f| f.data.iter().copied()).collect();
+        let re: Vec<u8> = attack
+            .fragments
+            .iter()
+            .flat_map(|f| f.data.iter().copied())
+            .collect();
         assert_eq!(re, data);
     }
 
@@ -555,7 +613,10 @@ mod tests {
     #[test]
     fn mtu_padded_zero_fragments_is_clamped_to_one() {
         let attack = MtuFragmentationAttack::mtu_padded(b"abc", 0, 50);
-        assert!(!attack.fragments.is_empty(), "n_fragments 0 must clamp to ≥1");
+        assert!(
+            !attack.fragments.is_empty(),
+            "n_fragments 0 must clamp to ≥1"
+        );
     }
 
     // ── Property tests (proptest) ─────────────────────────────────────────

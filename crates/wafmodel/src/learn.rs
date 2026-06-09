@@ -333,11 +333,10 @@ fn build_hypothesis<F: FnMut(&[usize]) -> Result<bool>>(
     // answers can break the L* closure invariant. Surface the
     // failure as `WafModelError::TableNotClosed` so the caller can
     // retry or raise the budget — never a mid-scan panic.
-    let eps_idx = t
-        .e
-        .iter()
-        .position(|e| e.is_empty())
-        .ok_or(WafModelError::TableNotClosed)?;
+    let eps_idx =
+        t.e.iter()
+            .position(|e| e.is_empty())
+            .ok_or(WafModelError::TableNotClosed)?;
     for (st, acc) in access.iter().zip(accept.iter_mut()) {
         *acc = t.row(st, mq)?[eps_idx];
     }
@@ -346,9 +345,7 @@ fn build_hypothesis<F: FnMut(&[usize]) -> Result<bool>>(
             let mut sa = access[st].clone();
             sa.push(a);
             let tgt_row = t.row(&sa, mq)?;
-            let tgt = *row_of
-                .get(&tgt_row)
-                .ok_or(WafModelError::TableNotClosed)?;
+            let tgt = *row_of.get(&tgt_row).ok_or(WafModelError::TableNotClosed)?;
             delta[st].push((alpha.guard(a), tgt));
         }
     }
@@ -842,7 +839,8 @@ where
         if n == 0 {
             return Err(crate::error::WafModelError::Oracle(
                 "equivalence oracle returned an empty counterexample — \
-                 Rivest–Schapire decomposition is undefined for ε".into(),
+                 Rivest–Schapire decomposition is undefined for ε"
+                    .into(),
             ));
         }
         let state_word = |k: usize, kv: &mut Kv<B>| -> Result<Vec<usize>> {

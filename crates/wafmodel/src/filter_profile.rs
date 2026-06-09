@@ -19,14 +19,14 @@
 //!
 //! | dangerous | benign twin | verdict          | meaning for the solver                       |
 //! |-----------|-------------|------------------|----------------------------------------------|
-//! | Block     | Pass        | [`Policed`]      | the rule keys on THIS token — must encode it  |
-//! | Pass      | Pass        | [`Unpoliced`]    | token reaches the sink raw — no work needed   |
-//! | Block     | Block       | [`CarrierGate`]  | not the keyword; the chars/len/context gate   |
-//! | Pass      | Block       | [`Inconclusive`] | contradictory (oracle noise) — never guessed  |
+//! | Block     | Pass        | `Policed`      | the rule keys on THIS token — must encode it  |
+//! | Pass      | Pass        | `Unpoliced`    | token reaches the sink raw — no work needed   |
+//! | Block     | Block       | `CarrierGate`  | not the keyword; the chars/len/context gate   |
+//! | Pass      | Block       | `Inconclusive` | contradictory (oracle noise) — never guessed  |
 //!
-//! [`Policed`](Verdict::Policed) and [`CarrierGate`](Verdict::CarrierGate)
-//! both inform the solver; [`Unpoliced`](Verdict::Unpoliced) is the prize
-//! (use the token in plaintext); [`Inconclusive`](Verdict::Inconclusive) is
+//! `Policed`(Verdict::Policed) and `CarrierGate`(Verdict::CarrierGate)
+//! both inform the solver; `Unpoliced`(Verdict::Unpoliced) is the prize
+//! (use the token in plaintext); `Inconclusive`(Verdict::Inconclusive) is
 //! discarded, never turned into a guess (anti-rig — the same discipline the
 //! learner applies to `ServerError`).
 //!
@@ -62,7 +62,11 @@ pub struct TokenProbe {
 impl TokenProbe {
     /// Construct a probe.
     pub fn new(token: impl Into<String>, benign_twin: impl Into<String>, class: RuleGroup) -> Self {
-        Self { token: token.into(), benign_twin: benign_twin.into(), class }
+        Self {
+            token: token.into(),
+            benign_twin: benign_twin.into(),
+            class,
+        }
     }
 
     /// Tier-B integrity: a sound twin changes ONLY ASCII letters, never the
@@ -151,18 +155,24 @@ pub struct FilterProfile {
 impl FilterProfile {
     /// Tokens the WAF policies by keyword — the solver must transform these.
     pub fn policed(&self) -> impl Iterator<Item = &TokenFinding> {
-        self.findings.iter().filter(|f| f.verdict == Verdict::Policed)
+        self.findings
+            .iter()
+            .filter(|f| f.verdict == Verdict::Policed)
     }
 
     /// Tokens that reach the sink in plaintext — free for the solver to use.
     pub fn unpoliced(&self) -> impl Iterator<Item = &TokenFinding> {
-        self.findings.iter().filter(|f| f.verdict == Verdict::Unpoliced)
+        self.findings
+            .iter()
+            .filter(|f| f.verdict == Verdict::Unpoliced)
     }
 
     /// Tokens whose *carrier* (chars/length/context), not the keyword, is the
     /// gate — encoding the keyword alone will not bypass these.
     pub fn carrier_gated(&self) -> impl Iterator<Item = &TokenFinding> {
-        self.findings.iter().filter(|f| f.verdict == Verdict::CarrierGate)
+        self.findings
+            .iter()
+            .filter(|f| f.verdict == Verdict::CarrierGate)
     }
 
     /// Is this exact token policed by keyword?
@@ -180,7 +190,7 @@ impl FilterProfile {
 /// header — so this crate takes no HTTP stack).
 ///
 /// Best-effort and total: a transport error on either half of a probe yields
-/// an [`Inconclusive`](Verdict::Inconclusive) finding (and increments
+/// an `Inconclusive`(Verdict::Inconclusive) finding (and increments
 /// [`FilterProfile::transport_errors`]) rather than aborting the whole sweep —
 /// one flaky probe must not discard the intelligence from the rest.
 pub fn characterize<O, F>(
@@ -245,7 +255,12 @@ pub struct DecodeGap {
 /// reusing the canonical solver encoder, so no encoding logic is duplicated.
 fn decode_probe_stages() -> Vec<(&'static str, Stage)> {
     vec![
-        ("url_decode", Stage::UrlDecode { plus_is_space: false }),
+        (
+            "url_decode",
+            Stage::UrlDecode {
+                plus_is_space: false,
+            },
+        ),
         ("double_url_decode", Stage::DoubleUrlDecode),
         ("html_entity_decode", Stage::HtmlEntityDecode),
         ("nfkc_normalize", Stage::NfkcNormalize),
@@ -256,7 +271,7 @@ fn decode_probe_stages() -> Vec<(&'static str, Stage)> {
 }
 
 /// For each **policed** token in `profile`, probe whether the structural
-/// preimage of each origin transform in [`decode_probe_stages`] passes the
+/// preimage of each origin transform in `decode_probe_stages` passes the
 /// WAF — surfacing the specific encodings that defeat the WAF's literal match.
 ///
 /// Sound by construction: every candidate preimage genuinely differs from the
@@ -306,7 +321,7 @@ where
 const DEFAULT_BATTERY_TOML: &str = include_str!("../rules/filter/tokens.toml");
 
 /// The default differential battery, parsed from the embedded Tier-B data file
-/// [`DEFAULT_BATTERY_TOML`]. Extend coverage by editing that file (or shipping
+/// `DEFAULT_BATTERY_TOML`. Extend coverage by editing that file (or shipping
 /// your own and passing it to [`battery_from_toml`]) — never by branching in
 /// code. The embedded data is validated by the same loader and pinned by tests.
 #[must_use]
@@ -319,7 +334,7 @@ pub fn default_battery() -> Vec<TokenProbe> {
 /// `[[probe]]` tables, each `{ token, benign_twin, class }` where `class` is one
 /// of the [`RuleGroup`] names (`xss`, `sqli`, `lfi_rfi`, `rce`, `protocol`,
 /// `scanner`). Every probe is validated against the structural twin invariant
-/// ([`TokenProbe::validate`]) at load — the loader **fails closed** on a
+/// (`TokenProbe::validate`) at load — the loader **fails closed** on a
 /// malformed twin, an unknown class, or an empty battery, so bad data can never
 /// silently weaken the differential.
 pub fn battery_from_toml(src: &str) -> Result<Vec<TokenProbe>> {
@@ -372,11 +387,17 @@ mod tests {
     /// An oracle that blocks any request whose URL contains one of `policed`
     /// (case-sensitive substring) — a faithful stand-in for a literal-token
     /// WAF rule. Everything else passes.
-    fn literal_token_waf(policed: &'static [&'static str]) -> FnOracle<impl FnMut(&Request) -> Result<Outcome>> {
+    fn literal_token_waf(
+        policed: &'static [&'static str],
+    ) -> FnOracle<impl FnMut(&Request) -> Result<Outcome>> {
         FnOracle::new(move |req: &Request| {
             let url = req.url();
             let blocked = policed.iter().any(|tok| url.contains(tok));
-            Ok(if blocked { Outcome::Block } else { Outcome::Pass })
+            Ok(if blocked {
+                Outcome::Block
+            } else {
+                Outcome::Pass
+            })
         })
     }
 
@@ -392,10 +413,17 @@ mod tests {
         // The WAF blocks exactly "<script>"; the twin "<scrupt>" is not a rule
         // keyword, so it passes → the differential must read Policed.
         let mut waf = literal_token_waf(&["<script>"]);
-        let battery = [TokenProbe::new("<script>", "<scrupt>", RuleGroup::CrossSiteScripting)];
+        let battery = [TokenProbe::new(
+            "<script>",
+            "<scrupt>",
+            RuleGroup::CrossSiteScripting,
+        )];
         let profile = characterize(&mut waf, &battery, query_carrier).unwrap();
 
-        assert_eq!(profile.queries, 2, "exactly two membership queries per probe");
+        assert_eq!(
+            profile.queries, 2,
+            "exactly two membership queries per probe"
+        );
         assert_eq!(profile.transport_errors, 0);
         assert!(profile.is_policed("<script>"));
         let policed: Vec<_> = profile.policed().map(|f| f.token.as_str()).collect();
@@ -407,12 +435,20 @@ mod tests {
         // The WAF policies SQLi only; an XSS tag sails through with its twin →
         // Unpoliced, and the solver learns it needs no encoding for it.
         let mut waf = literal_token_waf(&["union select"]);
-        let battery = [TokenProbe::new("<svg onload=", "<svq onloxd=", RuleGroup::CrossSiteScripting)];
+        let battery = [TokenProbe::new(
+            "<svg onload=",
+            "<svq onloxd=",
+            RuleGroup::CrossSiteScripting,
+        )];
         let profile = characterize(&mut waf, &battery, query_carrier).unwrap();
 
         assert!(!profile.is_policed("<svg onload="));
         let unpoliced: Vec<_> = profile.unpoliced().map(|f| f.token.as_str()).collect();
-        assert_eq!(unpoliced, vec!["<svg onload="], "an unpoliced token must be surfaced");
+        assert_eq!(
+            unpoliced,
+            vec!["<svg onload="],
+            "an unpoliced token must be surfaced"
+        );
     }
 
     #[test]
@@ -421,10 +457,17 @@ mod tests {
         // so BOTH the dangerous token and its twin block → CarrierGate, telling
         // the solver the keyword is not the gate.
         let mut waf = literal_token_waf(&["<"]);
-        let battery = [TokenProbe::new("<script>", "<scrupt>", RuleGroup::CrossSiteScripting)];
+        let battery = [TokenProbe::new(
+            "<script>",
+            "<scrupt>",
+            RuleGroup::CrossSiteScripting,
+        )];
         let profile = characterize(&mut waf, &battery, query_carrier).unwrap();
 
-        assert!(!profile.is_policed("<script>"), "both-block must NOT read as Policed");
+        assert!(
+            !profile.is_policed("<script>"),
+            "both-block must NOT read as Policed"
+        );
         let gated: Vec<_> = profile.carrier_gated().map(|f| f.token.as_str()).collect();
         assert_eq!(gated, vec!["<script>"]);
     }
@@ -433,9 +476,8 @@ mod tests {
     fn transport_error_is_inconclusive_not_a_guess() {
         // An oracle that always errors must yield Inconclusive findings and a
         // transport-error count — never a fabricated Pass/Block verdict.
-        let mut waf = FnOracle::new(|_req: &Request| {
-            Err(crate::error::WafModelError::Oracle("down".into()))
-        });
+        let mut waf =
+            FnOracle::new(|_req: &Request| Err(crate::error::WafModelError::Oracle("down".into())));
         let battery = default_battery();
         let n = battery.len();
         let profile = characterize(&mut waf, &battery, query_carrier).unwrap();
@@ -444,17 +486,32 @@ mod tests {
         assert!(profile.policed().next().is_none());
         assert!(profile.unpoliced().next().is_none());
         assert!(
-            profile.findings.iter().all(|f| f.verdict == Verdict::Inconclusive),
+            profile
+                .findings
+                .iter()
+                .all(|f| f.verdict == Verdict::Inconclusive),
             "transport failure must never produce an actionable verdict"
         );
     }
 
     #[test]
     fn from_outcomes_truth_table_is_exhaustive() {
-        assert_eq!(Verdict::from_outcomes(Outcome::Block, Outcome::Pass), Verdict::Policed);
-        assert_eq!(Verdict::from_outcomes(Outcome::Pass, Outcome::Pass), Verdict::Unpoliced);
-        assert_eq!(Verdict::from_outcomes(Outcome::Block, Outcome::Block), Verdict::CarrierGate);
-        assert_eq!(Verdict::from_outcomes(Outcome::Pass, Outcome::Block), Verdict::Inconclusive);
+        assert_eq!(
+            Verdict::from_outcomes(Outcome::Block, Outcome::Pass),
+            Verdict::Policed
+        );
+        assert_eq!(
+            Verdict::from_outcomes(Outcome::Pass, Outcome::Pass),
+            Verdict::Unpoliced
+        );
+        assert_eq!(
+            Verdict::from_outcomes(Outcome::Block, Outcome::Block),
+            Verdict::CarrierGate
+        );
+        assert_eq!(
+            Verdict::from_outcomes(Outcome::Pass, Outcome::Block),
+            Verdict::Inconclusive
+        );
     }
 
     #[test]
@@ -500,7 +557,10 @@ mod tests {
             RuleGroup::FileInclusion,
             RuleGroup::RemoteCodeExecution,
         ] {
-            assert!(classes.contains(&required), "default battery missing class {required:?}");
+            assert!(
+                classes.contains(&required),
+                "default battery missing class {required:?}"
+            );
         }
     }
 
@@ -529,7 +589,10 @@ mod tests {
             class = "xss"
         "#;
         let err = battery_from_toml(src).expect_err("must reject a bad twin");
-        assert!(format!("{err}").contains("invalid filter probe"), "got: {err}");
+        assert!(
+            format!("{err}").contains("invalid filter probe"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -540,8 +603,14 @@ mod tests {
             benign_twin = "systxm("
             class = "totally-made-up"
         "#;
-        assert!(battery_from_toml(bad_class).is_err(), "unknown class must be rejected");
-        assert!(battery_from_toml("# nothing here\n").is_err(), "empty battery must be rejected");
+        assert!(
+            battery_from_toml(bad_class).is_err(),
+            "unknown class must be rejected"
+        );
+        assert!(
+            battery_from_toml("# nothing here\n").is_err(),
+            "empty battery must be rejected"
+        );
     }
 
     /// One-pass percent-decode for the decode-gap test WAFs.
@@ -583,10 +652,12 @@ mod tests {
         // preimage of `<script>` differs from the literal, so every stage is a
         // decode-gap.
         let mut waf = literal_token_waf(&["<script>"]);
-        let gaps =
-            probe_decode_gaps(&mut waf, &policed_script_profile(), query_carrier).unwrap();
+        let gaps = probe_decode_gaps(&mut waf, &policed_script_profile(), query_carrier).unwrap();
         let stages: std::collections::HashSet<&str> = gaps.iter().map(|g| g.stage).collect();
-        assert!(stages.contains("url_decode"), "a no-decode WAF must expose the url_decode gap");
+        assert!(
+            stages.contains("url_decode"),
+            "a no-decode WAF must expose the url_decode gap"
+        );
         assert!(stages.contains("base64_decode"));
         assert!(
             gaps.iter().all(|g| g.token == "<script>"),
@@ -603,10 +674,13 @@ mod tests {
         // from what it does not.
         let mut waf = FnOracle::new(|req: &Request| {
             let decoded = pct_decode_once(req.url());
-            Ok(if decoded.contains("<script>") { Outcome::Block } else { Outcome::Pass })
+            Ok(if decoded.contains("<script>") {
+                Outcome::Block
+            } else {
+                Outcome::Pass
+            })
         });
-        let gaps =
-            probe_decode_gaps(&mut waf, &policed_script_profile(), query_carrier).unwrap();
+        let gaps = probe_decode_gaps(&mut waf, &policed_script_profile(), query_carrier).unwrap();
         let stages: std::collections::HashSet<&str> = gaps.iter().map(|g| g.stage).collect();
         assert!(
             !stages.contains("url_decode"),
@@ -629,7 +703,11 @@ mod tests {
         let empty = FilterProfile::default();
         let gaps = probe_decode_gaps(&mut waf, &empty, query_carrier).unwrap();
         assert!(gaps.is_empty());
-        assert_eq!(waf.queries(), 0, "no policed token ⇒ no decode-gap probes sent");
+        assert_eq!(
+            waf.queries(),
+            0,
+            "no policed token ⇒ no decode-gap probes sent"
+        );
     }
 
     #[test]
@@ -644,8 +722,12 @@ mod tests {
         assert!(profile.is_policed("union select"));
         assert!(profile.is_policed("/etc/passwd"));
         // RCE tokens were never policed → must be reported unpoliced.
-        let unpoliced: std::collections::HashSet<_> = profile.unpoliced().map(|f| f.token.as_str()).collect();
-        assert!(unpoliced.contains("system("), "unpoliced RCE token must be surfaced");
+        let unpoliced: std::collections::HashSet<_> =
+            profile.unpoliced().map(|f| f.token.as_str()).collect();
+        assert!(
+            unpoliced.contains("system("),
+            "unpoliced RCE token must be surfaced"
+        );
         assert!(unpoliced.contains(";bash -i"));
         assert_eq!(profile.transport_errors, 0);
         assert_eq!(profile.queries, default_battery().len() as u64 * 2);

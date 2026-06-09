@@ -7,7 +7,7 @@
 //! construction, a working differential.
 
 use crate::policy::ReassemblyPolicy;
-use crate::reassemble::{reassemble, Segment};
+use crate::reassemble::{Segment, reassemble};
 
 /// A verified differential overlap plan.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -149,7 +149,10 @@ mod tests {
         assert!(!plans.is_empty(), "some policy pair must disagree");
         for plan in &plans {
             assert_eq!(reassemble(&plan.segments, plan.waf_policy), plan.waf_view);
-            assert_eq!(reassemble(&plan.segments, plan.origin_policy), plan.origin_view);
+            assert_eq!(
+                reassemble(&plan.segments, plan.origin_policy),
+                plan.origin_view
+            );
             assert_eq!(plan.waf_view, b"safe");
             assert_eq!(plan.origin_view, b"evil");
             assert_ne!(plan.waf_policy, plan.origin_policy);
@@ -160,7 +163,9 @@ mod tests {
     fn matrix_covers_the_classic_first_last_pair() {
         let plans = differential_matrix(b"GET /a", b"GET /b");
         assert!(
-            plans.iter().any(|p| p.waf_policy == First && p.origin_policy == Last),
+            plans
+                .iter()
+                .any(|p| p.waf_policy == First && p.origin_policy == Last),
             "the canonical first↔last evasion must be in the matrix"
         );
     }

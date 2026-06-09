@@ -13,11 +13,8 @@ use wafrift_types::{EvasionConfig, Request, Technique, WafClass};
 fn aws_bot_control_routes_through_ml_evasion() {
     // evade_ml_backed returns Some for ML-backed WAFs (or None if no
     // manifold-valid mutation found — both are acceptable; must not panic).
-    let req = Request::post(
-        "https://example.com/search",
-        b"q=' OR 1=1--".to_vec(),
-    )
-    .header("Content-Type", "application/x-www-form-urlencoded");
+    let req = Request::post("https://example.com/search", b"q=' OR 1=1--".to_vec())
+        .header("Content-Type", "application/x-www-form-urlencoded");
 
     // Routing check (not outcome): an ML-backed WAF either yields techniques
     // (carrying MlEvasion) or none — never panics.
@@ -25,7 +22,9 @@ fn aws_bot_control_routes_through_ml_evasion() {
 
     if !techniques.is_empty() {
         assert!(
-            techniques.iter().any(|t| matches!(t, Technique::MlEvasion { .. })),
+            techniques
+                .iter()
+                .any(|t| matches!(t, Technique::MlEvasion { .. })),
             "ML evasion result must carry MlEvasion technique"
         );
     }
@@ -96,13 +95,19 @@ fn existing_evade_path_unchanged_for_non_ml_waf() {
 
 #[test]
 fn ml_evasion_technique_carries_metadata() {
-    let req = Request::post("https://example.com/", b"q=<script>alert(1)</script>".to_vec())
-        .header("Content-Type", "application/x-www-form-urlencoded");
+    let req = Request::post(
+        "https://example.com/",
+        b"q=<script>alert(1)</script>".to_vec(),
+    )
+    .header("Content-Type", "application/x-www-form-urlencoded");
 
     // ML-backed + an on-manifold payload ⇒ a structural mutation is produced.
     let (_mutated, techniques) =
         apply_ml_evasion_if_applicable(&req, "Cloudflare Bot Management", 256, 77);
-    assert!(!techniques.is_empty(), "ML-backed + on-manifold payload must mutate");
+    assert!(
+        !techniques.is_empty(),
+        "ML-backed + on-manifold payload must mutate"
+    );
 
     let queries = techniques
         .iter()

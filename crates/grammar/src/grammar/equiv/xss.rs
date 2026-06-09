@@ -581,7 +581,9 @@ pub fn generate(payload: &str, cfg: &EquivConfig) -> Vec<EquivPayload> {
 
     // Seed 2: sampled browser-equivalent rewrites × delivery.
     let mut attempts = 0;
-    while out.len() < cfg.max && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR {
+    while out.len() < cfg.max
+        && attempts < cfg.max * super::ATTEMPT_BUDGET_MULTIPLIER + super::ATTEMPT_BUDGET_FLOOR
+    {
         attempts += 1;
         let mut s = payload.to_string();
         let mut rules: Vec<&'static str> = Vec::with_capacity(8);
@@ -756,7 +758,11 @@ mod tests {
         let mut multi = false;
         for seed in 0..50u64 {
             for m in generate(atk, &cfg(seed)) {
-                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                assert!(
+                    still_executes_xss(atk, &m.payload),
+                    "UNSOUND {:?}",
+                    m.payload
+                );
                 if m.payload.matches("\\u").count() >= 2 {
                     multi = true;
                 }
@@ -778,7 +784,10 @@ mod tests {
         // `entity_attr_context` guard is the only thing keeping it sound.
         // Demonstrate the blind spot, then prove the guard closes it.
         assert!(
-            still_executes_xss("<script>alert(1)</script>", "<script>&#x61;lert(1)</script>"),
+            still_executes_xss(
+                "<script>alert(1)</script>",
+                "<script>&#x61;lert(1)</script>"
+            ),
             "oracle is entity-blind (this is WHY the generator guard must exist)"
         );
         let script_body = "<script>alert(1)</script>";
@@ -812,18 +821,29 @@ mod tests {
         let mut tagged = false;
         for seed in 0..60u64 {
             for m in generate(atk, &cfg(seed)) {
-                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                assert!(
+                    still_executes_xss(atk, &m.payload),
+                    "UNSOUND {:?}",
+                    m.payload
+                );
                 if m.rules.contains(&"html_entity_escape") {
                     tagged = true;
                     // Either numeric base (hex `&#xNN;` or decimal `&#NN;`).
-                    assert!(m.payload.contains("&#"), "tag without entity: {:?}", m.payload);
+                    assert!(
+                        m.payload.contains("&#"),
+                        "tag without entity: {:?}",
+                        m.payload
+                    );
                 }
             }
             if tagged {
                 break;
             }
         }
-        assert!(tagged, "generator never emitted an html_entity_escape variant");
+        assert!(
+            tagged,
+            "generator never emitted an html_entity_escape variant"
+        );
     }
 
     #[test]
@@ -852,7 +872,11 @@ mod tests {
         let mut saw_decimal = false;
         for seed in 0..120u64 {
             for m in generate(atk, &cfg(seed)) {
-                assert!(still_executes_xss(atk, &m.payload), "UNSOUND {:?}", m.payload);
+                assert!(
+                    still_executes_xss(atk, &m.payload),
+                    "UNSOUND {:?}",
+                    m.payload
+                );
                 if !m.rules.contains(&"html_entity_escape") {
                     continue;
                 }

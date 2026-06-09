@@ -114,3 +114,8 @@ wafrift-bench/results/*-live-*
 # Local-only scaffolded `wafrift scan` config — every operator has
 # their own values. The committed reference lives in `docs/`.
 .wafrift.toml
+
+# Local build logs / scratch (never ship in the public repo)
+_build*.log
+_build*.sh
+*-feedback-*.md

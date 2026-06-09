@@ -498,10 +498,7 @@ mod tests {
     #[test]
     fn chunked_parser_empty_input_is_incomplete() {
         let parser = ChunkedParser::default();
-        assert!(matches!(
-            parser.parse(b""),
-            Err(ParseError::Incomplete)
-        ));
+        assert!(matches!(parser.parse(b""), Err(ParseError::Incomplete)));
     }
 
     #[test]
@@ -541,8 +538,18 @@ mod tests {
     #[test]
     fn similarity_identical_bodies_returns_one() {
         let body = b"The quick brown fox jumps over the lazy dog".to_vec();
-        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: body.clone() };
-        let b = HttpResponse { version: 1, status: 200, headers: vec![], body };
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: body.clone(),
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body,
+        };
         assert_eq!(ResponseDiff::compare(&a, &b).similarity, 1.0);
     }
 
@@ -551,11 +558,15 @@ mod tests {
         // Shared first 20 bytes of a 22-byte string — Jaccard must be > 0.0
         // (there is substantial overlap), even if < 0.5 (two bytes differ).
         let a = HttpResponse {
-            version: 1, status: 200, headers: vec![],
+            version: 1,
+            status: 200,
+            headers: vec![],
             body: b"AAAAAAAAAAAAAAAAAAAA__".to_vec(),
         };
         let b = HttpResponse {
-            version: 1, status: 200, headers: vec![],
+            version: 1,
+            status: 200,
+            headers: vec![],
             body: b"AAAAAAAAAAAAAAAAAAAA++".to_vec(),
         };
         let diff = ResponseDiff::compare(&a, &b);
@@ -575,11 +586,15 @@ mod tests {
     #[test]
     fn similarity_suffix_match_above_zero() {
         let a = HttpResponse {
-            version: 1, status: 200, headers: vec![],
+            version: 1,
+            status: 200,
+            headers: vec![],
             body: b"__AAAAAAAAAAAAAAAAAA".to_vec(),
         };
         let b = HttpResponse {
-            version: 1, status: 200, headers: vec![],
+            version: 1,
+            status: 200,
+            headers: vec![],
             body: b"++AAAAAAAAAAAAAAAAAA".to_vec(),
         };
         let diff = ResponseDiff::compare(&a, &b);
@@ -601,8 +616,18 @@ mod tests {
         let body_a = b"The quick brown fox jumps over the lazy dog".to_vec();
         let mut body_b = body_a.clone();
         body_b[0] = b'X'; // single byte change
-        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: body_a };
-        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: body_b };
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: body_a,
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: body_b,
+        };
         let diff = ResponseDiff::compare(&a, &b);
         assert!(
             diff.similarity > 0.95,
@@ -613,22 +638,52 @@ mod tests {
 
     #[test]
     fn similarity_empty_bodies_are_identical() {
-        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
-        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: vec![],
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: vec![],
+        };
         assert_eq!(ResponseDiff::compare(&a, &b).similarity, 1.0);
     }
 
     #[test]
     fn similarity_one_empty_body_returns_zero() {
-        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: b"nonempty".to_vec() };
-        let b = HttpResponse { version: 1, status: 200, headers: vec![], body: vec![] };
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"nonempty".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: vec![],
+        };
         assert_eq!(ResponseDiff::compare(&a, &b).similarity, 0.0);
     }
 
     #[test]
     fn response_diff_same_body_different_status() {
-        let a = HttpResponse { version: 1, status: 200, headers: vec![], body: b"ok".to_vec() };
-        let b = HttpResponse { version: 1, status: 403, headers: vec![], body: b"ok".to_vec() };
+        let a = HttpResponse {
+            version: 1,
+            status: 200,
+            headers: vec![],
+            body: b"ok".to_vec(),
+        };
+        let b = HttpResponse {
+            version: 1,
+            status: 403,
+            headers: vec![],
+            body: b"ok".to_vec(),
+        };
         let diff = ResponseDiff::compare(&a, &b);
         assert!(diff.status_differs);
         assert!(!diff.body_differs);
@@ -654,7 +709,11 @@ mod tests {
                 thread::spawn(move || {
                     let parser = ChunkedParser::default();
                     let result = parser.parse(&data);
-                    assert!(result.is_ok(), "concurrent chunked parse failed: {:?}", result);
+                    assert!(
+                        result.is_ok(),
+                        "concurrent chunked parse failed: {:?}",
+                        result
+                    );
                     let body = result.unwrap();
                     assert!(!body.is_empty());
                 })

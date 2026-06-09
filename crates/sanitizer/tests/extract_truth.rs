@@ -30,7 +30,10 @@ fn dompurify_forbid_tags_extracted() {
 fn dompurify_forbid_tags_membership_is_exact() {
     let m = extract_sanitizer("DOMPurify.sanitize(x, { FORBID_TAGS: ['script'] });");
     assert!(has(&m.forbidden_tags, "script"));
-    assert!(!has(&m.forbidden_tags, "div"), "must not invent tags not in the list");
+    assert!(
+        !has(&m.forbidden_tags, "div"),
+        "must not invent tags not in the list"
+    );
 }
 
 #[test]
@@ -44,7 +47,10 @@ fn dompurify_allowed_tags_extracted() {
 fn dompurify_forbid_attr_extracted_without_implying_handler_strip() {
     let m = extract_sanitizer("DOMPurify.sanitize(x, { FORBID_ATTR: ['style','class'] });");
     assert!(has(&m.forbidden_attrs, "style") && has(&m.forbidden_attrs, "class"));
-    assert!(!m.strips_event_handlers, "style/class are not handler-strip evidence");
+    assert!(
+        !m.strips_event_handlers,
+        "style/class are not handler-strip evidence"
+    );
 }
 
 #[test]
@@ -61,7 +67,10 @@ fn dompurify_library_marker_without_config_is_not_empty() {
     let m = extract_sanitizer("DOMPurify.sanitize(dirty)");
     assert_eq!(m.kind, SanitizerKind::DomPurify);
     assert!(m.forbidden_tags.is_empty() && m.allowed_tags.is_none());
-    assert!(!m.is_empty(), "the recognised kind alone makes the model non-empty");
+    assert!(
+        !m.is_empty(),
+        "the recognised kind alone makes the model non-empty"
+    );
 }
 
 #[test]
@@ -96,9 +105,17 @@ fn js_xss_kind_from_filterxss_marker() {
 #[test]
 fn js_xss_whitelist_object_keys_become_allowlist() {
     let m = extract_sanitizer("new FilterXSS({ whiteList: { a: ['href'], img: ['src'] } });");
-    let allow = m.allowed_tags.expect("whiteList object keys form the allowlist");
-    assert!(has(&allow, "a"), "top-level whiteList key 'a' must be allowed");
-    assert!(has(&allow, "img"), "top-level whiteList key 'img' must be allowed");
+    let allow = m
+        .allowed_tags
+        .expect("whiteList object keys form the allowlist");
+    assert!(
+        has(&allow, "a"),
+        "top-level whiteList key 'a' must be allowed"
+    );
+    assert!(
+        has(&allow, "img"),
+        "top-level whiteList key 'img' must be allowed"
+    );
 }
 
 // ── Google Caja ──────────────────────────────────────────────────────────────
@@ -142,7 +159,12 @@ fn custom_strip_char_class_slash_is_not_a_terminator() {
 #[test]
 fn multiple_strip_patterns_are_all_captured() {
     let m = extract_sanitizer(r"y = s.replace(/<a>/g, '').replace(/<b>/g, '');");
-    assert_eq!(m.strip_patterns.len(), 2, "patterns: {:?}", m.strip_patterns);
+    assert_eq!(
+        m.strip_patterns.len(),
+        2,
+        "patterns: {:?}",
+        m.strip_patterns
+    );
 }
 
 // ── Event-handler stripping ──────────────────────────────────────────────────
@@ -195,7 +217,11 @@ fn data_scheme_blocked_via_anchored_pattern() {
 fn bare_data_identifier_is_not_a_scheme_block() {
     // `data:` as a TS type annotation must NOT be read as a scheme block.
     let m = extract_sanitizer("function f(data: number) { return data + 1; }");
-    assert!(!has(&m.blocked_schemes, "data"), "schemes: {:?}", m.blocked_schemes);
+    assert!(
+        !has(&m.blocked_schemes, "data"),
+        "schemes: {:?}",
+        m.blocked_schemes
+    );
 }
 
 #[test]

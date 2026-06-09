@@ -44,10 +44,10 @@ use crate::equiv_engine::ProbeEnvelope;
 ///
 /// # Production callers
 ///
-/// - `wafrift corpus stats` (read-only inspection, via [`crate::corpus_cmd::run_stats`])
+/// - `wafrift corpus stats` (read-only inspection, via `crate::corpus_cmd::run_stats`)
 ///   constructs via [`Self::new`] and reads via [`Self::corpus`] / [`Self::coverage`].
 /// - `wafrift bench-waf --corpus-out <PATH>` (write path, via
-///   [`crate::bench_waf::run_payload_strategy`] and the equiv-cegis
+///   `crate::bench_waf::run_payload_strategy` and the equiv-cegis
 ///   strategy) calls [`Self::record`] per probe and [`Self::flush`]
 ///   once at end of run.
 /// - `wafrift hunt` (every round runs `bench-waf` with a per-target

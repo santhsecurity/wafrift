@@ -37,10 +37,7 @@ mod tests {
 
     #[test]
     fn dedups_preserving_first_seen_order() {
-        let out = finalize(
-            vec!["b".into(), "c".into(), "b".into(), "d".into()],
-            "orig",
-        );
+        let out = finalize(vec!["b".into(), "c".into(), "b".into(), "d".into()], "orig");
         assert_eq!(out, vec!["b".to_string(), "c".into(), "d".into()]);
     }
 

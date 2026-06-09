@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use guise::fingerprint::StealthProfile;
 use guise::fingerprint::browser_catalog::HeaderProfile;
-use guise::http::session_coherence::{pair_for_name, pair_for_profile, HeaderOrder, SessionPool};
+use guise::http::session_coherence::{HeaderOrder, SessionPool, pair_for_name, pair_for_profile};
 
 /// Reorder `headers` to match the canonical insertion order of the
 /// named browser family. Returns the input unchanged if `profile_name`

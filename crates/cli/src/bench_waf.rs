@@ -312,7 +312,7 @@ pub struct BenchWafArgs {
     /// `budget / num_classes` slots, then within each class payloads
     /// are ordered by descending expected info gain. Classes with
     /// fewer payloads than their allocation contribute what they have
-    /// (honest under-fill — see [`info_gain_sched::schedule_per_class`]
+    /// (honest under-fill — see `info_gain_sched::schedule_per_class`
     /// for the contract).
     ///
     /// Independent of `--budget`: with no `--budget`, fairness has no

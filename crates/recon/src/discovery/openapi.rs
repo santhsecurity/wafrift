@@ -29,7 +29,9 @@ pub enum DiscoveryError {
     RateLimited { retry_after: u64 },
     #[error("Wordlist empty")]
     WordlistEmpty,
-    #[error("Discovery input cap exceeded ({what}: {got} > {cap}) — refusing to process hostile-looking spec/response")]
+    #[error(
+        "Discovery input cap exceeded ({what}: {got} > {cap}) — refusing to process hostile-looking spec/response"
+    )]
     InputCapExceeded {
         what: &'static str,
         got: usize,

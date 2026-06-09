@@ -124,7 +124,10 @@ mod tests {
         assert_eq!(bank.schema, 0, "missing schema defaults to 0");
         let host = bank.hosts.get("a.example").expect("host present");
         assert_eq!(host.proven_winners, vec!["t1".to_string()]);
-        assert!(host.blocklisted.is_empty(), "missing blocklisted defaults to empty");
+        assert!(
+            host.blocklisted.is_empty(),
+            "missing blocklisted defaults to empty"
+        );
         assert!(host.waf_name.is_none(), "missing waf_name defaults to None");
     }
 
@@ -161,8 +164,8 @@ mod tests {
             "future_field": "doesn't exist yet",
             "another_future": {"nested": true}
         }"#;
-        let bank: PersistedGeneBank = serde_json::from_str(json)
-            .expect("unknown top-level fields must be ignored");
+        let bank: PersistedGeneBank =
+            serde_json::from_str(json).expect("unknown top-level fields must be ignored");
         assert_eq!(bank.schema, 1);
     }
 }

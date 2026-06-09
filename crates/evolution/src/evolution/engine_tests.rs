@@ -296,7 +296,10 @@ fn seed_population_advances_rng() {
         let best_b = engine_b.best().map(|c| c.genes.clone());
         // It's valid for them to be the same if hill-climbing happened to
         // pick the same local optimum — but at minimum both must have a best.
-        assert!(best_a.is_some() && best_b.is_some(), "both engines must produce a best chromosome");
+        assert!(
+            best_a.is_some() && best_b.is_some(),
+            "both engines must produce a best chromosome"
+        );
     }
 }
 
@@ -629,7 +632,11 @@ fn evolution_five_generations_deterministic() {
         }
         engine.best().map(|c| c.genes.clone())
     };
-    assert_eq!(run(7777), run(7777), "same seed must be fully deterministic");
+    assert_eq!(
+        run(7777),
+        run(7777),
+        "same seed must be fully deterministic"
+    );
 }
 
 #[test]
@@ -793,8 +800,16 @@ fn next_id_saturates_at_u64_max() {
     // next_id is private; reach saturation by exercising batch_candidates
     // after artificially setting it via the generation_evals trick:
     // we instead confirm monotonicity over many calls stays consistent.
-    let id1 = engine.batch_candidates(1).into_iter().next().map(|(i, _)| i);
-    let id2 = engine.batch_candidates(1).into_iter().next().map(|(i, _)| i);
+    let id1 = engine
+        .batch_candidates(1)
+        .into_iter()
+        .next()
+        .map(|(i, _)| i);
+    let id2 = engine
+        .batch_candidates(1)
+        .into_iter()
+        .next()
+        .map(|(i, _)| i);
     if let (Some(a), Some(b)) = (id1, id2) {
         assert!(b > a, "candidate IDs must be strictly increasing");
     }
@@ -945,15 +960,33 @@ fn on_change_point_sets_boost_and_resets_stagnation() {
     engine.stagnation_counter = 7;
     engine.stats.stagnation_counter = 7;
 
-    assert_eq!(engine.exploration_boost_remaining, 0, "no boost before alarm");
-    assert!((engine.exploration_boost_factor - 1.0).abs() < 1e-9, "default factor is 1.0");
+    assert_eq!(
+        engine.exploration_boost_remaining, 0,
+        "no boost before alarm"
+    );
+    assert!(
+        (engine.exploration_boost_factor - 1.0).abs() < 1e-9,
+        "default factor is 1.0"
+    );
 
     engine.on_change_point(10, 2.0);
 
-    assert_eq!(engine.exploration_boost_remaining, 10, "boost must be set to 10 rounds");
-    assert!((engine.exploration_boost_factor - 2.0).abs() < 1e-9, "factor must be 2.0");
-    assert_eq!(engine.stagnation_counter, 0, "stagnation_counter must be reset to 0");
-    assert_eq!(engine.stats.stagnation_counter, 0, "stats.stagnation_counter must be reset to 0");
+    assert_eq!(
+        engine.exploration_boost_remaining, 10,
+        "boost must be set to 10 rounds"
+    );
+    assert!(
+        (engine.exploration_boost_factor - 2.0).abs() < 1e-9,
+        "factor must be 2.0"
+    );
+    assert_eq!(
+        engine.stagnation_counter, 0,
+        "stagnation_counter must be reset to 0"
+    );
+    assert_eq!(
+        engine.stats.stagnation_counter, 0,
+        "stats.stagnation_counter must be reset to 0"
+    );
 }
 
 /// Exploration boost decays by 1 each evolve() call and expires cleanly.
@@ -971,16 +1004,26 @@ fn exploration_boost_decays_per_evolve_and_expires() {
     assert_eq!(engine.exploration_boost_remaining, 3);
 
     engine.evolve(); // round 1
-    assert_eq!(engine.exploration_boost_remaining, 2, "boost must decrement to 2 after 1 evolve");
+    assert_eq!(
+        engine.exploration_boost_remaining, 2,
+        "boost must decrement to 2 after 1 evolve"
+    );
 
     engine.evolve(); // round 2
-    assert_eq!(engine.exploration_boost_remaining, 1, "boost must decrement to 1 after 2 evolves");
+    assert_eq!(
+        engine.exploration_boost_remaining, 1,
+        "boost must decrement to 1 after 2 evolves"
+    );
 
     engine.evolve(); // round 3 — boost expires
-    assert_eq!(engine.exploration_boost_remaining, 0, "boost must expire to 0 after 3 evolves");
+    assert_eq!(
+        engine.exploration_boost_remaining, 0,
+        "boost must expire to 0 after 3 evolves"
+    );
     assert!(
         (engine.exploration_boost_factor - 1.0).abs() < 1e-9,
-        "factor must revert to 1.0 after boost expiry, got {}", engine.exploration_boost_factor
+        "factor must revert to 1.0 after boost expiry, got {}",
+        engine.exploration_boost_factor
     );
 }
 
@@ -1018,14 +1061,26 @@ fn cache_key_identical_content_same_key() {
     // Use the chromosomes as in-flight entries and submit them.
     let eval_id_a = 9001u64;
     let eval_id_b = 9002u64;
-    engine.in_flight.insert(eval_id_a, (0, a.clone(), std::time::Instant::now()));
-    engine.in_flight.insert(eval_id_b, (0, b.clone(), std::time::Instant::now()));
+    engine
+        .in_flight
+        .insert(eval_id_a, (0, a.clone(), std::time::Instant::now()));
+    engine
+        .in_flight
+        .insert(eval_id_b, (0, b.clone(), std::time::Instant::now()));
 
     let before = engine.request_count;
-    engine.submit_batch(vec![
-        (eval_id_a as usize, crate::types::OracleVerdict::from_bool(false)),
-        (eval_id_b as usize, crate::types::OracleVerdict::from_bool(true)),
-    ]).unwrap();
+    engine
+        .submit_batch(vec![
+            (
+                eval_id_a as usize,
+                crate::types::OracleVerdict::from_bool(false),
+            ),
+            (
+                eval_id_b as usize,
+                crate::types::OracleVerdict::from_bool(true),
+            ),
+        ])
+        .unwrap();
     // Both submitted without error — the second may or may not hit cache
     // depending on internal state, but no panic is the correctness signal.
     let _ = before;
@@ -1055,7 +1110,10 @@ fn gene_stat_index_matches_linear_scan() {
             "gene_stat_index must find ({name}, {value})"
         );
         let (idx_s, idx_a) = found.unwrap();
-        assert_eq!(*idx_s, *successes, "successes mismatch for ({name}, {value})");
+        assert_eq!(
+            *idx_s, *successes,
+            "successes mismatch for ({name}, {value})"
+        );
         assert_eq!(*idx_a, *attempts, "attempts mismatch for ({name}, {value})");
     }
 
@@ -1092,5 +1150,8 @@ fn stagnation_does_not_accumulate_during_exploration_boost() {
         "stagnation_counter must not grow during exploration boost; got {}",
         engine.stagnation_counter
     );
-    assert_eq!(engine.exploration_boost_remaining, 5, "boost must be at 5 after 15 evolves");
+    assert_eq!(
+        engine.exploration_boost_remaining, 5,
+        "boost must be at 5 after 15 evolves"
+    );
 }

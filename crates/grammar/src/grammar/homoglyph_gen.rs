@@ -81,7 +81,11 @@ where
             .enumerate()
             .map(|(i, &c)| {
                 if i == pos {
-                    preimage.get(&c).and_then(|p| p.first()).copied().unwrap_or(c)
+                    preimage
+                        .get(&c)
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(c)
                 } else {
                     c
                 }
@@ -96,7 +100,11 @@ where
         .enumerate()
         .map(|(i, &c)| {
             if foldable.contains(&i) && i % 2 == 0 {
-                preimage.get(&c).and_then(|p| p.first()).copied().unwrap_or(c)
+                preimage
+                    .get(&c)
+                    .and_then(|p| p.first())
+                    .copied()
+                    .unwrap_or(c)
             } else {
                 c
             }

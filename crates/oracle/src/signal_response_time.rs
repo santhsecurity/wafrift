@@ -78,14 +78,20 @@ mod tests {
     #[test]
     fn boundary_at_3x_upper_not_anomalous() {
         // 300ms vs 100ms baseline: ratio = 3.0, which is IN [1/3, 3] => no signal.
-        assert!(classify_response_time(100, 300).is_none(), "exact 3x must NOT trigger");
+        assert!(
+            classify_response_time(100, 300).is_none(),
+            "exact 3x must NOT trigger"
+        );
     }
 
     /// One past 3x upper bound: anomalous.
     #[test]
     fn boundary_just_above_3x_is_anomalous() {
         // 301ms vs 100ms baseline: ratio = 3.01 > 3.0 => signal.
-        assert!(classify_response_time(100, 301).is_some(), "3.01x must trigger");
+        assert!(
+            classify_response_time(100, 301).is_some(),
+            "3.01x must trigger"
+        );
     }
 
     /// Exact 1/3 lower bound: not anomalous.
@@ -93,14 +99,20 @@ mod tests {
     fn boundary_at_lower_third_not_anomalous() {
         // 33ms vs 100ms baseline: ratio ~ 0.33, floor of 1/3 => not anomalous.
         // We use 34 which is still >= 1/3 (0.34 > 0.333...).
-        assert!(classify_response_time(100, 34).is_none(), "34ms vs 100ms must not trigger");
+        assert!(
+            classify_response_time(100, 34).is_none(),
+            "34ms vs 100ms must not trigger"
+        );
     }
 
     /// Just below 1/3 lower bound: anomalous.
     #[test]
     fn boundary_just_below_lower_third_is_anomalous() {
         // 33ms vs 100ms: ratio = 0.33 < 1/3 (0.333...) => signal.
-        assert!(classify_response_time(100, 33).is_some(), "33ms vs 100ms must trigger");
+        assert!(
+            classify_response_time(100, 33).is_some(),
+            "33ms vs 100ms must trigger"
+        );
     }
 
     /// Zero baseline is floored to MIN_SIGNAL_BASELINE_MS (10ms).
@@ -109,10 +121,16 @@ mod tests {
         // Passing 0 must not panic; it uses the 10ms floor.
         let result = classify_response_time(0, 100);
         // 100ms vs 10ms floor = 10x > 3 => anomalous.
-        assert!(result.is_some(), "100ms vs 0-baseline (floored to 10ms) must trigger");
+        assert!(
+            result.is_some(),
+            "100ms vs 0-baseline (floored to 10ms) must trigger"
+        );
         if let Some(s) = result {
             // The *reported* baseline_ms is the original 0, not the floor.
-            assert!(matches!(s, wafrift_types::Signal::ResponseTimeAnomaly { baseline_ms: 0, .. }));
+            assert!(matches!(
+                s,
+                wafrift_types::Signal::ResponseTimeAnomaly { baseline_ms: 0, .. }
+            ));
         }
     }
 
@@ -121,7 +139,10 @@ mod tests {
     fn zero_actual_uses_floor() {
         // 0ms actual vs 100ms baseline: 1/100 = 0.01 << 1/3 => anomalous.
         let result = classify_response_time(100, 0);
-        assert!(result.is_some(), "0ms actual vs 100ms baseline must trigger");
+        assert!(
+            result.is_some(),
+            "0ms actual vs 100ms baseline must trigger"
+        );
     }
 
     /// MIN_SIGNAL_BASELINE_MS floor: baseline of 5 acts as 10.
@@ -129,9 +150,14 @@ mod tests {
     fn sub_min_baseline_floored_to_min() {
         // 5ms baseline, 25ms actual: without floor ratio=5 (>3), with floor (10ms) ratio=2.5 (<3).
         // The floor suppresses the signal.
-        assert!(classify_response_time(5, 25).is_none(), "floor to 10ms makes 25/10=2.5 not anomalous");
+        assert!(
+            classify_response_time(5, 25).is_none(),
+            "floor to 10ms makes 25/10=2.5 not anomalous"
+        );
         // 35ms actual: 35/10 = 3.5 > 3 => anomalous even with the floor.
-        assert!(classify_response_time(5, 35).is_some(), "35/10=3.5 must trigger");
+        assert!(
+            classify_response_time(5, 35).is_some(),
+            "35/10=3.5 must trigger"
+        );
     }
-
 }

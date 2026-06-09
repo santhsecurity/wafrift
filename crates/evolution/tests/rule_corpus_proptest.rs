@@ -16,7 +16,7 @@ use proptest::prelude::*;
 use tempfile::tempdir;
 use wafrift_evolution::coverage_feedback::PayloadClass;
 use wafrift_evolution::rule_corpus::{
-    default_corpus_path, RuleBypassCorpus, SubmissionStatus, CORPUS_SCHEMA_VERSION,
+    CORPUS_SCHEMA_VERSION, RuleBypassCorpus, SubmissionStatus, default_corpus_path,
 };
 
 fn cls(s: &str) -> PayloadClass {
@@ -209,7 +209,13 @@ fn concurrent_record_no_data_race_via_mutex() {
                 let mut guard = c.lock().expect("lock");
                 let rule_id = format!("rule-{}", i % 10);
                 let payload = format!("worker-{worker}-payload-{i}");
-                guard.record_block(&rule_id, &payload, cls("sql"), vec![], (worker * 1000 + i) as u64);
+                guard.record_block(
+                    &rule_id,
+                    &payload,
+                    cls("sql"),
+                    vec![],
+                    (worker * 1000 + i) as u64,
+                );
             }
         }));
     }
@@ -235,7 +241,13 @@ fn save_atomic_no_torn_write_under_concurrent_readers() {
     // Seed with a valid corpus.
     let mut seed = RuleBypassCorpus::new("seed-fingerprint");
     for i in 0..50 {
-        seed.record_block(&format!("R{i}"), &format!("p{i}"), cls("sql"), vec![], i as u64);
+        seed.record_block(
+            &format!("R{i}"),
+            &format!("p{i}"),
+            cls("sql"),
+            vec![],
+            i as u64,
+        );
     }
     seed.save_atomic(&path).expect("seed");
 
@@ -271,7 +283,10 @@ fn save_atomic_no_torn_write_under_concurrent_readers() {
             // Either the seed (50 blocks) or one of the writer's 20
             // snapshots (30 bypasses each). Never an in-between
             // corrupted state where the fingerprint is empty.
-            assert!(!c.target_fingerprint.is_empty(), "torn write: empty fingerprint");
+            assert!(
+                !c.target_fingerprint.is_empty(),
+                "torn write: empty fingerprint"
+            );
         }
     });
 
