@@ -68,6 +68,30 @@ pub fn wafrift(args: &[&str]) -> (i32, String, String) {
     (code, stdout, stderr)
 }
 
+/// Like [`wafrift`] but retries when the subprocess is **signal-killed before
+/// it can produce an exit code** (`code == -1`, i.e. `status.code()` is `None`).
+///
+/// Under the full `cargo test --workspace` gate, ~20 integration-test binaries
+/// fork `wafrift` subprocesses concurrently; on a memory-limited CI runner the
+/// kernel OOM-killer SIGKILLs the heaviest one at random, surfacing as exit -1
+/// with empty stdout/stderr — the process never ran, so the measurement is
+/// *absent*, not *wrong*. Re-running the SAME invocation re-attempts the aborted
+/// measurement; it never masks a real result, because any real exit code
+/// (`>= 0`) is returned immediately with no retry. This covers the *cross-binary*
+/// contention that `#[serial]` cannot (it only orders spawns within one binary).
+/// Backoff grows so peer binaries can finish and free memory between attempts.
+#[allow(dead_code)]
+pub fn wafrift_resilient(args: &[&str]) -> (i32, String, String) {
+    let mut result = wafrift(args);
+    let mut attempt = 0u32;
+    while result.0 == -1 && attempt < 3 {
+        attempt += 1;
+        std::thread::sleep(Duration::from_millis(250 * u64::from(attempt)));
+        result = wafrift(args);
+    }
+    result
+}
+
 #[allow(dead_code)]
 pub fn wait_for_server(addr: SocketAddr) {
     let deadline = Instant::now() + SERVER_READY_DEADLINE;

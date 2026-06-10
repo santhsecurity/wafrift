@@ -8,7 +8,7 @@ use serial_test::serial;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod common;
-use common::wafrift;
+use common::wafrift_resilient;
 
 async fn spawn_h1_mock() -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -46,8 +46,16 @@ async fn spawn_h1_mock() -> std::net::SocketAddr {
 // OOM-killer (or a cgroup memory limit) signal-kills the heaviest
 // subprocess at random; the symptom is exit-code -1 with empty stderr,
 // and the bug looks like a wafrift crash when in fact wafrift never
-// got the chance to run. Serializing the spawn site eliminates the
-// contention without papering over the OOM via retry.
+// got the chance to run.
+//
+// `#[serial]` only orders spawns WITHIN this test binary — it cannot see
+// the ~20 OTHER integration-test binaries `cargo test --workspace` runs
+// in parallel, each forking its own subprocesses. That cross-binary
+// contention is what still SIGKILLs wafrift here at random (observed red
+// on CI: `left: -1`). `wafrift_resilient` re-attempts ONLY the signal-kill
+// artifact (exit -1 = killed before running, output absent) and never a
+// real exit code — so it re-runs an aborted measurement, it does not
+// paper over a wrong result.
 #[test]
 #[serial]
 fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
@@ -61,7 +69,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
     // block_on so its std::thread::sleep doesn't block the tokio
     // runtime thread (which caused SIGKILL / exit -1 intermittently).
     common::wait_for_server(addr);
-    let (code, stdout, stderr) = wafrift(&[
+    let (code, stdout, stderr) = wafrift_resilient(&[
         "h2-diff",
         &format!("http://{addr}/"),
         "--format",
@@ -98,7 +106,7 @@ fn h2_diff_against_h1_only_mock_records_h2_errors_per_probe() {
 #[test]
 #[serial]
 fn h2_diff_against_unreachable_target_exits_inconclusive() {
-    let (code, _stdout, _stderr) = wafrift(&[
+    let (code, _stdout, _stderr) = wafrift_resilient(&[
         "h2-diff",
         "http://127.0.0.1:1/",
         "--format",
@@ -120,7 +128,7 @@ fn h2_diff_against_unreachable_target_exits_inconclusive() {
 
 #[test]
 fn h2_diff_help_documents_options() {
-    let (code, stdout, _) = wafrift(&["h2-diff", "--help"]);
+    let (code, stdout, _) = wafrift_resilient(&["h2-diff", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--format"), "stdout:\n{stdout}");
     assert!(stdout.contains("--payload"), "stdout:\n{stdout}");
@@ -131,7 +139,7 @@ fn h2_diff_help_documents_options() {
 // alias must keep working forever.
 fn h2_diff_is_grouped_under_diff_with_working_alias() {
     // 1. The unified `diff` command is discoverable in top-level help.
-    let (code, stdout, _) = wafrift(&["--help"]);
+    let (code, stdout, _) = wafrift_resilient(&["--help"]);
     assert_eq!(code, 0);
     assert!(
         stdout.contains("\n  diff"),
@@ -139,14 +147,14 @@ fn h2_diff_is_grouped_under_diff_with_working_alias() {
     );
 
     // 2. Canonical new path exits 0.
-    let (code2, _stdout2, stderr2) = wafrift(&["diff", "h2", "--help"]);
+    let (code2, _stdout2, stderr2) = wafrift_resilient(&["diff", "h2", "--help"]);
     assert_eq!(
         code2, 0,
         "`wafrift diff h2 --help` must exit 0 — stderr:\n{stderr2}"
     );
 
     // 3. Deprecated flat alias still runs (LAW 2 backwards-compat).
-    let (code3, _stdout3, stderr3) = wafrift(&["h2-diff", "--help"]);
+    let (code3, _stdout3, stderr3) = wafrift_resilient(&["h2-diff", "--help"]);
     assert_eq!(
         code3, 0,
         "`wafrift h2-diff --help` must still exit 0 — stderr:\n{stderr3}"
