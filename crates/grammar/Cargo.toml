@@ -31,7 +31,11 @@ toml = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 serde_json = { workspace = true }
-wafrift-oracle = { workspace = true }
+# Path-only (no version) on purpose: wafrift-oracle depends on wafrift-grammar,
+# so a versioned dev-dep here would be an unpublishable cycle. cargo drops
+# path-only dev-deps from the published manifest; the local test build resolves
+# it via the path.
+wafrift-oracle = { path = "../oracle" }
 criterion = { version = "0.5", features = ["html_reports"] }
 # Drives the dogfood test that proves the NFKC-preimage engine defeats real
 # OWASP-CRS-941 XSS regexes.
