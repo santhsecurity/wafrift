@@ -113,9 +113,11 @@ jobs:
     # A strict gate would block all PRs until upstream cuts fixes, so the
     # job stays non-gating and the advisories remain VISIBLE (we do not
     # `--ignore` them) so each upstream fix-window is tracked. The fixable
-    # advisory IS fixed at the source: wasmtime bumped 30->45 clears
+    # advisory IS fixed at the source: wasmtime bumped 30->36.0.x clears
     # RUSTSEC-2026-0088/0089 (we use cranelift + no pooling, so neither was
-    # exploitable, but the upgrade removes them durably).
+    # exploitable, but the upgrade removes them durably). Pinned to 36.0.x
+    # (patched >=36.0.7) to keep MSRV at rustc 1.86 — wasmtime >=42 needs
+    # rustc 1.91+ / 45 needs 1.93, which would break the 1.88 MSRV gate.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

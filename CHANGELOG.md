@@ -25,10 +25,12 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ### Security — wasmtime upgraded; dead dep pruned
 
-- Bumped `wasmtime` 30 → 45, clearing RUSTSEC-2026-0088 (pooling-allocator data
-  leak) and RUSTSEC-2026-0089 (Winch `table.fill` panic) — neither feature is
-  used (we build cranelift, no pooling), but the upgrade removes them durably;
-  plugin-api WASM sandbox tests pass unchanged.
+- Bumped `wasmtime` 30 → 36.0.x, clearing RUSTSEC-2026-0088 (pooling-allocator
+  data leak) and RUSTSEC-2026-0089 (Winch `table.fill` panic) — neither feature
+  is used (we build cranelift, no pooling), but the upgrade removes them durably.
+  Pinned to the 36.0.x line (patched ≥36.0.7) because it keeps MSRV at rustc
+  1.86; wasmtime ≥42 requires rustc 1.91+ and 45 requires 1.93, which would break
+  the 1.88 MSRV gate. plugin-api WASM sandbox tests pass unchanged.
 - Removed the dead direct `rsa` dependency from `wafrift-cli` (its source never
   referenced it). This is manifest hygiene only: `rsa` remains in the tree
   transitively via `interactsh` (its OOB-server crypto requires it), so

@@ -210,6 +210,10 @@ webpki-roots = "1.0.6"
 fs4 = "1.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
-wasmtime = { version = "45", default-features = false, features = ["runtime", "cranelift"] }
+# Pinned to the 36.0.x line: it carries the RUSTSEC-2026-0088/0089 backport
+# (patched >=36.0.7) while keeping MSRV at rustc 1.86 — wasmtime >=42 requires
+# rustc 1.91+ and 45 requires 1.93, which would break the 1.88 MSRV gate and the
+# Docker build. Neither advisory was reachable (we build cranelift, no pooling).
+wasmtime = { version = "36.0.7", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
 lru = "0.18"
