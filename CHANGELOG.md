@@ -17,7 +17,8 @@ rename only.
 With the dead git dependency removed, the whole shared-lib closure
 (`scanclient`, `guise`, `pocgen`, `erroracle`, `interactsh`, `santh-bogon`,
 `santh-ctlog`, `secir`, `authjar`, …) and every `wafrift-*` crate now publish
-to crates.io, so `cargo install wafrift` works. wafrift's shared-lib
+to crates.io, so `cargo install wafrift-cli` (which installs the `wafrift`
+binary) works. wafrift's shared-lib
 dependencies are version-pinned (resolved from crates.io), making a standalone
 checkout of the repository build without the monorepo's local lib paths.
 
