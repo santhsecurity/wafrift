@@ -6,6 +6,14 @@ All notable changes to wafrift are documented here. The format is based on [Keep
 
 ### Fixed — deterministic proxy e2e tests, browser-launch panic, mutation gaps
 
+- **`report` on a fresh install.** `wafrift report` with no `--proxy-bank` and
+  no scan input now exits 0 and renders the empty "0 host(s) with bypasses"
+  page when the *default* gene bank (`~/.wafrift/gene-bank.json`) doesn't exist
+  yet — that's the fresh-install state, created lazily by wafrift-proxy, and the
+  empty result is surfaced loudly in the report body (and as `findings: []` in
+  JSON), not errored. An *explicitly* named `--proxy-bank` path that's missing
+  still fails closed with exit 2 (operator error). Previously both cases errored
+  (exit 2), so a clean machine — or any CI runner — couldn't run `report` at all.
 - **Proxy e2e port race.** `pick_free_port` binds `:0`, reads the port, then
   releases it before the proxy subprocess re-binds; under parallel test load
   another test could win that port. The proxy would then either fail to start

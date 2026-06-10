@@ -353,9 +353,21 @@ pub(crate) fn run_report(args: ReportArgs) -> ExitCode {
             // risk: the subsequent bounded open will fail cleanly if the
             // path changes between these two calls.
             if !path.exists() {
-                if has_scan_src {
-                    // Scan data already loaded; a missing default
-                    // bank is not an error in that mode.
+                // A missing bank file is a hard error ONLY when the operator
+                // named it explicitly via --proxy-bank. Two cases skip to the
+                // empty-bank render (exit 0) instead:
+                //   - has_scan_src: scan data already stands alone; a missing
+                //     default proxy bank is irrelevant in that mode.
+                //   - args.proxy_bank.is_empty(): this is the DEFAULT path
+                //     (~/.wafrift/gene-bank.json), created lazily by
+                //     wafrift-proxy. On a fresh install (or a clean CI runner)
+                //     it simply does not exist yet — report then renders the
+                //     "No bypasses recorded yet" page. That empty state IS the
+                //     honest result, surfaced loudly in the report body (and as
+                //     findings:[] / total_hosts:0 in JSON) — not a silent,
+                //     recall-losing fallback. An explicitly-named missing path
+                //     is operator error and still fails closed below.
+                if has_scan_src || args.proxy_bank.is_empty() {
                     continue;
                 }
                 return crate::helpers::input_error(format!(
