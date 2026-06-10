@@ -1,6 +1,6 @@
 //! `wafrift ja3-diff` — per-browser-profile TLS-fingerprint differential
 //! scanner. Gated behind the `tls-impersonate` cargo feature so default
-//! builds skip the BoringSSL/rquest compile cost.
+//! builds skip the BoringSSL/wreq compile cost.
 //!
 //! ## The innovation
 //!

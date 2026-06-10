@@ -56,7 +56,7 @@ scanclient = { workspace = true }
 # Pulled in for `wafrift smuggle-emit` (probe_aggregator) — also gives
 # the CLI the SmuggleProbe trait surface without duplicating the
 # aggregator across crates.
-wafrift-core = { path = "../core" }
+wafrift-core = { path = "../core", version = "0.3.1" }
 # HTTP/3 + QUIC evasion data-plane primitives (QPACK desync, 0-RTT
 # replay, CID rotation, stream priority topology, MTU fragmentation).
 # Pulled in so `techniques list` enumerates the HTTP/3 surface and
@@ -106,8 +106,8 @@ respdiff = "=0.3.0"
 # because they answer different questions with opposite cost asymmetries
 # (FN-cheap retry-loop vs. FN-expensive calibration). See each file's
 # doc-comment for the audit.
-# crates.io 0.2.0 (santhsecurity org).
-erroracle = "=0.2.0"
+# crates.io 0.2.1 (santhsecurity org).
+erroracle = "0.2.1"
 
 # SIGPIPE handler reset on Unix so `wafrift ... | head` exits silently
 # instead of panicking.
@@ -138,7 +138,7 @@ gossan-integration = ["origin-bypass"]
 origin-bypass = ["wafrift-transport/origin-bypass"]
 proxy-pool = ["wafrift-transport/proxy-pool"]
 # `tls-impersonate` unlocks the `wafrift ja3-diff` subcommand (and any
-# future stealth-client CLI surface). It pulls in rquest + BoringSSL,
+# future stealth-client CLI surface). It pulls in wreq + BoringSSL,
 # which adds ~30–60 s to first-time builds — gated explicitly so the
 # default `cargo install wafrift` stays lean. Build with
 # `cargo install wafrift --features tls-impersonate` to enable.

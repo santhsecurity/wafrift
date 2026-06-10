@@ -16,7 +16,7 @@ rand = { workspace = true }
 guise = { workspace = true }
 
 [dev-dependencies]
-wafrift-detect = { path = "../detect" }
+wafrift-detect = { path = "../detect", version = "0.3.1" }
 proptest = { workspace = true }
 
 [lints]

@@ -2893,7 +2893,7 @@ async fn forward_passthrough(
         }
         // §15 SSRF / DNS-rebind: pin the validated upstream addresses and dial
         // THOSE. Without this, `sc.send(..)` re-resolves the host inside
-        // `send_pinned(None)` on rquest's (non-bogon-filtering) resolver, so an
+        // `send_pinned(None)` on wreq's (non-bogon-filtering) resolver, so an
         // attacker who flips the DNS record between the `assert_forward_url_allowed`
         // validation above and this send could land on 169.254.169.254 / RFC1918
         // (a DNS-rebind TOCTOU on the stealth out-of-scope passthrough path).

@@ -1,7 +1,7 @@
 //! Wafrift compatibility surface for browser-identical TLS impersonation.
 //!
 //! The implementation lives in `scanclient` so the Santh scanners share
-//! one profile enum, one parser, one bogon guard, and one `rquest`
+//! one profile enum, one parser, one bogon guard, and one `wreq`
 //! transport. Wafrift keeps this module as the public import path for
 //! existing `wafrift_transport::stealth::*` consumers.
 
