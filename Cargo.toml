@@ -100,7 +100,7 @@ wafrift-liveoracle = { path = "crates/liveoracle", version = "0.3.1" }
 wafrift-strategy = { path = "crates/strategy", version = "0.3.1" }
 wafrift-oracle = { path = "crates/oracle", version = "0.3.1" }
 wafrift-transport = { path = "crates/transport", version = "0.3.1" }
-proxywire = { path = "../../libs/runtime/proxywire" }
+proxywire = { version = "0.2.0" }
 wafrift-recon = { path = "crates/recon", version = "0.3.1" }
 wafrift-captchaforge-bridge = { path = "crates/captchaforge-bridge", version = "0.3.1" }
 wafrift-genome-registry = { path = "crates/genome-registry", version = "0.3.1" }
@@ -108,20 +108,20 @@ wafrift-graphql = { path = "crates/graphql", version = "0.3.1" }
 wafrift-http3-evasion = { path = "crates/http3-evasion", version = "0.3.1" }
 wafrift-grpc-evasion = { path = "crates/grpc-evasion", version = "0.3.1" }
 wafrift-plugin-api = { path = "crates/plugin-api", version = "0.3.1" }
-guise = { path = "../../libs/runtime/guise", default-features = false, features = ["fingerprint", "http", "rotation"] }
-guise-pacing = { path = "../../libs/runtime/guise-pacing" }
-scanclient = { path = "../../libs/scanner/scanclient", default-features = false }
+guise = { version = "0.1.2", default-features = false, features = ["fingerprint", "http", "rotation"] }
+guise-pacing = { version = "0.1.0" }
+scanclient = { version = "0.2.1", default-features = false }
 mctrust = "=0.4.0"
-pocgen = { path = "../../libs/offensive/pocgen" }
+pocgen = { version = "0.2.1" }
 # Canonical SSRF bogon/CIDR classifier shared with gossan + keyhog. wafrift
 # delegates `wafrift_types::ip_addr_is_bogon` to it so one fix (e.g. the NAT64
 # 64:ff9b::/96 IMDS bypass) lands for every tool — see crates/types/src/bogon.rs.
-bogon = { path = "../../libs/scanner/bogon", version = "0.1.0" }
-boundedio = { path = "../../libs/general/boundedio" }
+bogon = { package = "santh-bogon", version = "0.1.0" }
+boundedio = { version = "0.1.0" }
 # Canonical crt.sh / CT-log client. wafrift-recon's bounded, timeout-guarded
 # crt.sh reader was the donor for this crate; recon now consumes it (with the
 # `fetch` layer) so the one hardened reader is shared, not re-derived.
-ctlog = { path = "../../libs/scanner/ctlog", features = ["fetch"] }
+ctlog = { package = "santh-ctlog", version = "0.1.1", features = ["fetch"] }
 
 # Core
 tokio = { version = "1", features = ["full"] }
@@ -139,16 +139,15 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Default builds do NOT pull this in (no boring-sys); only consumers
 # that enable `tls-impersonate` pay the dep cost.
 #
-# rquest 5.x split the impersonation profiles into a companion crate
-# (`rquest-util`) and renamed the API: `Impersonate::Chrome131` became
-# `rquest_util::Emulation::Chrome131`, and `ClientBuilder::impersonate(imp)`
-# became `ClientBuilder::emulation(emu)`. We pin both crates here.
+# The impersonation profiles live in a companion crate (`wreq-util`):
+# `wreq_util::Emulation::Chrome131` selects the profile, passed via
+# `ClientBuilder::emulation(emu)`. We pin both crates here.
 #
-# All rquest 4.x and earlier are yanked from crates.io, so 5.x is the
-# only path forward.
-rquest = { version = "5", default-features = false, features = ["cookies", "gzip", "brotli", "json", "charset", "stream"] }
-# Browser-emulation profile companion to rquest 5.x.
-rquest-util = { version = "2", default-features = false, features = ["emulation"] }
+# wreq is the maintained crates.io successor to the rquest fork (every
+# rquest release on crates.io is now yanked); wreq 5.x is the stable line.
+wreq = { version = "5", default-features = false, features = ["cookies", "gzip", "brotli", "json", "charset", "stream"] }
+# Browser-emulation profile companion to wreq 5.x.
+wreq-util = { version = "2", default-features = false, features = ["emulation"] }
 http = "1"
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

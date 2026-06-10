@@ -493,7 +493,7 @@ enum Commands {
     #[command(name = "trailer-diff", hide = true)]
     TrailerDiff(trailer_diff_cmd::TrailerDiffArgs),
     /// Per-browser-profile TLS-fingerprint differential scanner.
-    /// Sends the same probe through N rquest/BoringSSL-backed browser
+    /// Sends the same probe through N wreq/BoringSSL-backed browser
     /// emulations (Chrome 120/131, Firefox 133, Safari 17.5/18,
     /// Edge 131, OkHttp 5) plus a reqwest baseline and flags any
     /// profile whose status / body diverges — direct evidence the

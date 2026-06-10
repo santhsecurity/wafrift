@@ -2,7 +2,24 @@
 
 All notable changes to wafrift are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.3.1] - 2026-06-09
+
+### Changed — TLS-impersonate client migrated `rquest` → `wreq`; full crates.io release
+
+The optional `tls-impersonate` browser-ClientHello client moved off the
+`rquest` BoringSSL fork (every `rquest` release was yanked from crates.io and
+the crate was git-pinned, which made the published tree unbuildable) to its
+maintained crates.io successor `wreq` 5.3.0 / `wreq-util` 2.2.6. The TLS
+profile catalogue (`chrome131`, `firefox133`, `safari18`, `okhttp5`, …) and the
+`wafrift ja3-diff` subcommand are unchanged; the migration is a transport-layer
+rename only.
+
+With the dead git dependency removed, the whole shared-lib closure
+(`scanclient`, `guise`, `pocgen`, `erroracle`, `interactsh`, `santh-bogon`,
+`santh-ctlog`, `secir`, `authjar`, …) and every `wafrift-*` crate now publish
+to crates.io, so `cargo install wafrift` works. wafrift's shared-lib
+dependencies are version-pinned (resolved from crates.io), making a standalone
+checkout of the repository build without the monorepo's local lib paths.
 
 ### Added — default genome warm-start bank
 

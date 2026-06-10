@@ -91,7 +91,7 @@ clipboard = ["dep:arboard"]
 captchaforge = ["dep:wafrift-captchaforge-bridge"]
 # Forwards the wafrift-transport `tls-impersonate` feature so that
 # `wafrift-proxy --tls-impersonate <profile>` actually engages the
-# StealthClient (rquest + BoringSSL) instead of erroring at startup.
+# StealthClient (wreq + BoringSSL) instead of erroring at startup.
 # Without this feature, the CLI flag is accepted (clap parses it) but
 # StealthClient::new() returns the actionable "rebuild with feature"
 # error and the proxy exits cleanly. See docs/TLS_PARITY.md.

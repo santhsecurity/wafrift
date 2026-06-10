@@ -3,7 +3,7 @@
 //! Wraps either `reqwest::Client` (default, rustls TLS) or
 //! `wafrift_transport::StealthClient` (opt-in via the
 //! `tls-impersonate` feature on `wafrift-transport`, `BoringSSL` via
-//! `rquest` for browser-identical JA3) behind a single `send()` API.
+//! `wreq` for browser-identical JA3) behind a single `send()` API.
 //!
 //! Both paths return the same [`UpstreamResponse`] shape, so the proxy
 //! call sites at `forward_wafrift_request` and `forward_passthrough`
@@ -66,7 +66,7 @@ pub struct UpstreamResponse {
     pub body: Bytes,
 }
 
-/// Either the default reqwest client or a stealth (rquest) client,
+/// Either the default reqwest client or a stealth (wreq) client,
 /// optionally wearing a different browser fingerprint per request via
 /// the `UpstreamClient::StealthPool` variant.
 #[derive(Clone)]

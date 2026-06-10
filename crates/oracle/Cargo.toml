@@ -29,7 +29,7 @@ base64 = { workspace = true }
 # OOB canary IDs (always needed — dns_rebind.rs and doh_provider.rs use Uuid).
 uuid = { workspace = true, features = ["v4"] }
 # Optional: real interactsh OOB provider.
-interactsh = { path = "../../../../libs/offensive/interactsh", optional = true }
+interactsh = { version = "0.2.1", optional = true }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }

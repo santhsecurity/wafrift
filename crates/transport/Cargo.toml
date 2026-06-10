@@ -19,7 +19,7 @@ wafrift-types = { workspace = true }
 wafrift-strategy = { workspace = true }
 guise = { workspace = true }
 scanclient = { workspace = true, default-features = false }
-authjar = { path = "../../../../libs/runtime/authjar" }
+authjar = { version = "0.2.4" }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -44,7 +44,7 @@ rand = { workspace = true }
 proxy-pool = []
 # origin-bypass = ["dep:gossan-origin"]
 origin-bypass = []
-# Wire-identical browser TLS ClientHello via rquest + BoringSSL.
+# Wire-identical browser TLS ClientHello via wreq + BoringSSL.
 # When enabled, `transport::stealth::StealthClient` is available and
 # `--tls-impersonate chrome131` (et al.) on scan/proxy paths produces
 # a ClientHello that JA3-matches a real Chrome 131. Pulls in boring-sys

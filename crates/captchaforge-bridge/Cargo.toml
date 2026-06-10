@@ -12,10 +12,10 @@ categories = ["network-programming", "web-programming"]
 
 [dependencies]
 wafrift-transport = { workspace = true }
-captchaforge = { path = "../../../captchaforge", version = "0.2", features = ["vision"] }
+captchaforge = { version = "0.2", features = ["vision"] }
 # Firefox + BiDi driving via rustenium. Replaces the old
 # `runtime_headless` + `chromiumoxide` CDP stack.
-runtime-foxdriver = { path = "../../../../libs/runtime/foxdriver" }
+runtime-foxdriver = { version = "0.1.0" }
 guise = { workspace = true, features = ["browser"] }
 tokio = { workspace = true }
 anyhow = { workspace = true }
