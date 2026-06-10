@@ -434,3 +434,44 @@ fn nfkc_preimage_under_an_identity_sink_is_honest_none() {
         "identity origin cannot fold a homoglyph — must be None"
     );
 }
+
+/// Anti-rig (E5): the `OverlongUtf8Decode` sink's preimage is the canonical
+/// non-shortest 2-byte UTF-8 form of each in-scope ASCII byte, and non-ASCII
+/// bytes (which have no 2-byte overlong form) pass through untouched. This is a
+/// pure structural inverse, so the exact bytes are the contract — asserting the
+/// length alone would be decoration.
+///
+/// This drives `overlong_encode` through the PUBLIC `preimage_for` API (a
+/// single-stage pipeline applies it exactly once), so the curated mutation gate
+/// — which runs the contract tests, NOT lib unit tests — executes it and kills
+/// two surviving `overlong_encode` mutants: the `b >> 6 -> b << 6` lead-byte
+/// corruption and the `&& -> ||` scope guard. (`encode_all = true` puts every
+/// byte in scope, exercising the ASCII-vs-non-ASCII branch directly.)
+#[test]
+fn overlong_utf8_sink_preimage_is_canonical_two_byte_form() {
+    let sink = Pipeline(vec![Stage::OverlongUtf8Decode]);
+
+    // Concrete lead-byte witness: 'A' (0x41) has bit 0 set, so b >> 6 == 1
+    // gives lead byte 0xC1; the `b << 6` mutant truncates it to 0xC0.
+    assert_eq!(preimage_for(b"A", &sink, true), vec![0xC1, 0x81]);
+
+    // Every ASCII byte maps to its canonical 2-byte overlong form.
+    for b in 0u8..=0x7F {
+        assert_eq!(
+            preimage_for(&[b], &sink, true),
+            vec![0xC0 | (b >> 6), 0x80 | (b & 0x3F)],
+            "ASCII {b:#04x} preimage must be the canonical overlong 2-byte form"
+        );
+    }
+
+    // Non-ASCII bytes (> 0x7F) MUST pass through unchanged even under
+    // encode-everything scope — the `&&` guard protects this; `||` would
+    // wrongly emit a 2-byte form for them.
+    for b in 0x80u8..=0xFF {
+        assert_eq!(
+            preimage_for(&[b], &sink, true),
+            vec![b],
+            "non-ASCII {b:#04x} must pass through the overlong inverse unchanged"
+        );
+    }
+}

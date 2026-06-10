@@ -478,41 +478,4 @@ mod speed_tests {
             );
         }
     }
-
-    /// Pins `overlong_encode`'s exact bytes: every ASCII byte becomes its
-    /// canonical non-shortest 2-byte UTF-8 form `[0xC0 | (b >> 6), 0x80 | (b &
-    /// 0x3F)]`, and every non-ASCII byte passes through untouched. This is the
-    /// structural inverse of `Stage::OverlongUtf8Decode`, so the precise bytes
-    /// are the contract — asserting the length alone would be decoration.
-    ///
-    /// Anti-rig (E5): asserting the exact bytes kills the shift-direction
-    /// mutant `b >> 6 -> b << 6` (which corrupts the lead byte whenever b has
-    /// bit 0/1 set — e.g. 'A' would emit 0xC0 instead of 0xC1) and the
-    /// scope-guard mutant `&& -> ||` (which would wrongly overlong-encode the
-    /// pass-through non-ASCII bytes instead of leaving them intact).
-    #[test]
-    fn overlong_encode_emits_canonical_two_byte_form_for_ascii_only() {
-        // Every ASCII byte under Scope::All maps to its 2-byte overlong form.
-        for b in 0u8..=0x7F {
-            assert_eq!(
-                overlong_encode(&[b], Scope::All),
-                vec![0xC0 | (b >> 6), 0x80 | (b & 0x3F)],
-                "ASCII {b:#04x} must overlong-encode to the canonical 2-byte form"
-            );
-        }
-        // Concrete lead-byte witness: 'A' (0x41) has bit 0 set, so b >> 6 == 1
-        // gives 0xC1; the b << 6 mutant would truncate to 0xC0.
-        assert_eq!(overlong_encode(b"A", Scope::All), vec![0xC1, 0x81]);
-
-        // Non-ASCII bytes (> 0x7F) have no 2-byte overlong form and MUST pass
-        // through unchanged even when in scope — this is exactly what the `&&`
-        // scope guard protects and `||` would break.
-        for b in 0x80u8..=0xFF {
-            assert_eq!(
-                overlong_encode(&[b], Scope::All),
-                vec![b],
-                "non-ASCII {b:#04x} must pass through unchanged"
-            );
-        }
-    }
 }

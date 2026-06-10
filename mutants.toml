@@ -62,11 +62,14 @@ additional_cargo_test_args = ["--no-fail-fast"]
 #   mathematically IDENTICAL, so the mutant emits the same bytes for every
 #   input — unkillable by ANY byte-output test ⇒ provably equivalent ⇒
 #   excluded. (The killable overlong_encode mutants — the `&& -> ||` scope
-#   guard at col 22 and the `>> -> <<` shift at col 32 — ARE caught by
-#   `overlong_encode_emits_canonical_two_byte_form_for_ascii_only`, which
-#   pins the exact bytes for every ASCII byte and the pass-through of every
-#   non-ASCII byte.) Both `|`s sit at col 27, so one wildcard entry covers
-#   both lines and survives drift.
+#   guard at col 22 and the `>> -> <<` shift at col 32 — ARE caught by the
+#   `solve_contract` test `overlong_utf8_sink_preimage_is_canonical_two_byte_form`,
+#   which drives overlong_encode through the PUBLIC `preimage_for` API and pins
+#   the exact bytes for every ASCII byte + the pass-through of every non-ASCII
+#   byte. It MUST be a contract (integration) test, not a lib unit test: this
+#   gate runs `-- --test solve_contract ...`, which does NOT execute lib unit
+#   tests.) Both `|`s sit at col 27, so one wildcard entry covers both lines
+#   and survives drift.
 # `sfa.rs:206:9  replace Sfa::is_empty -> bool with false`
 #   `is_empty` is `self.accept.is_empty()`. `Sfa::new` rejects an
 #   empty automaton, so for EVERY constructible `Sfa` the true value
