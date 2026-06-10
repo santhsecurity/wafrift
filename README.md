@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml/badge.svg)](https://github.com/santhsecurity/wafrift/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Crates.io](https://img.shields.io/crates/v/wafrift-cli)](https://crates.io/crates/wafrift-cli)
+[![Crates.io](https://img.shields.io/crates/v/wafrift)](https://crates.io/crates/wafrift)
 
 ![WafRift Demo](wafrift-demo.gif)
 
@@ -87,8 +87,8 @@ curl -sSfL https://github.com/santhsecurity/wafrift/releases/latest/download/waf
 sudo mv wafrift wafrift-proxy /usr/local/bin/
 
 # From crates.io
-cargo install wafrift-cli
-cargo install wafrift-cli   --features tls-impersonate     # optional: enables `wafrift ja3-diff` (BoringSSL — Linux/macOS only)
+cargo install wafrift
+cargo install wafrift       --features tls-impersonate     # optional: enables `wafrift ja3-diff` (BoringSSL — Linux/macOS only)
 cargo install wafrift-proxy --features tls-impersonate     # optional: BoringSSL impersonation  (Linux/macOS only)
 ```
 
