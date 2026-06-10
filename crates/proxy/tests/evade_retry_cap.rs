@@ -5,7 +5,7 @@
 //! would pin the proxy in per-request retry storms.
 
 mod common;
-use common::{pick_free_port, start_proxy_and_wait, start_proxy_with_output, stop_proxy};
+use common::{pick_free_port, start_proxy_on_free_port, start_proxy_with_output, stop_proxy};
 
 #[tokio::test]
 async fn max_evade_retries_11_rejected_with_actionable_message() {
@@ -45,8 +45,7 @@ async fn max_evade_retries_u32_max_rejected_at_startup() {
 #[tokio::test]
 async fn max_evade_retries_10_starts_cleanly() {
     // Negative twin: the cap boundary itself must still be accepted.
-    let port = pick_free_port().expect("pick port");
-    let mut proxy = start_proxy_and_wait(port, &["--max-evade-retries", "10"])
+    let (mut proxy, _port) = start_proxy_on_free_port(&["--max-evade-retries", "10"])
         .await
         .expect("proxy must start with --max-evade-retries 10");
     stop_proxy(&mut proxy).await;

@@ -100,10 +100,22 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     # Best-effort: surface RustSec advisories on the dep graph without
-    # gating PR merges. Some advisories live in transitive deps we can't
-    # patch (e.g. RUSTSEC-2026-0002 against `lru 0.13.0` via `rquest 5.1.0`),
-    # so a strict gate would block all PRs until upstream cuts a fix.
-    # The job still runs every CI so a fix-window upstream is visible.
+    # gating PR merges. Three advisories live in transitive deps we cannot
+    # patch from here:
+    #   - RUSTSEC-2023-0071 (`rsa` Marvin timing sidechannel) — pulled by
+    #     `interactsh` for its OOB-server crypto; no fixed `rsa` release
+    #     exists. (We did drop the *dead* direct `rsa` dep from wafrift-cli,
+    #     but interactsh still requires it, so the advisory stays.)
+    #   - RUSTSEC-2026-0118 (`hickory-proto` NSEC3 loop) — no upstream fix.
+    #   - RUSTSEC-2026-0119 (`hickory-proto` O(n²) name compression) — fix
+    #     needs a `reqwest`->hickory 0.26 bump that only lands when upstream
+    #     republishes; `hickory` is pulled transitively via `reqwest`.
+    # A strict gate would block all PRs until upstream cuts fixes, so the
+    # job stays non-gating and the advisories remain VISIBLE (we do not
+    # `--ignore` them) so each upstream fix-window is tracked. The fixable
+    # advisory IS fixed at the source: wasmtime bumped 30->45 clears
+    # RUSTSEC-2026-0088/0089 (we use cranelift + no pooling, so neither was
+    # exploitable, but the upgrade removes them durably).
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

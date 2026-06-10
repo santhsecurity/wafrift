@@ -35,6 +35,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use futures::FutureExt as _;
 use runtime_foxdriver::{FoxBrowserConfig, launch_firefox};
 use tokio::sync::Mutex;
 
@@ -128,8 +129,18 @@ pub async fn solve_in_browser(
             "firefox executable not found at {path} — install Firefox or set the FIREFOX_PATH environment variable"
         ));
     }
-    let page = launch_firefox(launch_cfg)
+    // `launch_firefox` drives a third-party BiDi stack (rustenium) that can
+    // *panic* — not just error — when no usable Firefox/BiDi session exists
+    // (e.g. a headless CI box with no browser, where executable_path resolved
+    // to None). A Result-returning solver must never abort the caller on a
+    // missing browser, so catch the panic and surface it as an error.
+    let page = std::panic::AssertUnwindSafe(launch_firefox(launch_cfg))
+        .catch_unwind()
         .await
+        .map_err(|_| anyhow!(
+            "launch firefox panicked (no usable Firefox/BiDi session) — \
+             install Firefox and put it on PATH, or set FIREFOX_PATH"
+        ))?
         .map_err(|e| anyhow!(
             "launch firefox failed: {e} — verify Firefox is installed and on PATH, or set FIREFOX_PATH"
         ))?;

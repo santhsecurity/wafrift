@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 mod common;
-use common::{pick_free_port, proxy_client, start_proxy_and_wait, stop_proxy};
+use common::{proxy_client, start_proxy_on_free_port, stop_proxy};
 
 #[derive(Debug)]
 struct SeenRequest {
@@ -63,10 +63,10 @@ async fn capture_request(
 #[tokio::test]
 async fn mutate_url_pipeline_must_percent_encode_query_values() {
     let (upstream_port, captured, upstream_handle) = start_upstream_server().await;
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream", "--mutate-url"])
-        .await
-        .expect("start proxy");
+    let (mut proxy, proxy_port) =
+        start_proxy_on_free_port(&["--allow-private-upstream", "--mutate-url"])
+            .await
+            .expect("start proxy");
     let client = proxy_client(proxy_port).expect("proxy client");
 
     let target = format!("http://127.0.0.1:{upstream_port}/search?q=1'+OR+'1");
@@ -103,8 +103,7 @@ async fn mutate_url_pipeline_must_percent_encode_query_values() {
 #[tokio::test]
 async fn mutate_url_pipeline_must_not_encode_query_when_off() {
     let (upstream_port, captured, upstream_handle) = start_upstream_server().await;
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"])
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&["--allow-private-upstream"])
         .await
         .expect("start proxy");
     let client = proxy_client(proxy_port).expect("proxy client");

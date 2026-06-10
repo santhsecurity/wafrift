@@ -65,7 +65,6 @@ wafrift-http3-evasion = { workspace = true }
 rand = { workspace = true }
 base64 = { workspace = true }
 # Crypto primitives for interactsh-compatible OOB callback server.
-rsa = { workspace = true }
 aes = { workspace = true }
 ctr = { workspace = true }
 sha2 = { workspace = true }

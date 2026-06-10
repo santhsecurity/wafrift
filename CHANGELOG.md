@@ -2,6 +2,40 @@
 
 All notable changes to wafrift are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed — deterministic proxy e2e tests, browser-launch panic, mutation gaps
+
+- **Proxy e2e port race.** `pick_free_port` binds `:0`, reads the port, then
+  releases it before the proxy subprocess re-binds; under parallel test load
+  another test could win that port. The proxy would then either fail to start
+  or — worse — the readiness probe would connect to the *other* test's proxy
+  (one lacking `--allow-private-upstream`), which rejected the loopback upstream
+  and failed `forward_path_e2e` on response status. New `start_proxy_on_free_port`
+  / `start_proxy_piped_on_free_port` helpers re-pick the port on a lost race and
+  confirm the spawned child still owns it, making the suite deterministic.
+- **captchaforge-bridge browser launch.** `solve_in_browser` now wraps
+  `launch_firefox` in `catch_unwind`: the third-party BiDi stack *panics* (not
+  errors) when no usable Firefox session exists (e.g. headless CI), and a
+  `Result`-returning solver must surface that as an error, not abort the caller.
+- **Mutation coverage (E5).** Added an exact-byte test for `overlong_encode`
+  that kills the `&& -> ||` scope-guard and `>> -> <<` shift mutants, and
+  fixed a stale `mutants.toml` exclusion whose pinned line number had drifted
+  (now column-pinned + line-wildcarded so it survives edits above the function).
+
+### Security — wasmtime upgraded; dead dep pruned
+
+- Bumped `wasmtime` 30 → 45, clearing RUSTSEC-2026-0088 (pooling-allocator data
+  leak) and RUSTSEC-2026-0089 (Winch `table.fill` panic) — neither feature is
+  used (we build cranelift, no pooling), but the upgrade removes them durably;
+  plugin-api WASM sandbox tests pass unchanged.
+- Removed the dead direct `rsa` dependency from `wafrift-cli` (its source never
+  referenced it). This is manifest hygiene only: `rsa` remains in the tree
+  transitively via `interactsh` (its OOB-server crypto requires it), so
+  RUSTSEC-2023-0071 (Marvin timing sidechannel) and the two `hickory-proto` DoS
+  advisories (RUSTSEC-2026-0118/0119, pulled via `reqwest`) have no in-tree fix
+  and stay surfaced — not `--ignore`d — by the non-gating audit job.
+
 ## [0.3.1] - 2026-06-09
 
 ### Changed — TLS-impersonate client migrated `rquest` → `wreq`; full crates.io release

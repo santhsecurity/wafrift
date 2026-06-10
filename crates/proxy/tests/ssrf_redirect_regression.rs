@@ -14,7 +14,7 @@
 //! which can then decide whether to follow it.
 
 mod common;
-use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
+use common::{start_proxy_on_free_port, stop_proxy};
 
 use axum::{Router, http::StatusCode, response::IntoResponse, routing::get};
 use tokio::net::TcpListener;
@@ -54,8 +54,7 @@ async fn start_redirect_origin() -> (u16, tokio::task::JoinHandle<()>) {
 #[tokio::test]
 async fn proxy_does_not_follow_redirect_to_bogon_imds() {
     let (origin_port, origin_handle) = start_redirect_origin().await;
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"])
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&["--allow-private-upstream"])
         .await
         .expect("start proxy");
 
@@ -120,8 +119,7 @@ async fn proxy_does_not_follow_redirect_to_rfc1918() {
         axum::serve(listener, app).await.ok();
     });
 
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"])
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&["--allow-private-upstream"])
         .await
         .expect("start proxy");
 

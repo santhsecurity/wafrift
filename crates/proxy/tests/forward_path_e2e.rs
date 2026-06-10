@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 mod common;
-use common::{pick_free_port, proxy_client, start_proxy_and_wait, stop_proxy};
+use common::{proxy_client, start_proxy_on_free_port, stop_proxy};
 
 #[derive(Debug)]
 struct SeenRequest {
@@ -91,16 +91,12 @@ async fn capture_request(
 #[tokio::test]
 async fn forward_path_e2e_must_apply_evasion_and_return_response_unchanged() {
     let (upstream_port, captured, upstream_handle) = start_upstream_server().await;
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(
-        proxy_port,
-        &[
-            "--allow-private-upstream",
-            "--content-type-switching",
-            "--escalation",
-            "heavy",
-        ],
-    )
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&[
+        "--allow-private-upstream",
+        "--content-type-switching",
+        "--escalation",
+        "heavy",
+    ])
     .await
     .expect("start proxy");
 
@@ -138,16 +134,12 @@ async fn forward_path_e2e_must_apply_evasion_and_return_response_unchanged() {
 #[tokio::test]
 async fn forward_path_e2e_must_not_apply_evasion_when_off() {
     let (upstream_port, captured, upstream_handle) = start_upstream_server().await;
-    let proxy_port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(
-        proxy_port,
-        &[
-            "--allow-private-upstream",
-            "--content-type-switching",
-            "--escalation",
-            "heavy",
-        ],
-    )
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&[
+        "--allow-private-upstream",
+        "--content-type-switching",
+        "--escalation",
+        "heavy",
+    ])
     .await
     .expect("start proxy");
 

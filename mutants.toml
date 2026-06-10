@@ -37,19 +37,36 @@ additional_cargo_test_args = ["--no-fail-fast"]
 # distinguish it (so a test that "killed" it would be asserting an
 # implementation detail, not the contract — an anti-rig violation).
 #
-# `mine.rs:34:34  replace != with ==  in kmp_sfa`
+# `mine.rs:*:34  replace != with ==  in kmp_sfa`  (line WILDCARDED — see
+#                                                  exclude_re note below)
 #   `kmp_sfa` only promises the *membership* language "contains
-#   needle". `kmp_next` (NOT mutated) re-validates every byte via
-#   `c != needle[j]` and the automaton accepts ONLY after m sequential
-#   exact matches. A KMP failure function that under-estimates (which
-#   `!=`→`==` produces) makes the matcher do redundant restarts but can
-#   never skip a real occurrence nor manufacture a false one — the
-#   accepted language is invariant (the all-zeros failure function is
-#   exactly naive search, still correct). Confirmed empirically by
+#   needle". `kmp_next` (NOT mutated; its own `!=` is at col 26, killable)
+#   re-validates every byte via `c != needle[j]` and the automaton accepts
+#   ONLY after m sequential exact matches. A KMP failure function that
+#   under-estimates (which `!=`→`==` produces) makes the matcher do
+#   redundant restarts but can never skip a real occurrence nor manufacture
+#   a false one — the accepted language is invariant (the all-zeros failure
+#   function is exactly naive search, still correct). Confirmed empirically
+#   by
 #   `attack_grammar_kmp_equals_naive_substring_for_self_overlapping_needles`
 #   (exhaustive vs an independent oracle over bordered needles ×
 #   every word ≤ 2·|needle|): zero divergence. Efficiency-only ⇒
 #   equivalent ⇒ excluded, not chased.
+# `solve.rs:*:27  replace | with ^  in overlong_encode`  (line WILDCARDED;
+#                                                         covers BOTH `|`s)
+#   overlong_encode builds the two UTF-8 bytes `0xC0 | (b >> 6)` and
+#   `0x80 | (b & 0x3F)`, reached only when `b <= 0x7F`. Same bit-disjoint
+#   fact as the normalize.rs assembly below: `b >> 6` ∈ {0,1} occupies only
+#   bit 0, disjoint from 0xC0's bits 6–7; `b & 0x3F` occupies bits 0–5,
+#   disjoint from 0x80's bit 7. On bit-disjoint operands `|` and `^` are
+#   mathematically IDENTICAL, so the mutant emits the same bytes for every
+#   input — unkillable by ANY byte-output test ⇒ provably equivalent ⇒
+#   excluded. (The killable overlong_encode mutants — the `&& -> ||` scope
+#   guard at col 22 and the `>> -> <<` shift at col 32 — ARE caught by
+#   `overlong_encode_emits_canonical_two_byte_form_for_ascii_only`, which
+#   pins the exact bytes for every ASCII byte and the pass-through of every
+#   non-ASCII byte.) Both `|`s sit at col 27, so one wildcard entry covers
+#   both lines and survives drift.
 # `sfa.rs:206:9  replace Sfa::is_empty -> bool with false`
 #   `is_empty` is `self.accept.is_empty()`. `Sfa::new` rejects an
 #   empty automaton, so for EVERY constructible `Sfa` the true value
@@ -90,7 +107,14 @@ additional_cargo_test_args = ["--no-fail-fast"]
 #   507:20 delete `!`     — the dedupe guard on adding a distinguishing
 #                           suffix; all-suffixes CE still resolves it.
 exclude_re = [
-    "mine\\.rs:34:34: replace != with == in kmp_sfa",
+    # Lines WILDCARDED (`\d+`) deliberately: the kmp_sfa entry drifted 34->56
+    # when code was inserted above the fn, silently un-excluding it and
+    # red-ing CI. Column pins the operator uniquely within the named fn
+    # (kmp_sfa's failure-fn `!=` is col 34; kmp_next's killable `!=` is col
+    # 26; overlong_encode's two equivalent `|`s are both col 27), so the
+    # wildcard cannot over-match yet survives line drift.
+    "mine\\.rs:\\d+:34: replace != with == in kmp_sfa",
+    "solve\\.rs:\\d+:27: replace \\| with \\^ in overlong_encode",
     "sfa\\.rs:206:9: replace Sfa::is_empty -> bool with false",
     "learn\\.rs:76:9: replace Alphabet::is_empty -> bool with false",
     "learn\\.rs:474:29: replace \\+ with \\* in l_star_impl",

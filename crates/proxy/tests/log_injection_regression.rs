@@ -19,7 +19,7 @@
 //! sanitisation is applied before the log call.
 
 mod common;
-use common::pick_free_port;
+use common::start_proxy_piped_on_free_port;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -37,38 +37,13 @@ use tokio::net::TcpStream;
 /// that stderr does NOT contain the injection marker.
 #[tokio::test]
 async fn mitm_host_header_newline_is_stripped_from_logs() {
-    // The proxy binary's stderr is where tracing-subscriber emits logs.
-    // We need to capture it. Use `start_proxy_and_wait` which redirects
-    // stderr to null — but we need to override that. Instead, spawn
-    // manually via tokio::process::Command.
-
-    use tokio::process::Command;
-
-    let proxy_port = pick_free_port().expect("pick port");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift-proxy"))
-        .arg("--listen")
-        .arg(format!("127.0.0.1:{proxy_port}"))
-        // Enable verbose logging so the warn!() call fires.
-        .env("RUST_LOG", "warn")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+    // The proxy binary's stderr is where tracing-subscriber emits logs, so we
+    // spawn it with stderr piped. RUST_LOG=warn makes the warn!() call fire.
+    // start_proxy_piped_on_free_port re-picks the port if the pick→bind race
+    // is lost, so we never read another test's proxy logs by mistake.
+    let (mut child, proxy_port) = start_proxy_piped_on_free_port(&[], &[("RUST_LOG", "warn")])
+        .await
         .expect("spawn proxy");
-
-    // Wait for the proxy to be ready.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        if TcpStream::connect(format!("127.0.0.1:{proxy_port}"))
-            .await
-            .is_ok()
-        {
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("proxy did not start in time");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
 
     // Send a CONNECT request with a Host header containing a newline injection.
     // The injected payload: `Host: evil.com\r\nFAKE_LOG_ENTRY: injected`
@@ -114,31 +89,9 @@ async fn mitm_host_header_newline_is_stripped_from_logs() {
 /// is also stripped. Demonstrates the fix covers both CR and LF.
 #[tokio::test]
 async fn mitm_host_header_crlf_injection_is_stripped_from_logs() {
-    use tokio::process::Command;
-
-    let proxy_port = pick_free_port().expect("pick port");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_wafrift-proxy"))
-        .arg("--listen")
-        .arg(format!("127.0.0.1:{proxy_port}"))
-        .env("RUST_LOG", "warn")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+    let (mut child, proxy_port) = start_proxy_piped_on_free_port(&[], &[("RUST_LOG", "warn")])
+        .await
         .expect("spawn proxy");
-
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        if TcpStream::connect(format!("127.0.0.1:{proxy_port}"))
-            .await
-            .is_ok()
-        {
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("proxy did not start in time");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
 
     // CRLF injection — the proxy's internal Host extractor gets "evil.com\r\nCRLF_INJECTED".
     let connect_request = "CONNECT target.example.com:443 HTTP/1.1\r\nHost: target.example.com\r\nCRLF_INJECTED\r\n\r\n";

@@ -1,7 +1,7 @@
 mod common;
 #[cfg(not(feature = "captchaforge"))]
-use common::start_proxy_with_output;
-use common::{pick_free_port, start_proxy_and_wait, stop_proxy};
+use common::{pick_free_port, start_proxy_with_output};
+use common::{start_proxy_on_free_port, stop_proxy};
 #[cfg(not(feature = "captchaforge"))]
 use std::process::Output;
 
@@ -41,8 +41,7 @@ async fn captchaforge_install_must_fail_with_actionable_hint() {
 
 #[tokio::test]
 async fn captchaforge_install_must_not_fail_without_flag() {
-    let port = pick_free_port().expect("pick proxy port");
-    let mut proxy = start_proxy_and_wait(port, &["--allow-private-upstream"])
+    let (mut proxy, _port) = start_proxy_on_free_port(&["--allow-private-upstream"])
         .await
         .expect("start proxy");
 

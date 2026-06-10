@@ -190,7 +190,6 @@ proptest = "1.11.0"
 base64 = "0.22.1"
 # Crypto primitives for interactsh-compatible OOB callback server.
 # Versions match the interactsh client crate for wire compatibility.
-rsa = { version = "0.9", features = ["pem"] }
 aes = "0.8"
 ctr = "0.9"
 sha2 = "0.10"
@@ -211,6 +210,6 @@ webpki-roots = "1.0.6"
 fs4 = "1.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 # WASM sandbox engine for plugin-api external tampers.
-wasmtime = { version = "30", default-features = false, features = ["runtime", "cranelift"] }
+wasmtime = { version = "45", default-features = false, features = ["runtime", "cranelift"] }
 tempfile = "3"
 lru = "0.18"

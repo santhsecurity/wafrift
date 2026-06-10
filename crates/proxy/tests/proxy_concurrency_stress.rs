@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 
 mod common;
-use common::{pick_free_port, proxy_client, start_proxy_and_wait, stop_proxy};
+use common::{proxy_client, start_proxy_on_free_port, stop_proxy};
 
 // ── Tiny origin server ───────────────────────────────────────────────────────
 
@@ -46,14 +46,15 @@ async fn handler() -> impl IntoResponse {
 /// needed (each integration test file is its own binary).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn proxy_concurrent_200_clients_50_requests_each() {
-    let proxy_port = pick_free_port().expect("free port for proxy");
     let (origin_port, origin_handle) = start_origin().await;
 
     // Launch proxy pointing at the in-process origin.
     // --allow-private-upstream is required because the origin is on loopback
     // (127.0.0.1), which is in the bogon set.  This is the correct flag for
     // lab/test scenarios — it does NOT disable TLS or other checks.
-    let mut proxy = start_proxy_and_wait(proxy_port, &["--allow-private-upstream"])
+    // start_proxy_on_free_port re-picks the port if the pick→bind race is lost
+    // to a proxy spawned by another parallel test binary.
+    let (mut proxy, proxy_port) = start_proxy_on_free_port(&["--allow-private-upstream"])
         .await
         .expect("proxy start");
 
