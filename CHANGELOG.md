@@ -26,6 +26,15 @@ All notable changes to wafrift are documented here. The format is based on [Keep
   `launch_firefox` in `catch_unwind`: the third-party BiDi stack *panics* (not
   errors) when no usable Firefox session exists (e.g. headless CI), and a
   `Result`-returning solver must surface that as an error, not abort the caller.
+- **captchaforge-bridge launch is now inside the timeout.** `solve_timeout_ms`
+  is documented as the per-solve *overall* budget, but the browser launch ran
+  *outside* the timeout — on a host with no usable browser the BiDi launch probe
+  retries for several seconds (~7s on a browserless CI runner), so the call blew
+  past a tiny budget. The launch is now bounded by the same overall budget
+  (launch + solve together ≤ `solve_timeout_ms`); a launch that can't complete
+  in budget returns a clear error instead of hanging. New regression test
+  `launch_hang_is_bounded_by_budget` points the bridge at a fake browser that
+  sleeps 30× the budget and asserts the call still returns within it.
 - **Mutation coverage (E5).** Added an exact-byte test for `overlong_encode`
   that kills the `&& -> ||` scope-guard and `>> -> <<` shift mutants, and
   fixed a stale `mutants.toml` exclusion whose pinned line number had drifted

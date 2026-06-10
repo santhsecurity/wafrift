@@ -120,6 +120,9 @@ pub async fn solve_in_browser(
     cfg: &BridgeConfig,
 ) -> Result<Option<BridgeOutcome>> {
     let started = std::time::Instant::now();
+    // `solve_timeout_ms` is the per-solve OVERALL budget (see BridgeConfig)
+    // — it must bound launch + solve together, not just the solve phase.
+    let overall = std::time::Duration::from_millis(cfg.solve_timeout_ms);
 
     let launch_cfg = bridge_launch_options(cfg);
     if let Some(ref path) = launch_cfg.executable_path
@@ -134,16 +137,40 @@ pub async fn solve_in_browser(
     // (e.g. a headless CI box with no browser, where executable_path resolved
     // to None). A Result-returning solver must never abort the caller on a
     // missing browser, so catch the panic and surface it as an error.
-    let page = std::panic::AssertUnwindSafe(launch_firefox(launch_cfg))
-        .catch_unwind()
-        .await
-        .map_err(|_| anyhow!(
-            "launch firefox panicked (no usable Firefox/BiDi session) — \
-             install Firefox and put it on PATH, or set FIREFOX_PATH"
-        ))?
-        .map_err(|e| anyhow!(
-            "launch firefox failed: {e} — verify Firefox is installed and on PATH, or set FIREFOX_PATH"
-        ))?;
+    //
+    // The launch is ALSO bounded by the overall budget: on a host with no
+    // usable browser the BiDi launch probe retries for several seconds
+    // (~7s observed on a browserless CI runner) before giving up. Leaving
+    // the launch outside the timeout let the whole call run well past
+    // `solve_timeout_ms` — an unhonoured budget. Bound it here so launch can
+    // never outlive the operator's overall budget (Law: timeouts honoured).
+    let launched = tokio::time::timeout(
+        overall,
+        std::panic::AssertUnwindSafe(launch_firefox(launch_cfg)).catch_unwind(),
+    )
+    .await;
+    let page = match launched {
+        Err(_) => {
+            return Err(anyhow!(
+                "solve_in_browser exceeded {}ms budget during browser launch — \
+                 increase BridgeConfig.solve_timeout_ms, or install Firefox / set \
+                 FIREFOX_PATH if the browser launch is failing",
+                cfg.solve_timeout_ms
+            ));
+        }
+        Ok(Err(_panic)) => {
+            return Err(anyhow!(
+                "launch firefox panicked (no usable Firefox/BiDi session) — \
+                 install Firefox and put it on PATH, or set FIREFOX_PATH"
+            ));
+        }
+        Ok(Ok(Err(e))) => {
+            return Err(anyhow!(
+                "launch firefox failed: {e} — verify Firefox is installed and on PATH, or set FIREFOX_PATH"
+            ));
+        }
+        Ok(Ok(Ok(page))) => page,
+    };
 
     let _ = captchaforge::apply_default_stealth_profile(&page).await;
 
@@ -280,8 +307,12 @@ pub async fn solve_in_browser(
         Ok(None)
     };
 
-    let timeout = std::time::Duration::from_millis(cfg.solve_timeout_ms);
-    let result = tokio::time::timeout(timeout, solve_fut).await;
+    // Solve gets whatever remains of the overall budget after launch +
+    // stealth setup, so launch + solve together never exceed solve_timeout_ms.
+    let remaining = overall
+        .checked_sub(started.elapsed())
+        .unwrap_or(std::time::Duration::ZERO);
+    let result = tokio::time::timeout(remaining, solve_fut).await;
 
     // Always close the browser, even on timeout or solver error, so the
     // Firefox process doesn't leak.  A 5 s cap prevents a hung close from
